@@ -30,6 +30,7 @@ app.post('/api/generate-caption', async (req, res) => {
         imageSize: null,
         imageType: null,
         thumbnailPath: null,
+        previewPath: null,
         exifData: null,
         cameraMake: null,
         cameraModel: null,
@@ -72,27 +73,32 @@ app.post('/api/generate-caption', async (req, res) => {
 
         console.log('Received request - prompt:', !!prompt, 'base64Image length:', base64Image.length);
 
-        // Generate thumbnail
+        // Generate thumbnail and preview images
         const thumbnailResult = await thumbnailGenerator.generateThumbnail(base64Image, queryId);
         if (thumbnailResult) {
-            logData.thumbnailPath = thumbnailResult.relativePath;
+            logData.thumbnailPath = thumbnailResult.thumbnailRelativePath;
+            logData.previewPath = thumbnailResult.previewRelativePath;
         }
 
-        // If no prompt provided (extension request), extract EXIF and build prompt
+        // Always extract EXIF data for logging (for both web and extension requests)
+        console.log('Extracting EXIF data for logging...');
+        const { extractedData } = await buildPromptFromImageWithExtraction(base64Image);
+        
+        // Store extracted data for logging
+        if (extractedData) {
+            logData.exifData = extractedData.exifData;
+            logData.cameraMake = extractedData.cameraMake;
+            logData.cameraModel = extractedData.cameraModel;
+            logData.gpsLatitude = extractedData.gpsLatitude;
+            logData.gpsLongitude = extractedData.gpsLongitude;
+            logData.locationName = extractedData.locationName;
+        }
+
+        // If no prompt provided (extension request), build prompt with extracted context
         if (!prompt) {
-            console.log('Extension request detected - extracting EXIF and building prompt');
-            const { prompt: builtPrompt, extractedData } = await buildPromptFromImageWithExtraction(base64Image);
+            console.log('Extension request detected - building prompt with extracted context');
+            const { prompt: builtPrompt } = await buildPromptFromImageWithExtraction(base64Image);
             prompt = builtPrompt;
-            
-            // Store extracted data for logging
-            if (extractedData) {
-                logData.exifData = extractedData.exifData;
-                logData.cameraMake = extractedData.cameraMake;
-                logData.cameraModel = extractedData.cameraModel;
-                logData.gpsLatitude = extractedData.gpsLatitude;
-                logData.gpsLongitude = extractedData.gpsLongitude;
-                logData.locationName = extractedData.locationName;
-            }
         }
 
         // Validate prompt before sending to OpenAI

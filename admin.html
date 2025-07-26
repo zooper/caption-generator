@@ -95,6 +95,12 @@
             height: 50px;
             object-fit: cover;
             border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .thumbnail:hover {
+            transform: scale(1.1);
         }
 
         .source-badge {
@@ -156,6 +162,66 @@
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            position: relative;
+            margin: 5% auto;
+            max-width: 90%;
+            max-height: 90%;
+            text-align: center;
+        }
+
+        .modal-image {
+            max-width: 100%;
+            max-height: 80vh;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            color: white;
+            font-size: 2rem;
+            font-weight: bold;
+            cursor: pointer;
+            background: rgba(0,0,0,0.5);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            background: rgba(0,0,0,0.7);
+        }
+
+        .modal-info {
+            color: white;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
@@ -189,7 +255,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="thumbnailCount">-</div>
-                <div class="stat-label">Stored Thumbnails</div>
+                <div class="stat-label">Stored Images</div>
             </div>
         </div>
 
@@ -215,6 +281,15 @@
         </div>
     </div>
 
+    <!-- Image Modal -->
+    <div id="imageModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <img id="modalImage" class="modal-image" src="" alt="Full size image">
+            <div id="modalInfo" class="modal-info"></div>
+        </div>
+    </div>
+
     <script>
         let currentData = null;
 
@@ -237,7 +312,10 @@
                     : '-';
                 document.getElementById('avgProcessingTime').textContent = avgTime;
                 
-                document.getElementById('thumbnailCount').textContent = stats.storage.thumbnailCount || 0;
+                const thumbnailText = stats.storage.previewCount 
+                    ? `${stats.storage.thumbnailCount || 0} thumbnails, ${stats.storage.previewCount || 0} previews`
+                    : (stats.storage.thumbnailCount || 0);
+                document.getElementById('thumbnailCount').textContent = thumbnailText;
                 
             } catch (error) {
                 console.error('Error loading stats:', error);
@@ -285,7 +363,9 @@
                             <tr>
                                 <td>
                                     ${query.thumbnail_path 
-                                        ? `<img src="/${query.thumbnail_path}" alt="Thumbnail" class="thumbnail" onerror="this.style.display='none'">`
+                                        ? `<img src="/${query.thumbnail_path}" alt="Thumbnail" class="thumbnail" 
+                                             onclick="openModal('/${query.preview_path || query.thumbnail_path}', '${query.id}', '${query.timestamp}', '${query.camera_make || ''} ${query.camera_model || ''}', '${query.location_name || ''}')" 
+                                             onerror="this.style.display='none'">`
                                         : '<div style="width:50px;height:50px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;">No thumb</div>'
                                     }
                                 </td>
@@ -341,6 +421,43 @@
 
         // Auto-refresh every 30 seconds
         setInterval(refreshData, 30000);
+
+        // Modal functions
+        function openModal(imageSrc, queryId, timestamp, camera, location) {
+            const modal = document.getElementById('imageModal');
+            const modalImage = document.getElementById('modalImage');
+            const modalInfo = document.getElementById('modalInfo');
+            
+            modalImage.src = imageSrc;
+            
+            // Build info text
+            const info = [];
+            info.push(`Query ID: ${queryId}`);
+            info.push(`Timestamp: ${new Date(timestamp).toLocaleString()}`);
+            if (camera.trim()) info.push(`Camera: ${camera.trim()}`);
+            if (location.trim()) info.push(`Location: ${location.trim()}`);
+            
+            modalInfo.innerHTML = info.join('<br>');
+            modal.style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('imageModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside the image
+        document.getElementById('imageModal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeModal();
+            }
+        });
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeModal();
+            }
+        });
     </script>
 </body>
 </html>

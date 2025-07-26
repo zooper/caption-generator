@@ -23,9 +23,11 @@ class ThumbnailGenerator {
             // Convert base64 to buffer
             const imageBuffer = Buffer.from(base64Data, 'base64');
             
-            // Generate thumbnail filename
+            // Generate filenames
             const thumbnailFilename = `${queryId}_thumb.jpg`;
+            const previewFilename = `${queryId}_preview.jpg`;
             const thumbnailPath = path.join(this.thumbnailsDir, thumbnailFilename);
+            const previewPath = path.join(this.thumbnailsDir, previewFilename);
             
             // Create thumbnail (200x200 max, maintaining aspect ratio)
             await sharp(imageBuffer)
@@ -39,15 +41,30 @@ class ThumbnailGenerator {
                 })
                 .toFile(thumbnailPath);
             
-            console.log(`Thumbnail generated: ${thumbnailFilename}`);
+            // Create larger preview image (800x600 max, maintaining aspect ratio)
+            await sharp(imageBuffer)
+                .resize(800, 600, {
+                    fit: 'inside',
+                    withoutEnlargement: true
+                })
+                .jpeg({
+                    quality: 85,
+                    progressive: true
+                })
+                .toFile(previewPath);
+            
+            console.log(`Thumbnail and preview generated: ${thumbnailFilename}, ${previewFilename}`);
             return {
-                filename: thumbnailFilename,
-                path: thumbnailPath,
-                relativePath: `thumbnails/${thumbnailFilename}`
+                thumbnailFilename,
+                previewFilename,
+                thumbnailPath,
+                previewPath,
+                thumbnailRelativePath: `thumbnails/${thumbnailFilename}`,
+                previewRelativePath: `thumbnails/${previewFilename}`
             };
             
         } catch (error) {
-            console.error('Error generating thumbnail:', error);
+            console.error('Error generating thumbnail and preview:', error);
             return null;
         }
     }
@@ -77,7 +94,7 @@ class ThumbnailGenerator {
                 }
             }
             
-            console.log(`Cleaned up ${deletedCount} old thumbnails`);
+            console.log(`Cleaned up ${deletedCount} old thumbnail and preview images`);
             return deletedCount;
             
         } catch (error) {
@@ -90,22 +107,32 @@ class ThumbnailGenerator {
         try {
             const files = fs.readdirSync(this.thumbnailsDir);
             let totalSize = 0;
+            let thumbnailCount = 0;
+            let previewCount = 0;
             
             for (const file of files) {
                 const filePath = path.join(this.thumbnailsDir, file);
                 const stats = fs.statSync(filePath);
                 totalSize += stats.size;
+                
+                if (file.includes('_thumb.')) {
+                    thumbnailCount++;
+                } else if (file.includes('_preview.')) {
+                    previewCount++;
+                }
             }
             
             return {
-                thumbnailCount: files.length,
+                thumbnailCount,
+                previewCount,
+                totalFiles: files.length,
                 totalSizeBytes: totalSize,
                 totalSizeMB: (totalSize / (1024 * 1024)).toFixed(2)
             };
             
         } catch (error) {
             console.error('Error getting storage stats:', error);
-            return { thumbnailCount: 0, totalSizeBytes: 0, totalSizeMB: '0' };
+            return { thumbnailCount: 0, previewCount: 0, totalFiles: 0, totalSizeBytes: 0, totalSizeMB: '0' };
         }
     }
 }

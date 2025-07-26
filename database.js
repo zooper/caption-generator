@@ -30,6 +30,7 @@ class Database {
                         image_size INTEGER,
                         image_type TEXT,
                         thumbnail_path TEXT,
+                        preview_path TEXT,
                         exif_data TEXT,
                         camera_make TEXT,
                         camera_model TEXT,
@@ -64,6 +65,7 @@ class Database {
                 imageSize,
                 imageType,
                 thumbnailPath,
+                previewPath,
                 exifData,
                 cameraMake,
                 cameraModel,
@@ -80,15 +82,15 @@ class Database {
 
             const sql = `
                 INSERT INTO query_logs (
-                    id, source, image_size, image_type, thumbnail_path, exif_data,
+                    id, source, image_size, image_type, thumbnail_path, preview_path, exif_data,
                     camera_make, camera_model, gps_latitude, gps_longitude, location_name,
                     prompt_length, response_length, processing_time_ms, error_message,
                     ip_address, user_agent
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             this.db.run(sql, [
-                id, source, imageSize, imageType, thumbnailPath, 
+                id, source, imageSize, imageType, thumbnailPath, previewPath,
                 exifData ? JSON.stringify(exifData) : null,
                 cameraMake, cameraModel, gpsLatitude, gpsLongitude, locationName,
                 promptLength, responseLength, processingTimeMs, errorMessage,
