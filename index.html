@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instagram Caption Generator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>📸 Instagram Caption Generator</h1>
+            <p>AI-powered captions and hashtags for your photos</p>
+        </header>
+
+        <main class="main-content">
+            <div class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-placeholder" id="uploadPlaceholder">
+                        <div class="upload-icon">📁</div>
+                        <h3>Drop your image here</h3>
+                        <p>or click to browse</p>
+                        <p class="file-info">JPG, PNG, GIF up to 10MB</p>
+                    </div>
+                    <img class="preview-image" id="previewImage" style="display: none;" alt="Preview">
+                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                </div>
+
+                <div class="style-options">
+                    <h3>Choose Caption Style</h3>
+                    <div class="style-buttons">
+                        <button class="style-btn active" data-style="creative">✨ Creative</button>
+                        <button class="style-btn" data-style="professional">💼 Professional</button>
+                        <button class="style-btn" data-style="casual">😄 Casual</button>
+                        <button class="style-btn" data-style="trendy">🔥 Trendy</button>
+                        <button class="style-btn" data-style="inspirational">💭 Inspirational</button>
+                    </div>
+                </div>
+
+                <div class="context-section">
+                    <h3>Add Context (Optional)</h3>
+                    <div class="context-grid">
+                        <div class="context-field">
+                            <label for="cameraInput">📷 Camera/Gear</label>
+                            <input type="text" id="cameraInput" placeholder="e.g., Canon R5, iPhone 15 Pro, Sony A7IV">
+                        </div>
+                        <div class="context-field">
+                            <label for="eventInput">🎉 Event/Occasion</label>
+                            <input type="text" id="eventInput" placeholder="e.g., Wedding, Concert, Vacation, Birthday">
+                        </div>
+                        <div class="context-field">
+                            <label for="locationInput">📍 Location</label>
+                            <input type="text" id="locationInput" placeholder="e.g., Paris, Beach sunset, Home studio">
+                        </div>
+                        <div class="context-field">
+                            <label for="moodInput">💭 Mood/Vibe</label>
+                            <input type="text" id="moodInput" placeholder="e.g., Nostalgic, Energetic, Peaceful, Fun">
+                        </div>
+                        <div class="context-field">
+                            <label for="subjectInput">👤 Subject/Focus</label>
+                            <input type="text" id="subjectInput" placeholder="e.g., Portrait, Landscape, Food, Pet">
+                        </div>
+                        <div class="context-field">
+                            <label for="customInput">✏️ Custom Notes</label>
+                            <input type="text" id="customInput" placeholder="Any other details you want to include">
+                        </div>
+                    </div>
+                    <div class="template-section">
+                        <h4>📋 Templates</h4>
+                        <div class="template-controls">
+                            <select class="template-select" id="templateSelect">
+                                <option value="">Choose a saved template...</option>
+                            </select>
+                            <button class="load-template-btn" id="loadTemplateBtn" disabled>📂 Load</button>
+                            <button class="delete-template-btn" id="deleteTemplateBtn" disabled>🗑️ Delete</button>
+                        </div>
+                    </div>
+                    
+                    <div class="context-actions">
+                        <button class="clear-context-btn" id="clearContextBtn">🗑️ Clear All</button>
+                        <button class="save-context-btn" id="saveContextBtn">💾 Save as Template</button>
+                    </div>
+                </div>
+
+                <button class="generate-btn" id="generateBtn" disabled>
+                    <span class="btn-text">Generate Caption</span>
+                    <div class="loading-spinner" style="display: none;"></div>
+                </button>
+            </div>
+
+            <div class="results-section">
+                <div class="results-placeholder" id="resultsPlaceholder">
+                    <div class="placeholder-icon">✨</div>
+                    <h3>Your caption will appear here</h3>
+                    <p>Upload an image and choose a style to get started</p>
+                </div>
+
+                <div class="results-content" id="resultsContent" style="display: none;">
+                    <div class="caption-card">
+                        <div class="card-header">
+                            <h3>📝 Caption</h3>
+                            <span class="char-count" id="charCount">0 characters</span>
+                        </div>
+                        <div class="caption-text" id="captionText"></div>
+                        <button class="copy-btn" id="copyCaptionBtn">
+                            <span>📋 Copy Caption</span>
+                        </button>
+                    </div>
+
+                    <div class="hashtags-card">
+                        <div class="card-header">
+                            <h3>#️⃣ Hashtags</h3>
+                            <span class="hashtag-count" id="hashtagCount">0 tags</span>
+                        </div>
+                        <div class="hashtags-text" id="hashtagsText"></div>
+                        <button class="copy-btn" id="copyHashtagsBtn">
+                            <span>📋 Copy Hashtags</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <div class="notification" id="notification" style="display: none;">
+            <span class="notification-text"></span>
+        </div>
+
+        <footer class="footer">
+            <div class="pro-tips">
+                <h4>💡 Pro Tips</h4>
+                <ul>
+                    <li>Mix popular and niche hashtags for better reach</li>
+                    <li>Ask questions in your captions to boost engagement</li>
+                    <li>Post when your audience is most active</li>
+                    <li>Use 3-5 hashtags in comments for cleaner captions</li>
+                </ul>
+            </div>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
