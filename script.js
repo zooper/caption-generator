@@ -113,6 +113,7 @@ class CaptionGenerator {
 
         this.currentFile = file;
         this.displayPreview(file);
+        this.extractLocationFromEXIF(file);
         this.generateBtn.disabled = false;
         this.hideResults();
     }
@@ -142,6 +143,75 @@ class CaptionGenerator {
             this.uploadPlaceholder.style.display = 'none';
         };
         reader.readAsDataURL(file);
+    }
+
+    async extractLocationFromEXIF(file) {
+        try {
+            // Check if exifr is available
+            if (typeof exifr === 'undefined') {
+                console.log('EXIFR library not loaded');
+                return;
+            }
+
+            // Extract EXIF data with GPS coordinates
+            const exifData = await exifr.parse(file, ['latitude', 'longitude', 'CreateDate', 'Model', 'Make']);
+            
+            if (exifData && exifData.latitude && exifData.longitude) {
+                console.log('GPS coordinates found:', exifData.latitude, exifData.longitude);
+                
+                // Get location name from coordinates
+                const locationName = await this.reverseGeocode(exifData.latitude, exifData.longitude);
+                
+                if (locationName) {
+                    this.locationInput.value = locationName;
+                    this.showNotification(`📍 Location detected: ${locationName}`, 'success');
+                } else {
+                    // Fallback to showing coordinates
+                    this.locationInput.value = `${exifData.latitude.toFixed(4)}, ${exifData.longitude.toFixed(4)}`;
+                    this.showNotification('📍 GPS coordinates detected', 'success');
+                }
+            } else {
+                console.log('No GPS data found in image EXIF');
+            }
+        } catch (error) {
+            console.log('Could not extract EXIF data:', error.message);
+            // Silently fail - not all images have EXIF data
+        }
+    }
+
+    async reverseGeocode(latitude, longitude) {
+        try {
+            // Using a free geocoding service (Nominatim from OpenStreetMap)
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
+                {
+                    headers: {
+                        'User-Agent': 'Instagram Caption Generator'
+                    }
+                }
+            );
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                if (data && data.address) {
+                    // Build a readable location string
+                    const parts = [];
+                    if (data.address.city) parts.push(data.address.city);
+                    else if (data.address.town) parts.push(data.address.town);
+                    else if (data.address.village) parts.push(data.address.village);
+                    
+                    if (data.address.state) parts.push(data.address.state);
+                    if (data.address.country) parts.push(data.address.country);
+                    
+                    return parts.join(', ') || data.display_name;
+                }
+            }
+        } catch (error) {
+            console.log('Reverse geocoding failed:', error.message);
+        }
+        
+        return null;
     }
 
     selectStyle(style) {
