@@ -560,6 +560,9 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         this.resultsPlaceholder.style.display = 'none';
         this.resultsContent.style.display = 'block';
         
+        // Store caption for browser extension
+        this.storeCaptionForExtension(caption, hashtags);
+        
         // Auto-update Mastodon preview when caption is generated
         this.updateMastodonPreview();
     }
@@ -779,6 +782,23 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             btnText.textContent = '🚀 Post to Mastodon';
             spinner.style.display = 'none';
             this.postMastodonBtn.disabled = false;
+        }
+    }
+
+    // Store caption for browser extension use
+    async storeCaptionForExtension(caption, hashtags) {
+        try {
+            const fullCaption = `${caption}\n\n${hashtags}`;
+            await fetch('/api/store-caption', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ caption: fullCaption })
+            });
+        } catch (error) {
+            console.log('Could not store caption for extension:', error);
+            // Don't show error to user as this is optional functionality
         }
     }
 

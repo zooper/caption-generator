@@ -1,0 +1,38 @@
+{
+  "manifest_version": 2,
+  "name": "Instagram Caption Generator",
+  "version": "1.0",
+  "description": "Auto-fill Instagram captions from your local caption generator",
+
+  "permissions": [
+    "activeTab",
+    "storage",
+    "http://localhost/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*", "http://www.instagram.com/*"],
+      "js": ["textarea-detect.js"],
+      "css": ["content-style.css"],
+      "run_at": "document_end"
+    }
+  ],
+
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "Instagram Caption Generator"
+  },
+
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+}
