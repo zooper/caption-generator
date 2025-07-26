@@ -20,13 +20,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         await testConnection();
     });
 
+    // Get the correct storage API (Firefox vs Chrome compatibility)
+    function getStorageAPI() {
+        return typeof browser !== 'undefined' ? browser.storage : chrome.storage;
+    }
+
     async function loadSettings() {
         try {
-            const result = await browser.storage.sync.get(['appUrl']);
+            const storage = getStorageAPI();
+            const result = await storage.sync.get(['appUrl']);
             appUrlInput.value = result.appUrl || 'http://localhost:3000';
+            console.log('Settings loaded:', result);
         } catch (error) {
             console.error('Error loading settings:', error);
-            appUrlInput.value = 'http://localhost:3000';
+            // Fallback to local storage if sync fails
+            try {
+                const storage = getStorageAPI();
+                const result = await storage.local.get(['appUrl']);
+                appUrlInput.value = result.appUrl || 'http://localhost:3000';
+                console.log('Settings loaded from local storage:', result);
+            } catch (localError) {
+                console.error('Local storage also failed:', localError);
+                appUrlInput.value = 'http://localhost:3000';
+            }
         }
     }
 
@@ -43,17 +59,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Remove trailing slash
             const cleanUrl = appUrl.replace(/\/$/, '');
 
-            // Save to storage
-            await browser.storage.sync.set({ appUrl: cleanUrl });
-            
-            showStatus('✅ Settings saved successfully!', 'success');
+            console.log('Attempting to save URL:', cleanUrl);
+
+            // Try sync storage first
+            const storage = getStorageAPI();
+            try {
+                await storage.sync.set({ appUrl: cleanUrl });
+                console.log('Saved to sync storage successfully');
+                showStatus('✅ Settings saved successfully!', 'success');
+            } catch (syncError) {
+                console.warn('Sync storage failed, trying local storage:', syncError);
+                // Fallback to local storage
+                await storage.local.set({ appUrl: cleanUrl });
+                console.log('Saved to local storage successfully');
+                showStatus('✅ Settings saved successfully (local storage)!', 'success');
+            }
             
             // Test connection after saving
             setTimeout(testConnection, 500);
             
         } catch (error) {
             console.error('Error saving settings:', error);
-            showStatus('❌ Error saving settings', 'error');
+            showStatus(`❌ Error saving settings: ${error.message}`, 'error');
         }
     }
 

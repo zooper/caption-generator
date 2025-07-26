@@ -462,10 +462,19 @@
         try {
             // Use chrome.storage for Firefox compatibility
             const api = typeof browser !== 'undefined' ? browser : chrome;
-            const result = await api.storage.sync.get(['appUrl']);
-            return result.appUrl || 'http://localhost:3000';
+            
+            // Try sync storage first
+            try {
+                const result = await api.storage.sync.get(['appUrl']);
+                return result.appUrl || 'http://localhost:3000';
+            } catch (syncError) {
+                console.warn('Sync storage failed, trying local storage:', syncError);
+                // Fallback to local storage
+                const result = await api.storage.local.get(['appUrl']);
+                return result.appUrl || 'http://localhost:3000';
+            }
         } catch (error) {
-            console.error('Error getting app URL:', error);
+            console.error('Error getting app URL from storage:', error);
             return 'http://localhost:3000';
         }
     }
