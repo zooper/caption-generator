@@ -113,7 +113,12 @@ class CaptionGenerator {
 
         this.currentFile = file;
         this.displayPreview(file);
-        this.extractLocationFromEXIF(file);
+        
+        // Clear context fields before checking new image
+        this.locationInput.value = '';
+        this.cameraInput.value = '';
+        
+        this.extractMetadataFromEXIF(file);
         this.generateBtn.disabled = false;
         this.hideResults();
     }
@@ -145,37 +150,94 @@ class CaptionGenerator {
         reader.readAsDataURL(file);
     }
 
-    async extractLocationFromEXIF(file) {
+    async extractMetadataFromEXIF(file) {
         try {
             // Check if exifr is available
             if (typeof exifr === 'undefined') {
                 console.log('EXIFR library not loaded');
+                this.showNotification('⚠️ EXIF library not available', 'error');
                 return;
             }
 
-            // Extract EXIF data with GPS coordinates
-            const exifData = await exifr.parse(file, ['latitude', 'longitude', 'CreateDate', 'Model', 'Make']);
+            // Show that we're trying to extract metadata
+            this.showNotification('🔍 Checking for image metadata...', 'info');
+
+            console.log('Attempting to parse file:', file.name, file.type);
             
-            if (exifData && exifData.latitude && exifData.longitude) {
-                console.log('GPS coordinates found:', exifData.latitude, exifData.longitude);
+            // Extract both GPS and camera data
+            const [gpsData, allExifData] = await Promise.all([
+                exifr.gps(file).catch(() => null),
+                exifr.parse(file).catch(err => {
+                    console.error('EXIF parse error:', err);
+                    return null;
+                })
+            ]);
+            
+            console.log('GPS data:', gpsData);
+            console.log('All EXIF data:', allExifData);
+            
+            let hasData = false;
+            
+            // Handle GPS/Location data
+            if (gpsData && gpsData.latitude && gpsData.longitude) {
+                console.log('GPS coordinates found:', gpsData.latitude, gpsData.longitude);
+                
+                // Show that we're reverse geocoding
+                this.showNotification('🌍 Looking up location name...', 'info');
                 
                 // Get location name from coordinates
-                const locationName = await this.reverseGeocode(exifData.latitude, exifData.longitude);
+                const locationName = await this.reverseGeocode(gpsData.latitude, gpsData.longitude);
                 
                 if (locationName) {
                     this.locationInput.value = locationName;
-                    this.showNotification(`📍 Location detected: ${locationName}`, 'success');
+                    hasData = true;
                 } else {
                     // Fallback to showing coordinates
-                    this.locationInput.value = `${exifData.latitude.toFixed(4)}, ${exifData.longitude.toFixed(4)}`;
-                    this.showNotification('📍 GPS coordinates detected', 'success');
+                    this.locationInput.value = `${gpsData.latitude.toFixed(4)}, ${gpsData.longitude.toFixed(4)}`;
+                    hasData = true;
+                }
+            }
+            
+            // Handle Camera data
+            if (allExifData && (allExifData.Make || allExifData.Model)) {
+                const cameraParts = [];
+                
+                if (allExifData.Make) {
+                    cameraParts.push(allExifData.Make);
+                }
+                
+                if (allExifData.Model && (!allExifData.Make || !allExifData.Model.includes(allExifData.Make))) {
+                    cameraParts.push(allExifData.Model);
+                }
+                
+                if (allExifData.LensModel) {
+                    cameraParts.push(`(${allExifData.LensModel})`);
+                }
+                
+                const cameraInfo = cameraParts.join(' ').trim();
+                if (cameraInfo) {
+                    this.cameraInput.value = cameraInfo;
+                    hasData = true;
+                    console.log('Camera info extracted:', cameraInfo);
                 }
             } else {
-                console.log('No GPS data found in image EXIF');
+                console.log('No camera data found in EXIF');
             }
+            
+            // Show appropriate notification
+            if (hasData) {
+                const detectedItems = [];
+                if (this.locationInput.value) detectedItems.push('location');
+                if (this.cameraInput.value) detectedItems.push('camera');
+                
+                this.showNotification(`📸 Detected: ${detectedItems.join(' & ')}`, 'success');
+            } else {
+                this.showNotification('📷 No metadata found in this image', 'info');
+            }
+            
         } catch (error) {
-            console.log('Could not extract EXIF data:', error.message);
-            // Silently fail - not all images have EXIF data
+            console.error('EXIF extraction error:', error);
+            this.showNotification('⚠️ Could not read image metadata', 'error');
         }
     }
 
