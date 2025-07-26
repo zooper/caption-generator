@@ -74,8 +74,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function getAppUrl() {
         try {
-            const result = await browser.storage.sync.get(['appUrl']);
-            return result.appUrl || 'http://localhost:3000';
+            const api = typeof browser !== 'undefined' ? browser : chrome;
+            
+            // Try sync storage first
+            try {
+                const result = await api.storage.sync.get(['appUrl']);
+                return result.appUrl || 'http://localhost:3000';
+            } catch (syncError) {
+                console.warn('Sync storage failed, trying local storage:', syncError);
+                // Fallback to local storage
+                const result = await api.storage.local.get(['appUrl']);
+                return result.appUrl || 'http://localhost:3000';
+            }
         } catch (error) {
             console.error('Error getting app URL:', error);
             return 'http://localhost:3000';

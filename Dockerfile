@@ -17,8 +17,9 @@ COPY . .
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Change ownership of the app directory
-RUN chown -R nodejs:nodejs /app
+# Create data directory for persistent storage
+RUN mkdir -p /app/data/thumbnails && \
+    chown -R nodejs:nodejs /app
 USER nodejs
 
 # Expose port

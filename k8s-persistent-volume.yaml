@@ -1,0 +1,61 @@
+# This deployment uses the existing NFS share via nfs-fileserver-pvc
+# No additional PV/PVC needed as it uses the shared NFS storage
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caption-generator
+  labels:
+    app: caption-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: caption-generator
+  template:
+    metadata:
+      labels:
+        app: caption-generator
+    spec:
+      containers:
+      - name: caption-generator
+        image: caption-generator:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: DATA_PATH
+          value: "/app/data"
+        - name: PORT
+          value: "3000"
+        volumeMounts:
+        - name: caption-data
+          mountPath: /app/data
+          subPath: caption-generator
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: caption-data
+        persistentVolumeClaim:
+          claimName: nfs-fileserver-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: caption-generator-service
+  labels:
+    app: caption-generator
+spec:
+  selector:
+    app: caption-generator
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: LoadBalancer

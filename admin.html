@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caption Generator - Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .section {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        .queries-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .queries-table th,
+        .queries-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .queries-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .thumbnail {
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+
+        .source-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .source-web {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .source-extension {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .error-badge {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .success-badge {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .btn:hover {
+            background: #5a6fd8;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .controls {
+            margin-bottom: 1rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        select, input {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Caption Generator Admin Dashboard</h1>
+        <p>Monitor query logs, analytics, and system performance</p>
+    </div>
+
+    <div class="container">
+        <!-- Statistics Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalQueries">-</div>
+                <div class="stat-label">Total Queries</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="webQueries">-</div>
+                <div class="stat-label">Web App Queries</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="extensionQueries">-</div>
+                <div class="stat-label">Extension Queries</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="successRate">-</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgProcessingTime">-</div>
+                <div class="stat-label">Avg Processing Time</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="thumbnailCount">-</div>
+                <div class="stat-label">Stored Thumbnails</div>
+            </div>
+        </div>
+
+        <!-- Recent Queries Section -->
+        <div class="section">
+            <div class="section-title">Recent Queries</div>
+            <div class="controls">
+                <label>
+                    Show:
+                    <select id="limitSelect">
+                        <option value="25">25 queries</option>
+                        <option value="50" selected>50 queries</option>
+                        <option value="100">100 queries</option>
+                    </select>
+                </label>
+                <button class="btn" onclick="refreshData()">🔄 Refresh</button>
+                <button class="btn" onclick="cleanupThumbnails()">🧹 Cleanup Old Thumbnails</button>
+            </div>
+            
+            <div id="queriesContainer">
+                <div class="loading">Loading recent queries...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentData = null;
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/admin/stats');
+                const stats = await response.json();
+                
+                document.getElementById('totalQueries').textContent = stats.database.total_queries || 0;
+                document.getElementById('webQueries').textContent = stats.database.web_queries || 0;
+                document.getElementById('extensionQueries').textContent = stats.database.extension_queries || 0;
+                
+                const successRate = stats.database.total_queries > 0 
+                    ? Math.round((stats.database.successful_queries / stats.database.total_queries) * 100)
+                    : 0;
+                document.getElementById('successRate').textContent = successRate + '%';
+                
+                const avgTime = stats.database.avg_processing_time 
+                    ? Math.round(stats.database.avg_processing_time) + 'ms'
+                    : '-';
+                document.getElementById('avgProcessingTime').textContent = avgTime;
+                
+                document.getElementById('thumbnailCount').textContent = stats.storage.thumbnailCount || 0;
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadQueries() {
+            try {
+                const limit = document.getElementById('limitSelect').value;
+                const response = await fetch(`/api/admin/queries?limit=${limit}`);
+                const queries = await response.json();
+                
+                currentData = queries;
+                displayQueries(queries);
+                
+            } catch (error) {
+                console.error('Error loading queries:', error);
+                document.getElementById('queriesContainer').innerHTML = 
+                    '<div class="loading">Error loading queries</div>';
+            }
+        }
+
+        function displayQueries(queries) {
+            if (queries.length === 0) {
+                document.getElementById('queriesContainer').innerHTML = 
+                    '<div class="loading">No queries found</div>';
+                return;
+            }
+
+            const table = `
+                <table class="queries-table">
+                    <thead>
+                        <tr>
+                            <th>Thumbnail</th>
+                            <th>Timestamp</th>
+                            <th>Source</th>
+                            <th>Camera</th>
+                            <th>Location</th>
+                            <th>Processing Time</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${queries.map(query => `
+                            <tr>
+                                <td>
+                                    ${query.thumbnail_path 
+                                        ? `<img src="/${query.thumbnail_path}" alt="Thumbnail" class="thumbnail" onerror="this.style.display='none'">`
+                                        : '<div style="width:50px;height:50px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;">No thumb</div>'
+                                    }
+                                </td>
+                                <td>${new Date(query.timestamp).toLocaleString()}</td>
+                                <td><span class="source-badge source-${query.source}">${query.source}</span></td>
+                                <td>${query.camera_make && query.camera_model 
+                                    ? `${query.camera_make} ${query.camera_model}` 
+                                    : '-'}</td>
+                                <td>${query.location_name || '-'}</td>
+                                <td>${query.processing_time_ms ? query.processing_time_ms + 'ms' : '-'}</td>
+                                <td><span class="source-badge ${query.error_message ? 'error-badge' : 'success-badge'}">
+                                    ${query.error_message ? 'Error' : 'Success'}
+                                </span></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            
+            document.getElementById('queriesContainer').innerHTML = table;
+        }
+
+        async function refreshData() {
+            await Promise.all([loadStats(), loadQueries()]);
+        }
+
+        async function cleanupThumbnails() {
+            const daysOld = prompt('Delete thumbnails older than how many days?', '30');
+            if (!daysOld) return;
+            
+            try {
+                const response = await fetch('/api/admin/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ daysOld: parseInt(daysOld) })
+                });
+                
+                const result = await response.json();
+                alert(`${result.message}`);
+                refreshData();
+                
+            } catch (error) {
+                console.error('Error during cleanup:', error);
+                alert('Error during cleanup');
+            }
+        }
+
+        // Event listeners
+        document.getElementById('limitSelect').addEventListener('change', loadQueries);
+
+        // Initial load
+        refreshData();
+
+        // Auto-refresh every 30 seconds
+        setInterval(refreshData, 30000);
+    </script>
+</body>
+</html>

@@ -4,6 +4,13 @@
   "version": "1.0",
   "description": "Auto-fill Instagram captions from your local caption generator",
 
+  "icons": {
+    "16": "icons/colorful-camera-16.png",
+    "32": "icons/colorful-camera-32.png",
+    "48": "icons/colorful-camera-48.png",
+    "128": "icons/colorful-camera-128.png"
+  },
+
   "permissions": [
     "activeTab",
     "storage",
@@ -28,7 +35,13 @@
 
   "browser_action": {
     "default_popup": "popup.html",
-    "default_title": "Instagram Caption Generator"
+    "default_title": "Instagram Caption Generator",
+    "default_icon": {
+      "16": "icons/colorful-camera-16.png",
+      "32": "icons/colorful-camera-32.png",
+      "48": "icons/colorful-camera-48.png",
+      "128": "icons/colorful-camera-128.png"
+    }
   },
 
   "options_ui": {
