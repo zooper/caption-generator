@@ -83,6 +83,23 @@
                     </div>
                 </div>
 
+                <div class="mastodon-section">
+                    <h3>🐘 Mastodon Settings</h3>
+                    <div class="mastodon-config">
+                        <div class="config-field">
+                            <label for="mastodonInstance">Instance URL</label>
+                            <input type="url" id="mastodonInstance" placeholder="https://mastodon.social" 
+                                   value="https://mastodon.social">
+                        </div>
+                        <div class="config-field">
+                            <label for="mastodonToken">Access Token</label>
+                            <input type="password" id="mastodonToken" placeholder="Your Mastodon access token">
+                            <small>Get your token from: Settings → Development → New Application</small>
+                        </div>
+                        <button class="test-mastodon-btn" id="testMastodonBtn">🔍 Test Connection</button>
+                    </div>
+                </div>
+
                 <button class="generate-btn" id="generateBtn" disabled>
                     <span class="btn-text">Generate Caption</span>
                     <div class="loading-spinner" style="display: none;"></div>
@@ -117,6 +134,32 @@
                         <button class="copy-btn" id="copyHashtagsBtn">
                             <span>📋 Copy Hashtags</span>
                         </button>
+                    </div>
+
+                    <div class="alttext-card">
+                        <div class="card-header">
+                            <h3>♿ Alt Text</h3>
+                            <span class="alttext-count" id="alttextCount">For accessibility</span>
+                        </div>
+                        <div class="alttext-text" id="alttextText">Alt text will appear here...</div>
+                    </div>
+
+                    <div class="mastodon-card">
+                        <div class="card-header">
+                            <h3>🐘 Post to Mastodon</h3>
+                            <span class="mastodon-status" id="mastodonStatus">Ready to post</span>
+                        </div>
+                        <div class="mastodon-preview">
+                            <div class="post-preview" id="postPreview">
+                                <p><em>Caption and hashtags will appear here...</em></p>
+                            </div>
+                        </div>
+                        <div class="mastodon-actions">
+                            <button class="post-mastodon-btn" id="postMastodonBtn" disabled>
+                                <span class="btn-text">🚀 Post to Mastodon</span>
+                                <div class="loading-spinner" style="display: none;"></div>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -79,7 +79,16 @@ app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK', 
         apiKeyConfigured: !!process.env.OPENAI_API_KEY,
+        mastodonConfigured: !!(process.env.MASTODON_INSTANCE && process.env.MASTODON_TOKEN),
         timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/api/mastodon-config', (req, res) => {
+    res.json({
+        instance: process.env.MASTODON_INSTANCE || '',
+        token: process.env.MASTODON_TOKEN || '',
+        configured: !!(process.env.MASTODON_INSTANCE && process.env.MASTODON_TOKEN)
     });
 });
 
