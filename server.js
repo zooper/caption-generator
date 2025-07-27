@@ -10,9 +10,73 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize database and thumbnail generator
-const database = new Database();
+// Rate limiting for OpenAI API calls
+const rateLimiter = {
+    requests: [],
+    maxRequestsPerMinute: 3, // Conservative limit to avoid 429 errors
+    
+    canMakeRequest() {
+        const now = Date.now();
+        const oneMinuteAgo = now - 60000;
+        
+        // Remove requests older than 1 minute
+        this.requests = this.requests.filter(timestamp => timestamp > oneMinuteAgo);
+        
+        return this.requests.length < this.maxRequestsPerMinute;
+    },
+    
+    recordRequest() {
+        this.requests.push(Date.now());
+    },
+    
+    getWaitTime() {
+        if (this.requests.length === 0) return 0;
+        const oldestRequest = Math.min(...this.requests);
+        const waitTime = 60000 - (Date.now() - oldestRequest);
+        return Math.max(0, Math.ceil(waitTime / 1000)); // Return seconds
+    }
+};
+
+// Simple in-memory cache for API responses
+const responseCache = new Map();
+const CACHE_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+
+function getCacheKey(imageHash, style) {
+    return `${imageHash}_${style}`;
+}
+
+function getCachedResponse(cacheKey) {
+    const cached = responseCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY_MS) {
+        return cached.response;
+    }
+    if (cached) {
+        responseCache.delete(cacheKey); // Remove expired cache
+    }
+    return null;
+}
+
+function setCachedResponse(cacheKey, response) {
+    responseCache.set(cacheKey, {
+        response,
+        timestamp: Date.now()
+    });
+}
+
+// Initialize thumbnail generator
 const thumbnailGenerator = new ThumbnailGenerator();
+
+// Initialize database with async handling
+let database;
+const initializeDatabase = async () => {
+    try {
+        database = new Database();
+        console.log('✅ Database initialized successfully');
+    } catch (error) {
+        console.error('❌ Database initialization failed:', error);
+        process.exit(1);
+    }
+};
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -42,7 +106,11 @@ app.post('/api/generate-caption', async (req, res) => {
         processingTimeMs: null,
         errorMessage: null,
         ipAddress: req.ip || req.connection.remoteAddress,
-        userAgent: req.get('User-Agent')
+        userAgent: req.get('User-Agent'),
+        inputTokens: null,
+        outputTokens: null,
+        totalTokens: null,
+        estimatedCostUsd: null
     };
 
     try {
@@ -114,6 +182,24 @@ app.post('/api/generate-caption', async (req, res) => {
         logData.promptLength = prompt.length;
         console.log('Sending prompt to OpenAI, length:', prompt.length);
 
+        // Check rate limit before making API call
+        if (!rateLimiter.canMakeRequest()) {
+            const waitTime = rateLimiter.getWaitTime();
+            console.log(`Rate limit exceeded. Need to wait ${waitTime} seconds.`);
+            
+            logData.errorMessage = `Rate limit exceeded. Please wait ${waitTime} seconds before trying again.`;
+            logData.processingTimeMs = Date.now() - startTime;
+            await database.logQuery(logData);
+            
+            return res.status(429).json({ 
+                error: `Rate limit exceeded. Please wait ${waitTime} seconds before trying again.`,
+                waitTime: waitTime
+            });
+        }
+
+        // Record this request
+        rateLimiter.recordRequest();
+
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -164,6 +250,21 @@ app.post('/api/generate-caption', async (req, res) => {
 
         const data = await response.json();
         const responseContent = data.choices[0].message.content;
+        
+        // Extract token usage and calculate cost
+        if (data.usage) {
+            logData.inputTokens = data.usage.prompt_tokens || 0;
+            logData.outputTokens = data.usage.completion_tokens || 0;
+            logData.totalTokens = data.usage.total_tokens || 0;
+            
+            // Calculate cost based on GPT-4o pricing (as of 2024)
+            // Input: $2.50 per 1M tokens, Output: $10.00 per 1M tokens
+            const inputCost = (logData.inputTokens / 1000000) * 2.50;
+            const outputCost = (logData.outputTokens / 1000000) * 10.00;
+            logData.estimatedCostUsd = inputCost + outputCost;
+            
+            console.log(`Token usage - Input: ${logData.inputTokens}, Output: ${logData.outputTokens}, Cost: $${logData.estimatedCostUsd.toFixed(6)}`);
+        }
         
         // Complete logging with success data
         logData.responseLength = responseContent.length;
@@ -219,6 +320,59 @@ app.post('/api/store-caption', (req, res) => {
     res.json({ success: true, message: 'Caption stored for extension use' });
 });
 
+// Debug endpoint to test EXIF extraction
+app.post('/api/debug-exif', async (req, res) => {
+    try {
+        const { base64Image } = req.body;
+        console.log('=== DEBUG EXIF EXTRACTION ===');
+        console.log('Received base64 length:', base64Image ? base64Image.length : 'null');
+        
+        if (!base64Image) {
+            return res.json({ error: 'No image provided' });
+        }
+        
+        const imageBuffer = Buffer.from(base64Image, 'base64');
+        console.log('Image buffer size:', imageBuffer.length, 'bytes');
+        
+        // Try different EXIF extraction methods
+        const exifData = await exifr.parse(imageBuffer);
+        console.log('Basic EXIF extraction result:', exifData ? 'Found data' : 'No data');
+        
+        if (exifData) {
+            console.log('EXIF keys:', Object.keys(exifData));
+            console.log('Camera Make:', exifData.Make);
+            console.log('Camera Model:', exifData.Model);
+            console.log('GPS data:', {
+                lat: exifData.GPSLatitude,
+                lon: exifData.GPSLongitude,
+                latRef: exifData.GPSLatitudeRef,
+                lonRef: exifData.GPSLongitudeRef
+            });
+        }
+        
+        // Try with all options enabled
+        const fullExifData = await exifr.parse(imageBuffer, true);
+        console.log('Full EXIF extraction result:', fullExifData ? 'Found data' : 'No data');
+        
+        res.json({
+            hasBasicExif: !!exifData,
+            hasFullExif: !!fullExifData,
+            basicExifKeys: exifData ? Object.keys(exifData) : [],
+            fullExifKeys: fullExifData ? Object.keys(fullExifData) : [],
+            camera: exifData ? { make: exifData.Make, model: exifData.Model } : null,
+            gps: exifData ? {
+                lat: exifData.GPSLatitude,
+                lon: exifData.GPSLongitude,
+                latRef: exifData.GPSLatitudeRef,
+                lonRef: exifData.GPSLongitudeRef
+            } : null
+        });
+    } catch (error) {
+        console.error('Debug EXIF error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Enhanced version that returns both prompt and extracted data for logging
 async function buildPromptFromImageWithExtraction(base64Image) {
     console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
@@ -241,10 +395,38 @@ async function buildPromptFromImageWithExtraction(base64Image) {
     try {
         // Convert base64 to buffer for EXIF extraction
         const imageBuffer = Buffer.from(base64Image, 'base64');
+        console.log('Image buffer size:', imageBuffer.length, 'bytes');
         
-        // Extract EXIF data
-        const exifData = await exifr.parse(imageBuffer);
+        // Check image format first
+        const imageHeader = imageBuffer.slice(0, 10);
+        console.log('Image header bytes:', Array.from(imageHeader).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+        
+        // Extract EXIF data with more detailed options
+        const exifData = await exifr.parse(imageBuffer, {
+            tiff: true,
+            ifd0: true,
+            exif: true,
+            gps: true,
+            pick: ['Make', 'Model', 'GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef']
+        });
         console.log('Server EXIF extraction:', exifData ? 'Success' : 'No data');
+        if (exifData) {
+            console.log('EXIF data keys:', Object.keys(exifData));
+            console.log('EXIF Make:', exifData.Make);
+            console.log('EXIF Model:', exifData.Model);
+            console.log('EXIF GPS:', exifData.GPSLatitude, exifData.GPSLongitude);
+        } else {
+            // Try alternative extraction method
+            try {
+                const allExifData = await exifr.parse(imageBuffer, true);
+                console.log('Alternative EXIF extraction:', allExifData ? 'Success' : 'No data');
+                if (allExifData) {
+                    console.log('Alternative EXIF keys:', Object.keys(allExifData));
+                }
+            } catch (altError) {
+                console.log('Alternative EXIF extraction failed:', altError.message);
+            }
+        }
         
         if (exifData) {
             extractedData.exifData = exifData;
@@ -387,6 +569,280 @@ app.post('/api/admin/cleanup', async (req, res) => {
     }
 });
 
+// Get database schema information
+app.get('/api/admin/schema', async (req, res) => {
+    try {
+        const schemaInfo = await database.getSchemaInfo();
+        res.json(schemaInfo);
+    } catch (error) {
+        console.error('Error fetching schema info:', error);
+        res.status(500).json({ error: 'Failed to fetch schema information' });
+    }
+});
+
+// Debug endpoint to test OpenAI API access
+app.get('/api/admin/openai-debug', async (req, res) => {
+    try {
+        if (!process.env.OPENAI_API_KEY) {
+            return res.json({ error: 'No API key configured' });
+        }
+
+        const results = {};
+
+        // Test 1: Basic API access (models endpoint)
+        try {
+            const modelsResponse = await fetch('https://api.openai.com/v1/models', {
+                headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }
+            });
+            results.models = {
+                status: modelsResponse.status,
+                statusText: modelsResponse.statusText,
+                accessible: modelsResponse.ok
+            };
+        } catch (e) {
+            results.models = { error: e.message };
+        }
+
+        // Test 2: Usage endpoint (try different parameter formats)
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        
+        // Try format 1: single date parameter
+        try {
+            const usageResponse1 = await fetch(`https://api.openai.com/v1/usage?date=${todayStr}`, {
+                headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }
+            });
+            results.usage_single_date = {
+                status: usageResponse1.status,
+                statusText: usageResponse1.statusText,
+                accessible: usageResponse1.ok,
+                url: `https://api.openai.com/v1/usage?date=${todayStr}`
+            };
+            if (usageResponse1.ok) {
+                const data = await usageResponse1.json();
+                results.usage_single_date.hasData = !!data;
+                results.usage_single_date.sampleData = data;
+            } else {
+                const errorText = await usageResponse1.text();
+                results.usage_single_date.errorBody = errorText;
+            }
+        } catch (e) {
+            results.usage_single_date = { error: e.message };
+        }
+
+        // Try format 2: start_date and end_date  
+        try {
+            const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            const startDateStr = startDate.toISOString().split('T')[0];
+            const usageResponse2 = await fetch(`https://api.openai.com/v1/usage?start_date=${startDateStr}&end_date=${todayStr}`, {
+                headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }
+            });
+            results.usage_date_range = {
+                status: usageResponse2.status,
+                statusText: usageResponse2.statusText,
+                accessible: usageResponse2.ok,
+                url: `https://api.openai.com/v1/usage?start_date=${startDateStr}&end_date=${todayStr}`
+            };
+            if (usageResponse2.ok) {
+                const data = await usageResponse2.json();
+                results.usage_date_range.hasData = !!data;
+                results.usage_date_range.sampleData = data;
+            } else {
+                const errorText = await usageResponse2.text();
+                results.usage_date_range.errorBody = errorText;
+            }
+        } catch (e) {
+            results.usage_date_range = { error: e.message };
+        }
+
+        // Test 3: Subscription endpoint
+        try {
+            const subResponse = await fetch('https://api.openai.com/v1/dashboard/billing/subscription', {
+                headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` }
+            });
+            results.subscription = {
+                status: subResponse.status,
+                statusText: subResponse.statusText,
+                accessible: subResponse.ok
+            };
+            if (subResponse.ok) {
+                const data = await subResponse.json();
+                results.subscription.hasData = !!data;
+            } else {
+                const errorText = await subResponse.text();
+                results.subscription.errorBody = errorText;
+            }
+        } catch (e) {
+            results.subscription = { error: e.message };
+        }
+
+        res.json(results);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Check OpenAI account balance and usage
+app.get('/api/admin/openai-usage', async (req, res) => {
+    try {
+        if (!process.env.OPENAI_API_KEY) {
+            return res.status(400).json({ 
+                error: 'OpenAI API key not configured',
+                available: false
+            });
+        }
+
+        // Get usage data for the last 7 days to provide better monthly estimates
+        const today = new Date();
+        const dates = [];
+        for (let i = 0; i < 7; i++) {
+            const date = new Date(today);
+            date.setDate(date.getDate() - i);
+            dates.push(date.toISOString().split('T')[0]);
+        }
+        
+        let openaiUsage = null;
+        let usageAvailable = false;
+        let weeklyUsage = {
+            totalContextTokens: 0,
+            totalGeneratedTokens: 0,
+            totalRequests: 0,
+            dailyBreakdown: []
+        };
+
+        try {
+            // Fetch usage for multiple days
+            const usagePromises = dates.map(async (dateStr) => {
+                const response = await fetch(`https://api.openai.com/v1/usage?date=${dateStr}`, {
+                    headers: {
+                        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    return { date: dateStr, data };
+                }
+                return { date: dateStr, data: null };
+            });
+            
+            const results = await Promise.all(usagePromises);
+            
+            // Process results
+            results.forEach(result => {
+                if (result.data && result.data.data) {
+                    let dayContextTokens = 0;
+                    let dayGeneratedTokens = 0;
+                    let dayRequests = 0;
+                    
+                    result.data.data.forEach(item => {
+                        dayContextTokens += item.n_context_tokens_total || 0;
+                        dayGeneratedTokens += item.n_generated_tokens_total || 0;
+                        dayRequests += item.n_requests || 0;
+                    });
+                    
+                    weeklyUsage.totalContextTokens += dayContextTokens;
+                    weeklyUsage.totalGeneratedTokens += dayGeneratedTokens;
+                    weeklyUsage.totalRequests += dayRequests;
+                    
+                    weeklyUsage.dailyBreakdown.push({
+                        date: result.date,
+                        contextTokens: dayContextTokens,
+                        generatedTokens: dayGeneratedTokens,
+                        requests: dayRequests,
+                        cost: ((dayContextTokens / 1000000) * 2.50) + ((dayGeneratedTokens / 1000000) * 10.00)
+                    });
+                }
+            });
+            
+            // Get today's specific data for detailed view
+            const todayStr = dates[0];
+            const todayUsageResponse = await fetch(`https://api.openai.com/v1/usage?date=${todayStr}`, {
+                headers: {
+                    'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+                }
+            });
+
+            if (todayUsageResponse.ok) {
+                openaiUsage = await todayUsageResponse.json();
+                usageAvailable = true;
+                console.log('OpenAI usage data fetched successfully for', todayStr);
+                
+                // Calculate totals from today's usage data
+                let totalContextTokens = 0;
+                let totalGeneratedTokens = 0;
+                let totalRequests = 0;
+                
+                if (openaiUsage && openaiUsage.data) {
+                    openaiUsage.data.forEach(item => {
+                        totalContextTokens += item.n_context_tokens_total || 0;
+                        totalGeneratedTokens += item.n_generated_tokens_total || 0;
+                        totalRequests += item.n_requests || 0;
+                    });
+                }
+                
+                // Calculate actual spending using OpenAI's public pricing for GPT-4o
+                // Input: $2.50 per 1M tokens, Output: $10.00 per 1M tokens
+                const inputCostToday = (totalContextTokens / 1000000) * 2.50;
+                const outputCostToday = (totalGeneratedTokens / 1000000) * 10.00;
+                const totalCostToday = inputCostToday + outputCostToday;
+                
+                openaiUsage.totals = {
+                    totalContextTokens,
+                    totalGeneratedTokens,
+                    totalTokens: totalContextTokens + totalGeneratedTokens,
+                    totalRequests,
+                    estimatedCostToday: totalCostToday,
+                    inputCostToday,
+                    outputCostToday
+                };
+                
+                // Calculate weekly totals and projections
+                const weeklyInputCost = (weeklyUsage.totalContextTokens / 1000000) * 2.50;
+                const weeklyOutputCost = (weeklyUsage.totalGeneratedTokens / 1000000) * 10.00;
+                const weeklyTotalCost = weeklyInputCost + weeklyOutputCost;
+                
+                // Estimate monthly spending based on weekly average
+                const dailyAverageCost = weeklyTotalCost / 7;
+                const estimatedMonthlyCost = dailyAverageCost * 30;
+                
+                weeklyUsage.totals = {
+                    weeklyInputCost,
+                    weeklyOutputCost,
+                    weeklyTotalCost,
+                    dailyAverageCost,
+                    estimatedMonthlyCost
+                };
+                
+            } else {
+                console.log('Could not fetch OpenAI usage data:', todayUsageResponse.status, todayUsageResponse.statusText);
+            }
+        } catch (usageError) {
+            console.log('OpenAI usage API request failed:', usageError.message);
+        }
+
+        res.json({
+            openaiUsage,
+            weeklyUsage,
+            subscription: null, // Not available via API (browser-only)
+            available: usageAvailable,
+            usageApiAvailable: usageAvailable,
+            billingApiAvailable: false, // Confirmed: browser-only
+            message: usageAvailable 
+                ? 'OpenAI usage API accessible with spending estimates'
+                : 'Using local cost tracking (most accurate)',
+            date: dates[0]
+        });
+
+    } catch (error) {
+        console.error('Error fetching OpenAI usage:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch OpenAI usage data',
+            available: false
+        });
+    }
+});
+
 // Convert DMS (degrees, minutes, seconds) to decimal degrees
 function convertDMSToDD(dmsArray, ref) {
     if (Array.isArray(dmsArray) && dmsArray.length === 3) {
@@ -442,9 +898,20 @@ app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 Instagram Caption Generator running on http://localhost:${PORT}`);
-    console.log(`📁 Serving files from: ${__dirname}`);
-    console.log(`🔑 OpenAI API Key: ${process.env.OPENAI_API_KEY ? 'Configured ✅' : 'Missing ❌'}`);
-    console.log(`💡 Open http://localhost:${PORT} in your browser to start!`);
+// Start server with database initialization
+const startServer = async () => {
+    await initializeDatabase();
+    
+    app.listen(PORT, () => {
+        console.log(`🚀 Instagram Caption Generator running on http://localhost:${PORT}`);
+        console.log(`📁 Serving files from: ${__dirname}`);
+        console.log(`🔑 OpenAI API Key: ${process.env.OPENAI_API_KEY ? 'Configured ✅' : 'Missing ❌'}`);
+        console.log(`🗄️ Database schema version: ${database.CURRENT_SCHEMA_VERSION}`);
+        console.log(`💡 Open http://localhost:${PORT} in your browser to start!`);
+    });
+};
+
+startServer().catch(error => {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
 });
