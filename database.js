@@ -16,7 +16,7 @@ class Database {
         this.db = new sqlite3.Database(this.dbPath);
         
         // Current schema version
-        this.CURRENT_SCHEMA_VERSION = 2;
+        this.CURRENT_SCHEMA_VERSION = 3;
         
         this.initDatabase();
     }
@@ -102,6 +102,13 @@ class Database {
             await this.migration_v2();
             await this.setSchemaVersion(2);
         }
+
+        // Migration from version 2 to 3: Add weather data tracking columns
+        if (fromVersion < 3) {
+            console.log('Running migration: Add weather data tracking columns (v3)');
+            await this.migration_v3();
+            await this.setSchemaVersion(3);
+        }
     }
 
     migration_v1() {
@@ -182,6 +189,28 @@ class Database {
         });
     }
 
+    migration_v3() {
+        return new Promise((resolve, reject) => {
+            // Add weather data tracking columns
+            this.db.serialize(() => {
+                this.db.run("ALTER TABLE query_logs ADD COLUMN include_weather INTEGER", (err) => {
+                    if (err && !err.message.includes('duplicate column name')) {
+                        console.error('Error adding include_weather column:', err);
+                    }
+                });
+
+                this.db.run("ALTER TABLE query_logs ADD COLUMN weather_data TEXT", (err) => {
+                    if (err && !err.message.includes('duplicate column name')) {
+                        console.error('Error adding weather_data column:', err);
+                    } else {
+                        console.log('Migration v3 completed: Weather data tracking columns added');
+                        resolve();
+                    }
+                });
+            });
+        });
+    }
+
     async logQuery(logData) {
         return new Promise((resolve, reject) => {
             const {
@@ -206,7 +235,9 @@ class Database {
                 inputTokens,
                 outputTokens,
                 totalTokens,
-                estimatedCostUsd
+                estimatedCostUsd,
+                includeWeather,
+                weatherData
             } = logData;
 
             const sql = `
@@ -214,8 +245,9 @@ class Database {
                     id, source, image_size, image_type, thumbnail_path, preview_path, exif_data,
                     camera_make, camera_model, gps_latitude, gps_longitude, location_name,
                     prompt_length, response_length, processing_time_ms, error_message,
-                    ip_address, user_agent, input_tokens, output_tokens, total_tokens, estimated_cost_usd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ip_address, user_agent, input_tokens, output_tokens, total_tokens, estimated_cost_usd,
+                    include_weather, weather_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             this.db.run(sql, [
@@ -223,7 +255,8 @@ class Database {
                 exifData ? JSON.stringify(exifData) : null,
                 cameraMake, cameraModel, gpsLatitude, gpsLongitude, locationName,
                 promptLength, responseLength, processingTimeMs, errorMessage,
-                ipAddress, userAgent, inputTokens, outputTokens, totalTokens, estimatedCostUsd
+                ipAddress, userAgent, inputTokens, outputTokens, totalTokens, estimatedCostUsd,
+                includeWeather ? 1 : 0, weatherData
             ], function(err) {
                 if (err) {
                     console.error('Error logging query:', err);

@@ -66,6 +66,13 @@
                             <label for="customInput">✏️ Custom Notes</label>
                             <input type="text" id="customInput" placeholder="Any other details you want to include">
                         </div>
+                        <div class="context-field">
+                            <label for="weatherToggle">🌤️ Include Weather</label>
+                            <div class="weather-toggle-container">
+                                <input type="checkbox" id="weatherToggle" class="weather-checkbox">
+                                <span class="weather-description">Auto-detect weather from photo location & time</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="template-section">
                         <h4>📋 Templates</h4>
@@ -115,6 +122,23 @@
                 </div>
 
                 <div class="results-content" id="resultsContent" style="display: none;">
+                    <div class="weather-info-card" id="weatherInfoCard" style="display: none;">
+                        <div class="card-header">
+                            <h3>🌤️ Weather Info</h3>
+                            <span class="weather-timestamp" id="weatherTimestamp">Photo date & time</span>
+                        </div>
+                        <div class="weather-details">
+                            <div class="weather-main">
+                                <span class="weather-temp" id="weatherTemp">--°C</span>
+                                <span class="weather-desc" id="weatherDesc">--</span>
+                            </div>
+                            <div class="weather-extras">
+                                <span class="weather-humidity" id="weatherHumidity">💧 --%</span>
+                                <span class="weather-wind" id="weatherWind">💨 -- km/h</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="caption-card">
                         <div class="card-header">
                             <h3>📝 Caption</h3>

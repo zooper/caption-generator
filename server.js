@@ -110,11 +110,14 @@ app.post('/api/generate-caption', async (req, res) => {
         inputTokens: null,
         outputTokens: null,
         totalTokens: null,
-        estimatedCostUsd: null
+        estimatedCostUsd: null,
+        includeWeather: null,
+        weatherData: null
     };
 
     try {
-        let { prompt, base64Image } = req.body;
+        let { prompt, base64Image, includeWeather, style } = req.body;
+        logData.includeWeather = includeWeather;
 
         if (!process.env.OPENAI_API_KEY) {
             logData.errorMessage = 'OpenAI API key not configured';
@@ -135,7 +138,15 @@ app.post('/api/generate-caption', async (req, res) => {
         }
 
         // Determine source and log basic image info
-        logData.source = prompt ? 'web' : 'extension';
+        const userAgent = req.get('User-Agent') || '';
+        console.log('User-Agent:', userAgent);
+        if (userAgent.includes('CaptionGenerator-iOS') || userAgent.includes('CFNetwork')) {
+            logData.source = 'ios';
+        } else if (prompt) {
+            logData.source = 'web';
+        } else {
+            logData.source = 'extension';
+        }
         logData.imageSize = Math.round(base64Image.length * 0.75); // Approximate original size
         logData.imageType = 'image/jpeg'; // Default assumption
 
@@ -150,7 +161,23 @@ app.post('/api/generate-caption', async (req, res) => {
 
         // Always extract EXIF data for logging (for both web and extension requests)
         console.log('Extracting EXIF data for logging...');
-        const { extractedData } = await buildPromptFromImageWithExtraction(base64Image);
+        let extractedData;
+        
+        // If no prompt provided (extension request) or weather is requested, build prompt with extracted context
+        if (!prompt || includeWeather) {
+            if (!prompt) {
+                console.log('Extension request detected - building prompt with extracted context');
+            } else {
+                console.log('Weather requested - rebuilding prompt with extracted context including weather');
+            }
+            const result = await buildPromptFromImageWithExtraction(base64Image, includeWeather, style);
+            prompt = result.prompt;
+            extractedData = result.extractedData;
+        } else {
+            // For regular requests without weather, still extract basic data for logging
+            const result = await buildPromptFromImageWithExtraction(base64Image, false, style);
+            extractedData = result.extractedData;
+        }
         
         // Store extracted data for logging
         if (extractedData) {
@@ -160,13 +187,7 @@ app.post('/api/generate-caption', async (req, res) => {
             logData.gpsLatitude = extractedData.gpsLatitude;
             logData.gpsLongitude = extractedData.gpsLongitude;
             logData.locationName = extractedData.locationName;
-        }
-
-        // If no prompt provided (extension request), build prompt with extracted context
-        if (!prompt) {
-            console.log('Extension request detected - building prompt with extracted context');
-            const { prompt: builtPrompt } = await buildPromptFromImageWithExtraction(base64Image);
-            prompt = builtPrompt;
+            logData.weatherData = extractedData.weatherData;
         }
 
         // Validate prompt before sending to OpenAI
@@ -181,6 +202,10 @@ app.post('/api/generate-caption', async (req, res) => {
 
         logData.promptLength = prompt.length;
         console.log('Sending prompt to OpenAI, length:', prompt.length);
+        console.log('Full prompt being sent:');
+        console.log('=== PROMPT START ===');
+        console.log(prompt);
+        console.log('=== PROMPT END ===');
 
         // Check rate limit before making API call
         if (!rateLimiter.canMakeRequest()) {
@@ -271,7 +296,15 @@ app.post('/api/generate-caption', async (req, res) => {
         logData.processingTimeMs = Date.now() - startTime;
         await database.logQuery(logData);
         
-        res.json({ content: responseContent });
+        // Include extracted data in response for weather display
+        const responseData = { content: responseContent };
+        if (extractedData && extractedData.weatherData) {
+            responseData.weatherData = extractedData.weatherData;
+            responseData.photoDateTime = extractedData.photoDateTime;
+            responseData.locationName = extractedData.locationName;
+        }
+        
+        res.json(responseData);
 
     } catch (error) {
         console.error('Server error:', error);
@@ -374,8 +407,10 @@ app.post('/api/debug-exif', async (req, res) => {
 });
 
 // Enhanced version that returns both prompt and extracted data for logging
-async function buildPromptFromImageWithExtraction(base64Image) {
+async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative') {
     console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
+    console.log('Include weather:', includeWeather);
+    console.log('Caption style:', style);
     
     if (!base64Image) {
         console.error('No base64Image provided to buildPromptFromImageWithExtraction');
@@ -389,7 +424,10 @@ async function buildPromptFromImageWithExtraction(base64Image) {
         cameraModel: null,
         gpsLatitude: null,
         gpsLongitude: null,
-        locationName: null
+        locationName: null,
+        weatherData: null,
+        photoDateTime: null,
+        dateTimeSource: null
     };
     
     try {
@@ -401,13 +439,22 @@ async function buildPromptFromImageWithExtraction(base64Image) {
         const imageHeader = imageBuffer.slice(0, 10);
         console.log('Image header bytes:', Array.from(imageHeader).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
         
+        // Check if this looks like a valid JPEG with EXIF
+        const isJPEG = imageHeader[0] === 0xFF && imageHeader[1] === 0xD8;
+        const hasEXIFMarker = imageBuffer.includes(Buffer.from([0xFF, 0xE1])); // EXIF APP1 marker
+        console.log('Image format check:', { isJPEG, hasEXIFMarker, bufferSize: imageBuffer.length });
+        
         // Extract EXIF data with more detailed options
         const exifData = await exifr.parse(imageBuffer, {
             tiff: true,
             ifd0: true,
             exif: true,
             gps: true,
-            pick: ['Make', 'Model', 'GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef']
+            pick: [
+                'Make', 'Model', 
+                'GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef',
+                'DateTimeOriginal', 'DateTime', 'DateTimeDigitized'
+            ]
         });
         console.log('Server EXIF extraction:', exifData ? 'Success' : 'No data');
         if (exifData) {
@@ -415,6 +462,11 @@ async function buildPromptFromImageWithExtraction(base64Image) {
             console.log('EXIF Make:', exifData.Make);
             console.log('EXIF Model:', exifData.Model);
             console.log('EXIF GPS:', exifData.GPSLatitude, exifData.GPSLongitude);
+            console.log('EXIF DateTime:', {
+                DateTimeOriginal: exifData.DateTimeOriginal,
+                DateTime: exifData.DateTime,
+                DateTimeDigitized: exifData.DateTimeDigitized
+            });
         } else {
             // Try alternative extraction method
             try {
@@ -430,6 +482,35 @@ async function buildPromptFromImageWithExtraction(base64Image) {
         
         if (exifData) {
             extractedData.exifData = exifData;
+            
+            // Extract photo date/time
+            const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
+            for (const field of dateFields) {
+                if (exifData[field]) {
+                    try {
+                        let dateStr = exifData[field];
+                        let parsedDate;
+                        
+                        if (typeof dateStr === 'string') {
+                            // Standard EXIF format: "2024:01:15 14:30:25"
+                            dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T') + 'Z';
+                            parsedDate = new Date(dateStr);
+                        } else if (dateStr instanceof Date) {
+                            parsedDate = dateStr;
+                        }
+                        
+                        if (parsedDate && !isNaN(parsedDate.getTime())) {
+                            extractedData.photoDateTime = parsedDate.toISOString();
+                            extractedData.dateTimeSource = field;
+                            context.push(`Photo taken: ${parsedDate.toLocaleDateString()} ${parsedDate.toLocaleTimeString()}`);
+                            console.log(`Photo date extracted from ${field}:`, parsedDate);
+                            break;
+                        }
+                    } catch (error) {
+                        console.log(`Failed to parse ${field}:`, error.message);
+                    }
+                }
+            }
             
             // Camera/gear context
             if (exifData.Make || exifData.Model) {
@@ -464,6 +545,19 @@ async function buildPromptFromImageWithExtraction(base64Image) {
                         } else {
                             console.log('Reverse geocoding returned no location');
                         }
+                        
+                        // Fetch weather data if requested and we have GPS coordinates
+                        if (includeWeather) {
+                            console.log('Fetching weather data for coordinates:', lat, lon);
+                            const weatherData = await getHistoricalWeather(lat, lon, exifData);
+                            if (weatherData) {
+                                context.push(`Weather: ${weatherData}`);
+                                extractedData.weatherData = weatherData;
+                                console.log('Weather data added:', weatherData);
+                            } else {
+                                console.log('Failed to fetch weather data');
+                            }
+                        }
                     } else {
                         console.log('Invalid coordinates after conversion:', lat, lon);
                     }
@@ -481,11 +575,41 @@ async function buildPromptFromImageWithExtraction(base64Image) {
     
     const contextString = context.length > 0 ? `\n\nAdditional Context:\n${context.join('\n')}` : '';
     
+    // Define style-specific caption instructions
+    const styleInstructions = {
+        creative: {
+            tone: 'Uses artistic and expressive language with creative metaphors',
+            description: 'creative and artistic'
+        },
+        professional: {
+            tone: 'Uses clean, professional language suitable for business contexts',
+            description: 'professional and business-friendly'
+        },
+        casual: {
+            tone: 'Uses relaxed, conversational language like talking to a friend',
+            description: 'casual and friendly'
+        },
+        trendy: {
+            tone: 'Uses current trends, viral language, and popular internet expressions',
+            description: 'trendy and viral'
+        },
+        inspirational: {
+            tone: 'Uses motivational, uplifting, and encouraging language',
+            description: 'inspirational and motivational'
+        },
+        edgy: {
+            tone: 'Uses short, dry, clever language that is a little dark. Keep it deadpan, sarcastic, or emotionally detached—but still tied to the image. No fluff, minimal emojis',
+            description: 'edgy and unconventional'
+        }
+    };
+    
+    const selectedStyle = styleInstructions[style] || styleInstructions.creative;
+    
     const prompt = `Analyze this image for Instagram posting. Generate:
 
-1. A creative caption that:
+1. A ${selectedStyle.description} caption that:
    - Captures the main subject/scene
-   - Uses artistic and expressive language with creative metaphors
+   - ${selectedStyle.tone}
    - Is 1-3 sentences
    - Includes relevant emojis
    - Feels authentic and natural (NO forced questions or call-to-actions)
@@ -885,6 +1009,143 @@ async function reverseGeocode(latitude, longitude) {
         }
     } catch (error) {
         console.log('Reverse geocoding failed:', error.message);
+    }
+    
+    return null;
+}
+
+// Fetch historical weather data using OpenWeatherMap API
+async function getHistoricalWeather(latitude, longitude, exifData) {
+    try {
+        if (!process.env.OPENWEATHER_API_KEY) {
+            console.log('OpenWeatherMap API key not configured');
+            return null;
+        }
+        
+        // Extract date from EXIF data, default to current time if not available
+        let photoTimestamp = Date.now();
+        let dateSource = 'current_time';
+        
+        // Try multiple date fields in order of preference
+        const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
+        
+        for (const field of dateFields) {
+            if (exifData && exifData[field]) {
+                try {
+                    console.log(`Trying to parse ${field}:`, exifData[field]);
+                    
+                    // Parse EXIF date format: "YYYY:MM:DD HH:MM:SS"
+                    let dateStr = exifData[field];
+                    
+                    // Handle different date formats
+                    if (typeof dateStr === 'string') {
+                        // Standard EXIF format: "2024:01:15 14:30:25"
+                        dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T') + 'Z';
+                    } else if (dateStr instanceof Date) {
+                        // Already a Date object
+                        photoTimestamp = dateStr.getTime();
+                        dateSource = field;
+                        console.log(`Successfully parsed ${field} as Date object:`, new Date(photoTimestamp));
+                        break;
+                    }
+                    
+                    const parsedDate = new Date(dateStr);
+                    if (!isNaN(parsedDate.getTime())) {
+                        photoTimestamp = parsedDate.getTime();
+                        dateSource = field;
+                        console.log(`Successfully parsed ${field}:`, new Date(photoTimestamp));
+                        break;
+                    }
+                } catch (dateError) {
+                    console.log(`Failed to parse ${field}:`, dateError.message);
+                }
+            }
+        }
+        
+        console.log(`Photo timestamp source: ${dateSource}, date: ${new Date(photoTimestamp)}`);
+        
+        // Validate timestamp is reasonable (not in the future, not before digital cameras existed)
+        const now = Date.now();
+        const year2000 = new Date('2000-01-01').getTime();
+        
+        if (photoTimestamp > now || photoTimestamp < year2000) {
+            console.log('Photo timestamp seems invalid, using current time:', new Date(photoTimestamp));
+            photoTimestamp = now;
+            dateSource = 'current_time_fallback';
+        }
+        
+        // Convert to Unix timestamp (seconds)
+        const unixTimestamp = Math.floor(photoTimestamp / 1000);
+        
+        // Use historical weather data API for all dates (available back to 1979)
+        // Note: Requires One Call API 3.0 subscription, but includes 1,000 calls/day free
+        const weatherUrl = `https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=${latitude}&lon=${longitude}&dt=${unixTimestamp}&appid=${process.env.OPENWEATHER_API_KEY}&units=metric`;
+        const apiDescription = 'historical';
+        
+        console.log(`Fetching ${apiDescription} weather data from OpenWeatherMap...`);
+        
+        const response = await fetch(weatherUrl, {
+            headers: {
+                'User-Agent': 'Instagram Caption Generator'
+            }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.log(`OpenWeatherMap API error: ${response.status} ${response.statusText}`);
+            console.log(`Error details:`, errorText);
+            
+            // If historical API fails, try the 2.5 current weather API as fallback
+            if (response.status === 401 || response.status === 403) {
+                console.log('Historical weather API access denied, falling back to current weather');
+                try {
+                    const fallbackUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${process.env.OPENWEATHER_API_KEY}&units=metric`;
+                    const fallbackResponse = await fetch(fallbackUrl);
+                    
+                    if (fallbackResponse.ok) {
+                        const fallbackData = await fallbackResponse.json();
+                        if (fallbackData.main) {
+                            const weatherText = `${Math.round(fallbackData.main.temp)}°C, ${fallbackData.weather[0].description}` +
+                                               (fallbackData.main.humidity ? `, ${fallbackData.main.humidity}% humidity` : '') +
+                                               (fallbackData.wind ? `, ${Math.round(fallbackData.wind.speed * 3.6)} km/h wind` : '') +
+                                               ' (current weather - historical not available)';
+                            console.log('Fallback weather data:', weatherText);
+                            return weatherText;
+                        }
+                    }
+                } catch (fallbackError) {
+                    console.log('Fallback weather API also failed:', fallbackError.message);
+                }
+            }
+            
+            return null;
+        }
+        
+        const data = await response.json();
+        
+        let weatherInfo;
+        if (data.data && data.data.length > 0) {
+            const weather = data.data[0];
+            weatherInfo = {
+                temperature: Math.round(weather.temp),
+                description: weather.weather[0].description,
+                humidity: weather.humidity,
+                windSpeed: Math.round(weather.wind_speed * 3.6), // Convert m/s to km/h
+                timestamp: photoTimestamp
+            };
+        }
+        
+        if (weatherInfo) {
+            const weatherText = `${weatherInfo.temperature}°C, ${weatherInfo.description}` +
+                               (weatherInfo.humidity ? `, ${weatherInfo.humidity}% humidity` : '') +
+                               (weatherInfo.windSpeed ? `, ${weatherInfo.windSpeed} km/h wind` : '');
+            
+            console.log('Weather data formatted:', weatherText);
+            return weatherText;
+        }
+        
+    } catch (error) {
+        console.log('Weather API request failed:', error.message);
     }
     
     return null;

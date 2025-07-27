@@ -28,6 +28,14 @@ class CaptionGenerator {
         this.alttextCount = document.getElementById('alttextCount');
         this.notification = document.getElementById('notification');
         
+        // Weather info card elements
+        this.weatherInfoCard = document.getElementById('weatherInfoCard');
+        this.weatherTimestamp = document.getElementById('weatherTimestamp');
+        this.weatherTemp = document.getElementById('weatherTemp');
+        this.weatherDesc = document.getElementById('weatherDesc');
+        this.weatherHumidity = document.getElementById('weatherHumidity');
+        this.weatherWind = document.getElementById('weatherWind');
+        
         // Context inputs
         this.cameraInput = document.getElementById('cameraInput');
         this.eventInput = document.getElementById('eventInput');
@@ -35,6 +43,7 @@ class CaptionGenerator {
         this.moodInput = document.getElementById('moodInput');
         this.subjectInput = document.getElementById('subjectInput');
         this.customInput = document.getElementById('customInput');
+        this.weatherToggle = document.getElementById('weatherToggle');
         this.clearContextBtn = document.getElementById('clearContextBtn');
         this.saveContextBtn = document.getElementById('saveContextBtn');
         
@@ -330,8 +339,8 @@ class CaptionGenerator {
             const base64Image = await this.fileToBase64(this.currentFile);
             const prompt = this.buildPrompt(this.currentStyle);
             
-            const response = await this.callLocalAPI(prompt, base64Image);
-            this.displayResults(response);
+            const responseData = await this.callLocalAPI(prompt, base64Image);
+            this.displayResults(responseData);
             this.showNotification('Caption generated successfully!');
         } catch (error) {
             console.error('Error generating caption:', error);
@@ -427,6 +436,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         this.moodInput.value = '';
         this.subjectInput.value = '';
         this.customInput.value = '';
+        this.weatherToggle.checked = false;
         this.showNotification('Context cleared');
     }
 
@@ -437,7 +447,8 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             location: this.locationInput.value.trim(),
             mood: this.moodInput.value.trim(),
             subject: this.subjectInput.value.trim(),
-            custom: this.customInput.value.trim()
+            custom: this.customInput.value.trim(),
+            includeWeather: this.weatherToggle.checked
         };
 
         const templateName = prompt('Enter a name for this context template:');
@@ -496,6 +507,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             this.moodInput.value = template.mood || '';
             this.subjectInput.value = template.subject || '';
             this.customInput.value = template.custom || '';
+            this.weatherToggle.checked = template.includeWeather || false;
             
             this.showNotification(`Template "${templateName}" loaded!`);
         }
@@ -524,7 +536,9 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             },
             body: JSON.stringify({
                 prompt: prompt,
-                base64Image: base64Image
+                base64Image: base64Image,
+                includeWeather: this.weatherToggle.checked,
+                style: this.currentStyle
             })
         });
 
@@ -534,13 +548,16 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         }
 
         const data = await response.json();
-        return data.content;
+        return data;
     }
 
-    displayResults(response) {
-        const captionMatch = response.match(/CAPTION:\s*(.*?)(?=HASHTAGS:|ALT_TEXT:|$)/s);
-        const hashtagsMatch = response.match(/HASHTAGS:\s*(.*?)(?=ALT_TEXT:|$)/s);
-        const altTextMatch = response.match(/ALT_TEXT:\s*(.*?)$/s);
+    displayResults(data) {
+        // Handle both old string format and new object format
+        const responseText = typeof data === 'string' ? data : data.content;
+        
+        const captionMatch = responseText.match(/CAPTION:\s*(.*?)(?=HASHTAGS:|ALT_TEXT:|$)/s);
+        const hashtagsMatch = responseText.match(/HASHTAGS:\s*(.*?)(?=ALT_TEXT:|$)/s);
+        const altTextMatch = responseText.match(/ALT_TEXT:\s*(.*?)$/s);
 
         const caption = captionMatch ? captionMatch[1].trim() : 'Caption could not be generated';
         const hashtags = hashtagsMatch ? hashtagsMatch[1].trim() : '';
@@ -557,6 +574,9 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         const hashtagArray = hashtags.split(' ').filter(tag => tag.startsWith('#'));
         this.hashtagCount.textContent = `${hashtagArray.length} tags`;
         this.alttextCount.textContent = altText ? `${altText.length} chars` : 'None';
+        
+        // Display weather data if available
+        this.displayWeatherInfo(data);
 
         this.resultsPlaceholder.style.display = 'none';
         this.resultsContent.style.display = 'block';
@@ -566,6 +586,64 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         
         // Auto-update Mastodon preview when caption is generated
         this.updateMastodonPreview();
+    }
+
+    displayWeatherInfo(data) {
+        // Only show weather card if weather data is available
+        if (data && typeof data === 'object' && data.weatherData) {
+            const weatherData = data.weatherData;
+            const photoDateTime = data.photoDateTime;
+            const locationName = data.locationName;
+            
+            // Parse weather data (format: "30°C, scattered clouds, 65% humidity, 8 km/h wind")
+            const weatherParts = weatherData.split(', ');
+            let temperature = '--°C';
+            let description = '--';
+            let humidity = '--%';
+            let windSpeed = '-- km/h';
+            
+            // Extract temperature and description
+            if (weatherParts.length >= 2) {
+                temperature = weatherParts[0];
+                description = weatherParts[1];
+            }
+            
+            // Extract humidity and wind from remaining parts
+            for (let i = 2; i < weatherParts.length; i++) {
+                const part = weatherParts[i];
+                if (part.includes('humidity')) {
+                    humidity = part.replace(' humidity', '');
+                } else if (part.includes('wind')) {
+                    windSpeed = part.replace(' wind', '');
+                }
+            }
+            
+            // Update weather card content
+            this.weatherTemp.textContent = temperature;
+            this.weatherDesc.textContent = description;
+            this.weatherHumidity.textContent = `💧 ${humidity}`;
+            this.weatherWind.textContent = `💨 ${windSpeed}`;
+            
+            // Format photo date/time
+            if (photoDateTime) {
+                const date = new Date(photoDateTime);
+                const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                this.weatherTimestamp.textContent = formattedDate;
+            } else {
+                this.weatherTimestamp.textContent = 'Photo date & time';
+            }
+            
+            // Add location if available
+            if (locationName) {
+                this.weatherTimestamp.textContent += ` • ${locationName}`;
+            }
+            
+            // Show the weather card
+            this.weatherInfoCard.style.display = 'block';
+        } else {
+            // Hide weather card if no weather data
+            this.weatherInfoCard.style.display = 'none';
+        }
     }
 
     hideResults() {
