@@ -12,7 +12,7 @@ AI-powered web application that generates Instagram-ready captions, hashtags, an
 - **Smart Captions**: Generate natural, engaging captions in multiple styles
 - **Relevant Hashtags**: Mix of popular and niche hashtags (10-15 tags)
 - **Accessibility Alt Text**: Descriptive text for screen readers
-- **Multiple Styles**: Creative, Professional, Casual, Trendy, Inspirational
+- **Multiple Styles**: Creative, Professional, Casual, Trendy, Inspirational, Edgy
 
 ### 📸 Automatic Metadata Extraction
 - **GPS Location**: Auto-populates location from image EXIF data

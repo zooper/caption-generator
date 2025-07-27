@@ -50,6 +50,7 @@ Build a personal web application that uses AI to analyze uploaded images and gen
   - 😄 Casual (friendly, conversational)
   - 🔥 Trendy (current slang, viral language)
   - 💭 Inspirational (motivational, uplifting)
+  - 🖤 Edgy (dry, clever, sarcastic, emotionally detached)
 
 ### Results Display
 - **Caption Card**: 
@@ -86,7 +87,7 @@ Analyze this image for Instagram posting. Generate:
    - Include location-based tags if applicable
    - Avoid banned or shadowbanned hashtags
 
-Style: [Creative/Professional/Casual/Trendy/Inspirational]
+Style: [Creative/Professional/Casual/Trendy/Inspirational/Edgy]
 ```
 
 ## Implementation Phases

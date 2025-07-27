@@ -17,17 +17,43 @@
             if (event.target.type === 'file' && event.target.files && event.target.files.length > 0) {
                 const file = event.target.files[0];
                 if (file.type.startsWith('image/')) {
-                    console.log('IG Extension: Intercepted file upload:', file.name, file.type, file.size);
+                    console.log('IG Extension: Intercepted file upload:', file.name, file.type, file.size, 'lastModified:', new Date(file.lastModified));
                     interceptedFile = file;
-                    // Keep the file for 60 seconds
+                    
+                    // Check if this file has EXIF data
+                    checkFileForExif(file);
+                    
+                    // Keep the file for 5 minutes instead of 1 minute
                     setTimeout(() => {
                         if (interceptedFile === file) {
+                            console.log('IG Extension: Intercepted file expired:', file.name);
                             interceptedFile = null;
                         }
-                    }, 60000);
+                    }, 300000); // 5 minutes
                 }
             }
         }, true);
+    }
+    
+    // Check if file has EXIF data (for debugging)
+    async function checkFileForExif(file) {
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const view = new DataView(arrayBuffer);
+            
+            // Check for JPEG EXIF marker (0xFFE1)
+            let hasExif = false;
+            for (let i = 0; i < Math.min(arrayBuffer.byteLength - 1, 1000); i++) {
+                if (view.getUint8(i) === 0xFF && view.getUint8(i + 1) === 0xE1) {
+                    hasExif = true;
+                    break;
+                }
+            }
+            
+            console.log('IG Extension: File EXIF check:', file.name, 'has EXIF marker:', hasExif);
+        } catch (e) {
+            console.log('IG Extension: Could not check EXIF:', e.message);
+        }
     }
 
     // Start watching for caption textarea
@@ -86,7 +112,7 @@
     function findImagePreview() {
         // First check if we have an intercepted file
         if (interceptedFile) {
-            // Only log once when we actually use the file, not during detection
+            console.log('IG Extension: Using intercepted file:', interceptedFile.name, 'age:', Date.now() - interceptedFile.lastModified, 'ms');
             return { type: 'file', element: interceptedFile };
         }
 
@@ -227,8 +253,9 @@
             
             if (imageResult.type === 'file') {
                 // Use File API to preserve EXIF data
-                console.log('IG Extension: Using original file with EXIF preservation:', imageResult.element.name);
+                console.log('IG Extension: Using original file with EXIF preservation:', imageResult.element.name, 'Size:', imageResult.element.size, 'Type:', imageResult.element.type);
                 imageData = await fileToBase64(imageResult.element);
+                console.log('IG Extension: File converted to base64, length:', imageData.length);
             } else if (imageResult.type === 'blob') {
                 // Try to fetch blob and preserve EXIF
                 console.log('IG Extension: Attempting to fetch blob with EXIF preservation');

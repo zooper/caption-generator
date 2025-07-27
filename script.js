@@ -356,7 +356,8 @@ class CaptionGenerator {
             professional: 'business-appropriate and polished tone',
             casual: 'friendly, conversational, and relatable',
             trendy: 'current slang, viral language, and trending expressions',
-            inspirational: 'motivational, uplifting, and encouraging'
+            inspirational: 'motivational, uplifting, and encouraging',
+            edgy: 'short, dry, clever, and a little dark. Keep it deadpan, sarcastic, or emotionally detached—but still tied to the image. No fluff, no emojis, just vibes'
         };
 
         const context = this.getContextInfo();
