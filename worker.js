@@ -392,11 +392,18 @@ D1Database.prototype.deleteTier = async function(tierId) {
 };
 
 D1Database.prototype.setUserTier = async function(userId, tierId) {
-    const stmt = this.db.prepare(`
-        UPDATE users SET tier_id = ? WHERE id = ?
-    `);
-    const result = await stmt.bind(tierId, userId).run();
-    return result.changes > 0;
+    try {
+        console.log('Database setUserTier called:', { userId, tierId });
+        const stmt = this.db.prepare(`
+            UPDATE users SET tier_id = ? WHERE id = ?
+        `);
+        const result = await stmt.bind(tierId, userId).run();
+        console.log('setUserTier result:', result);
+        return result.changes > 0;
+    } catch (error) {
+        console.error('Error in setUserTier:', error);
+        throw error;
+    }
 };
 
 D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt) {
@@ -911,17 +918,32 @@ app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async
         const { userId } = c.req.param();
         const { tierId } = await c.req.json();
         
-        if (!tierId) {
-            return c.json({ error: 'Tier ID is required' }, 400);
-        }
+        console.log('Updating user tier:', { userId, tierId });
         
         const database = new D1Database(c.env.DB);
-        // Verify tier exists
+        
+        // Handle clearing tier (tierId is null/empty)
+        if (!tierId || tierId === '' || tierId === 'null') {
+            console.log('Clearing tier for user:', userId);
+            const success = await database.setUserTier(userId, null);
+            if (success) {
+                return c.json({ 
+                    success: true, 
+                    message: 'User tier cleared (no tier assigned)' 
+                });
+            } else {
+                return c.json({ error: 'User not found' }, 404);
+            }
+        }
+        
+        // Verify tier exists for non-null tierId
         const tier = await database.getTierById(tierId);
         if (!tier) {
+            console.log('Tier not found:', tierId);
             return c.json({ error: 'Invalid tier ID' }, 400);
         }
         
+        console.log('Setting user tier:', { userId, tierId, tierName: tier.name });
         const success = await database.setUserTier(userId, tierId);
         
         if (success) {
@@ -930,10 +952,12 @@ app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async
                 message: `User tier updated to "${tier.name}"` 
             });
         } else {
+            console.log('setUserTier returned false for userId:', userId);
             return c.json({ error: 'User not found' }, 404);
         }
     } catch (error) {
-        return c.json({ error: 'Failed to update user tier' }, 500);
+        console.error('Error updating user tier:', error);
+        return c.json({ error: 'Failed to update user tier: ' + error.message }, 500);
     }
 });
 
