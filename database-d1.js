@@ -385,13 +385,13 @@ class D1Database {
     }
 
     // Invite system methods
-    async createInviteToken(email, invitedBy, token, expiresAt) {
+    async createInviteToken(email, invitedBy, token, expiresAt, tierId = null, personalMessage = null) {
         const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by, token, expires_at) 
-            VALUES (?, ?, ?, ?)
+            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id, personal_message) 
+            VALUES (?, ?, ?, ?, ?, ?)
         `);
-        await stmt.bind(email, invitedBy, token, expiresAt).run();
-        return { email, token, expiresAt };
+        await stmt.bind(email, invitedBy, token, expiresAt, tierId, personalMessage).run();
+        return { email, token, expiresAt, tierId, personalMessage };
     }
 
     async getInviteToken(token) {

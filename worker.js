@@ -842,6 +842,18 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
             console.log('tier_id column already exists or could not be added:', alterError.message);
         }
         
+        // Add personal_message column if it doesn't exist (for existing tables)
+        try {
+            const alterStmt2 = this.db.prepare(`
+                ALTER TABLE invite_tokens ADD COLUMN personal_message TEXT
+            `);
+            await alterStmt2.run();
+            console.log('Added personal_message column to invite_tokens table');
+        } catch (alterError) {
+            // Column likely already exists, which is fine
+            console.log('personal_message column already exists or could not be added:', alterError.message);
+        }
+        
         console.log('invite_tokens table ensured');
     } catch (error) {
         console.log('Could not ensure invite_tokens table exists:', error);
@@ -1204,7 +1216,7 @@ app.post('/api/auth/accept-invite', async (c) => {
         if (invite.tier_id) {
             const tierInfo = await database.getTierById(invite.tier_id);
             if (tierInfo) {
-                await database.updateUserTier(user.id, invite.tier_id);
+                await database.setUserTier(user.id, invite.tier_id);
                 console.log(`Assigned tier ${tierInfo.name} to user ${email}`);
             }
         }
@@ -1507,7 +1519,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
         
         const user = c.get('user');
-        await database.createInviteToken(email, user.id, token, expiresAt, tierId);
+        await database.createInviteToken(email, user.id, token, expiresAt, tierId, personalMessage);
 
         // Create invite link
         const inviteUrl = `${new URL(c.req.url).origin}/auth?invite=${token}&email=${encodeURIComponent(email)}`;

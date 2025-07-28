@@ -74,12 +74,15 @@ CREATE TABLE IF NOT EXISTS invite_tokens (
     token TEXT PRIMARY KEY,
     email TEXT NOT NULL,
     invited_by_user_id INTEGER NOT NULL,
+    tier_id INTEGER,
+    personal_message TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME NOT NULL,
     used_at DATETIME,
     used_by_user_id INTEGER,
     FOREIGN KEY (invited_by_user_id) REFERENCES users (id),
-    FOREIGN KEY (used_by_user_id) REFERENCES users (id)
+    FOREIGN KEY (used_by_user_id) REFERENCES users (id),
+    FOREIGN KEY (tier_id) REFERENCES user_tiers (id)
 );
 
 -- User settings for integrations
