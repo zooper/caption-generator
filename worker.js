@@ -153,6 +153,31 @@ app.get('/api/health', (c) => {
   });
 });
 
+// Debug endpoint to check database schema
+app.get('/api/debug/schema', async (c) => {
+  try {
+    const database = new D1Database(c.env.DB);
+    
+    // Get list of tables
+    const tablesStmt = database.db.prepare(`
+      SELECT name FROM sqlite_master 
+      WHERE type='table' 
+      ORDER BY name
+    `);
+    const tables = await tablesStmt.all();
+    
+    return c.json({
+      tables: tables.results || [],
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    return c.json({
+      error: 'Failed to get schema info',
+      message: error.message
+    }, 500);
+  }
+});
+
 // Authentication endpoints
 app.post('/api/auth/request-login', async (c) => {
     try {
