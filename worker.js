@@ -2973,14 +2973,13 @@ app.get('/', (c) => {
         document.addEventListener('DOMContentLoaded', () => {
             checkAuth();
             loadSavedTheme();
-        });
-
-        // File upload handling
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const previewImage = document.getElementById('previewImage');
-        const uploadPlaceholder = document.getElementById('uploadPlaceholder');
-        const generateBtn = document.getElementById('generateBtn');
+            
+            // File upload handling - moved inside DOMContentLoaded
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+            const previewImage = document.getElementById('previewImage');
+            const uploadPlaceholder = document.getElementById('uploadPlaceholder');
+            const generateBtn = document.getElementById('generateBtn');
 
         uploadArea.addEventListener('click', () => fileInput.click());
         uploadArea.addEventListener('dragover', (e) => {
@@ -3386,6 +3385,8 @@ app.get('/', (c) => {
                 }, 3000);
             }
         }
+            
+        }); // End of DOMContentLoaded callback
     </script>
 </body>
 </html>
