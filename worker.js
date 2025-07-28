@@ -3389,6 +3389,25 @@ app.get('/', (c) => {
             window.requestLogin = requestLogin;
             window.logout = logout;
             
+            // Debug: Check if function is properly assigned
+            console.log('Functions assigned to window:', {
+                requestLogin: typeof window.requestLogin,
+                logout: typeof window.logout
+            });
+            
+            // Debug: Add event listener as alternative to onclick
+            const loginButton = document.querySelector('button[onclick="requestLogin()"]');
+            if (loginButton) {
+                console.log('Found login button, adding event listener');
+                loginButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    console.log('Button clicked via event listener');
+                    requestLogin();
+                });
+            } else {
+                console.log('Login button not found');
+            }
+            
         }); // End of DOMContentLoaded callback
     </script>
 </body>
