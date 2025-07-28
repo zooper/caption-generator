@@ -1380,7 +1380,22 @@ app.post('/api/auth/request-login', async (req, res) => {
 
     } catch (error) {
         console.error('Magic link request error:', error);
-        res.status(500).json({ error: 'Failed to send magic link' });
+        
+        // Provide more specific error messages
+        let errorMessage = 'Failed to send magic link';
+        if (error.code === 'EAUTH') {
+            errorMessage = 'SMTP authentication failed. Please check your email configuration.';
+        } else if (error.code === 'ECONNECTION') {
+            errorMessage = 'Could not connect to email server. Please check your network settings.';
+        } else if (error.code === 'ETIMEDOUT') {
+            errorMessage = 'Email server connection timed out. Please try again.';
+        }
+        
+        res.status(500).json({ 
+            error: errorMessage,
+            code: error.code,
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
