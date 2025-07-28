@@ -775,17 +775,35 @@ D1Database.prototype.setUserTier = async function(userId, tierId) {
 
 D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt, tierId = null, personalMessage = null) {
     try {
+        console.log('createInviteToken called with:', { email, invitedBy, token, expiresAt, tierId, personalMessage });
+        
         // First ensure the invite_tokens table exists with proper schema
         await this.ensureInviteTokensTable();
+        console.log('ensureInviteTokensTable completed successfully');
         
+        // Debug: List all tables to see what exists
+        try {
+            const tablesResult = await this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+            console.log('All tables in database:', tablesResult.results?.map(t => t.name) || 'No results');
+        } catch (listError) {
+            console.log('Could not list tables:', listError.message);
+        }
+        
+        console.log('About to prepare INSERT statement');
         const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id, personal_message) 
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, personal_message) 
+            VALUES (?, ?, ?, ?, ?)
         `);
-        await stmt.bind(email, invitedBy, token, expiresAt, tierId, personalMessage).run();
+        console.log('INSERT statement prepared successfully');
+        
+        console.log('About to bind parameters and execute');
+        const result = await stmt.bind(email, invitedBy, token, expiresAt, personalMessage).run();
+        console.log('INSERT completed successfully:', result);
+        
         return { email, token, expiresAt, tierId, personalMessage };
     } catch (error) {
         console.error('Error creating invite token:', error);
+        console.error('Error stack:', error.stack);
         throw error;
     }
 };
