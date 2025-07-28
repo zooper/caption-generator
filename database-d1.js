@@ -393,12 +393,27 @@ class D1Database {
 
     // Invite system methods
     async createInviteToken(email, invitedBy, token, expiresAt, tierId = null, personalMessage = null) {
-        const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id, personal_message) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        `);
-        await stmt.bind(email, invitedBy, token, expiresAt, tierId, personalMessage).run();
-        return { email, token, expiresAt, tierId, personalMessage };
+        console.log('createInviteToken called with:', { email, invitedBy, token, expiresAt, tierId, personalMessage });
+        
+        try {
+            // Debug: Check if invite_tokens table exists
+            const tablesResult = await this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+            console.log('All tables in database:', tablesResult.results?.map(t => t.name) || 'No results');
+            
+            const stmt = this.db.prepare(`
+                INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id, personal_message) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            `);
+            console.log('Prepared statement created successfully');
+            
+            const result = await stmt.bind(email, invitedBy, token, expiresAt, tierId, personalMessage).run();
+            console.log('Insert completed successfully:', result);
+            
+            return { email, token, expiresAt, tierId, personalMessage };
+        } catch (error) {
+            console.error('Error in createInviteToken:', error);
+            throw error;
+        }
     }
 
     async getInviteToken(token) {
