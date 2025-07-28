@@ -1,6 +1,6 @@
 name = "ai-caption-studio"
 main = "worker.js"
-compatibility_date = "2024-07-28"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 # D1 Database configuration
