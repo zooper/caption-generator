@@ -13,7 +13,7 @@ if ! command -v wrangler &> /dev/null; then
     exit 1
 fi
 
-# Project name
+# Project name (should match your Cloudflare Pages project name)
 PROJECT_NAME="ai-caption-studio"
 
 echo "📝 You'll be prompted to enter each secret value..."
@@ -22,14 +22,14 @@ echo ""
 # Set SMTP_PASSWORD (Resend API key)
 echo "1/3 Setting SMTP_PASSWORD (your Resend API key):"
 echo "   Example: re_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-wrangler pages secret put SMTP_PASSWORD --project-name="$PROJECT_NAME"
+wrangler pages secret put SMTP_PASSWORD
 
 echo ""
 
 # Set OPENAI_API_KEY
 echo "2/3 Setting OPENAI_API_KEY (your OpenAI API key):"
 echo "   Example: sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-wrangler pages secret put OPENAI_API_KEY --project-name="$PROJECT_NAME"
+wrangler pages secret put OPENAI_API_KEY
 
 echo ""
 
@@ -37,7 +37,7 @@ echo ""
 echo "3/3 Setting JWT_SECRET (a random secret string):"
 echo "   You can generate one with: openssl rand -base64 32"
 echo "   Or use any random string (at least 32 characters recommended)"
-wrangler pages secret put JWT_SECRET --project-name="$PROJECT_NAME"
+wrangler pages secret put JWT_SECRET
 
 echo ""
 echo "✅ All secrets have been set!"
@@ -46,5 +46,5 @@ echo "🚀 Your AI Caption Studio should now be fully functional on Cloudflare P
 echo "   Visit your Cloudflare Pages URL to test the application."
 echo ""
 echo "📋 To verify your secrets were set correctly:"
-echo "   wrangler pages secret list --project-name=$PROJECT_NAME"
+echo "   wrangler pages secret list"
 echo ""
