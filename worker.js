@@ -570,13 +570,12 @@ app.get('/', (c) => {
                 const data = await response.json();
                 
                 if (data.success) {
-                    messageDiv.innerHTML = `
-                        <p style="color: green;">✅ Magic link generated!</p>
-                        <p><a href="${data.loginUrl}" target="_blank">Click here to login</a></p>
-                        <p style="font-size: 12px; color: #666;">Link expires in ${data.expiresIn}</p>
-                    `;
+                    messageDiv.innerHTML = 
+                        '<p style="color: green;">✅ Magic link generated!</p>' +
+                        '<p><a href="' + data.loginUrl + '" target="_blank">Click here to login</a></p>' +
+                        '<p style="font-size: 12px; color: #666;">Link expires in ' + data.expiresIn + '</p>';
                 } else {
-                    messageDiv.innerHTML = `<p style="color: red;">❌ ${data.error}</p>`;
+                    messageDiv.innerHTML = '<p style="color: red;">❌ ' + data.error + '</p>';
                 }
             } catch (error) {
                 messageDiv.innerHTML = '<p style="color: red;">❌ Failed to send magic link</p>';
