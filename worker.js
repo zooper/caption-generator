@@ -1234,6 +1234,7 @@ app.post('/api/auth/logout', authenticateToken, async (c) => {
 app.post('/api/auth/accept-invite', async (c) => {
     try {
         const { email, inviteToken } = await c.req.json();
+        console.log('Accept invite called with:', { email, inviteToken });
         
         if (!email || !inviteToken) {
             return c.json({ error: 'Email and invite token are required' }, 400);
@@ -1242,7 +1243,9 @@ app.post('/api/auth/accept-invite', async (c) => {
         const database = new D1Database(c.env.DB);
         
         // Validate the invite token
+        console.log('Getting invite token...');
         const invite = await database.getInviteToken(inviteToken);
+        console.log('Invite token result:', invite);
         if (!invite) {
             return c.json({ error: 'Invalid or expired invite token' }, 400);
         }
@@ -1252,17 +1255,23 @@ app.post('/api/auth/accept-invite', async (c) => {
         }
         
         // Check if user already exists
+        console.log('Checking if user exists...');
         const existingUser = await database.getUserByEmail(email);
+        console.log('Existing user result:', existingUser);
         if (existingUser) {
             return c.json({ error: 'User already exists' }, 400);
         }
         
         // Create the user account
-        const user = await database.createUser(email, false);
+        console.log('Creating user account...');
+        const user = await database.createUser(email, c.env);
+        console.log('User created:', user);
         
         // Assign tier if specified in the invite
         if (invite.tier_id) {
+            console.log('Assigning tier:', invite.tier_id);
             const tierInfo = await database.getTierById(invite.tier_id);
+            console.log('Tier info:', tierInfo);
             if (tierInfo) {
                 await database.setUserTier(user.id, invite.tier_id);
                 console.log(`Assigned tier ${tierInfo.name} to user ${email}`);
@@ -1270,6 +1279,7 @@ app.post('/api/auth/accept-invite', async (c) => {
         }
         
         // Mark the invite token as used
+        console.log('Marking invite as used with user ID:', user.id);
         await database.useInviteToken(inviteToken, user.id);
         
         // Create a login session for the new user
