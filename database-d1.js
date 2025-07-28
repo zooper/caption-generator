@@ -295,11 +295,18 @@ class D1Database {
     }
 
     async getTierById(tierId) {
-        const stmt = this.db.prepare(`
-            SELECT * FROM user_tiers WHERE id = ?
-        `);
-        const result = await stmt.bind(tierId).first();
-        return result || null;
+        console.log('getTierById called with tierId:', tierId);
+        try {
+            const stmt = this.db.prepare(`
+                SELECT * FROM user_tiers WHERE id = ?
+            `);
+            const result = await stmt.bind(tierId).first();
+            console.log('getTierById result:', result);
+            return result || null;
+        } catch (error) {
+            console.error('Error in getTierById:', error);
+            throw error;
+        }
     }
 
     async createTier(name, dailyLimit, description = null) {

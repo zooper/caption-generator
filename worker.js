@@ -1508,6 +1508,14 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
         // Validate tier if provided
         let tierInfo = null;
         if (tierId) {
+            // Debug: List all tables in the database
+            try {
+                const tablesResult = await database.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+                console.log('Available tables in database:', tablesResult.results?.map(t => t.name) || 'No results');
+            } catch (dbError) {
+                console.log('Could not list tables:', dbError.message);
+            }
+            
             tierInfo = await database.getTierById(tierId);
             if (!tierInfo) {
                 return c.json({ error: 'Invalid tier selected' }, 400);
