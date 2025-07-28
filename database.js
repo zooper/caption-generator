@@ -1,9 +1,9 @@
-const { neon } = require('@netlify/neon');
+const { neon } = require('@neondatabase/serverless');
 
 class Database {
     constructor() {
-        // Initialize Neon connection - automatically uses NETLIFY_DATABASE_URL
-        this.sql = neon();
+        // Initialize Neon connection using DATABASE_URL environment variable
+        this.sql = neon(process.env.DATABASE_URL);
         
         // Current schema version
         this.CURRENT_SCHEMA_VERSION = 8;
