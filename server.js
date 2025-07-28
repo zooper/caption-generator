@@ -69,6 +69,24 @@ smtpTransporter.verify((error, success) => {
     }
 });
 
+// SMTP test endpoint for debugging
+app.get('/api/smtp-test', (req, res) => {
+    const config = {
+        host: process.env.SMTP_HOST || 'smtp.resend.com',
+        port: parseInt(process.env.SMTP_PORT) || 587,
+        user: process.env.SMTP_USER || 'resend',
+        hasPassword: !!process.env.SMTP_PASSWORD,
+        fromEmail: process.env.SMTP_FROM_EMAIL,
+        fromName: process.env.SMTP_FROM_NAME
+    };
+    
+    res.json({
+        message: 'SMTP Configuration',
+        config,
+        timestamp: new Date().toISOString()
+    });
+});
+
 // JWT configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-this';
 const JWT_EXPIRES_IN = '7d'; // Sessions last 7 days
