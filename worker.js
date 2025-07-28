@@ -112,14 +112,49 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
   }
 });
 
-// Serve static files
-app.get('/', serveStatic({ path: './index.html' }));
-app.get('/auth', serveStatic({ path: './auth.html' }));
-app.get('/admin', serveStatic({ path: './admin.html' }));
-app.get('/settings', serveStatic({ path: './settings.html' }));
+// Basic HTML response for root path (static files not available in Workers)
+app.get('/', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Caption Studio</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; text-align: center; }
+        .gradient { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); 
+                   -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .status { padding: 20px; margin: 20px 0; border-radius: 8px; background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="gradient">AI Caption Studio</h1>
+        <p>🚀 Cloudflare Workers deployment is running!</p>
+        <div class="status">
+            <h3>API Status</h3>
+            <p>✅ Health endpoint: <a href="/api/health">/api/health</a></p>
+            <p>⚡ Runtime: Cloudflare Workers + Hono</p>
+            <p>🤖 OpenAI API: Configured</p>
+        </div>
+        <h3>Available Endpoints:</h3>
+        <ul style="text-align: left; display: inline-block;">
+            <li><code>GET /api/health</code> - Service health check</li>
+            <li><code>POST /api/generate-caption</code> - Generate captions from images</li>
+        </ul>
+        <p><small>For the full web interface, use the local development server.</small></p>
+    </div>
+</body>
+</html>
+  `);
+});
 
-// Serve other static assets
-app.get('/*', serveStatic({ root: './' }));
+// Simple info endpoints for other routes
+app.get('/auth', (c) => c.html('<h1>Auth page not available in Workers deployment</h1><a href="/">← Back</a>'));
+app.get('/admin', (c) => c.html('<h1>Admin page not available in Workers deployment</h1><a href="/">← Back</a>'));
+app.get('/settings', (c) => c.html('<h1>Settings page not available in Workers deployment</h1><a href="/">← Back</a>'));
 
 export default app;
 
