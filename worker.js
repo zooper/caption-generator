@@ -115,7 +115,9 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
 });
 
 // Static Files (must come last - catch-all route)
-app.get('/*', serveStatic());
+app.get('/*', serveStatic({ 
+  manifest: typeof __STATIC_CONTENT_MANIFEST !== 'undefined' ? __STATIC_CONTENT_MANIFEST : {}
+}));
 
 export default app;
 
