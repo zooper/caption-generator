@@ -3318,11 +3318,8 @@ app.get('/', (c) => {
 
             // Authentication functions need to be inside DOMContentLoaded too
             async function requestLogin() {
-                console.log('requestLogin function called');
                 const email = document.getElementById('emailInput').value;
                 const messageDiv = document.getElementById('loginMessage');
-                
-                console.log('Email value:', email);
                 
                 if (!email) {
                     messageDiv.innerHTML = '<p style="color: red;">Please enter your email address</p>';
@@ -3332,16 +3329,13 @@ app.get('/', (c) => {
                 messageDiv.innerHTML = '<p style="color: blue;">Sending magic link...</p>';
 
                 try {
-                    console.log('Making fetch request to /api/auth/request-login');
                     const response = await fetch('/api/auth/request-login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email })
                     });
 
-                    console.log('Response status:', response.status);
                     const data = await response.json();
-                    console.log('Response data:', data);
                     
                     if (data.success) {
                         messageDiv.innerHTML = '<p style="color: green;">✅ ' + data.message + '</p>' + '<p style="font-size: 12px; color: #666;">Link expires in ' + data.expiresIn + '</p>';
@@ -3352,27 +3346,23 @@ app.get('/', (c) => {
                         messageDiv.innerHTML = '<p style="color: red;">❌ ' + data.error + '</p>';
                     }
                 } catch (error) {
-                    console.error('Fetch error:', error);
+                    console.error('Login request failed:', error);
                     messageDiv.innerHTML = '<p style="color: red;">❌ Failed to send magic link: ' + error.message + '</p>';
                 }
             }
 
             async function logout() {
                 try {
-                    // Call server logout to invalidate session
-                    let headers = {};
                     const token = localStorage.getItem('auth_token');
                     if (token) {
-                        headers['Authorization'] = 'Bearer ' + token;
+                        await fetch('/api/auth/logout', {
+                            method: 'POST',
+                            headers: { 'Authorization': 'Bearer ' + token },
+                            credentials: 'include'
+                        });
                     }
-                    
-                    await fetch('/api/auth/logout', {
-                        method: 'POST',
-                        headers: headers,
-                        credentials: 'include'
-                    });
                 } catch (error) {
-                    console.log('Server logout failed:', error);
+                    // Server logout failed, but continue with local cleanup
                 }
                 
                 // Clear local storage and cookies
@@ -3383,27 +3373,13 @@ app.get('/', (c) => {
                 showLoginForm();
             }
 
-            // Make functions available globally for onclick handlers
-            window.requestLogin = requestLogin;
-            window.logout = logout;
-            
-            // Debug: Check if function is properly assigned
-            console.log('Functions assigned to window:', {
-                requestLogin: typeof window.requestLogin,
-                logout: typeof window.logout
-            });
-            
             // Add event listener to login button
             const loginButton = document.getElementById('loginButton');
             if (loginButton) {
-                console.log('Found login button, adding event listener');
                 loginButton.addEventListener('click', function(e) {
                     e.preventDefault();
-                    console.log('Button clicked via event listener');
                     requestLogin();
                 });
-            } else {
-                console.log('Login button not found');
             }
             
             // Add Enter key listener to email input
@@ -3412,7 +3388,6 @@ app.get('/', (c) => {
                 emailInput.addEventListener('keypress', function(e) {
                     if (e.key === 'Enter') {
                         e.preventDefault();
-                        console.log('Enter key pressed in email input');
                         requestLogin();
                     }
                 });
