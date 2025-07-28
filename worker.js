@@ -1,31 +1,39 @@
 // Cloudflare Worker for AI Caption Studio
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    
-    // Set environment variables
-    Object.assign(process.env, env, { CLOUDFLARE: 'true' });
-    
-    // Handle static files
-    if (url.pathname === '/' || url.pathname === '/index.html') {
-      // Serve the main HTML file
-      return new Response(await getIndexHTML(), {
-        headers: { 'content-type': 'text/html' }
+    try {
+      const url = new URL(request.url);
+      
+      // Handle static files
+      if (url.pathname === '/' || url.pathname === '/index.html') {
+        // Serve the main HTML file
+        return new Response(await getIndexHTML(), {
+          headers: { 'content-type': 'text/html' }
+        });
+      }
+      
+      // Handle API routes
+      if (url.pathname.startsWith('/api/')) {
+        return handleAPIRoute(request, env, ctx);
+      }
+      
+      // Handle other static files (CSS, JS, etc.)
+      if (url.pathname.endsWith('.css') || url.pathname.endsWith('.js') || url.pathname.endsWith('.html')) {
+        return handleStaticFile(request, url.pathname);
+      }
+      
+      // 404 for everything else
+      return new Response('Not Found', { status: 404 });
+    } catch (error) {
+      return new Response(JSON.stringify({
+        error: 'Worker error',
+        message: error.message,
+        stack: error.stack
+      }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' }
       });
     }
-    
-    // Handle API routes
-    if (url.pathname.startsWith('/api/')) {
-      return handleAPIRoute(request, env, ctx);
-    }
-    
-    // Handle other static files (CSS, JS, etc.)
-    if (url.pathname.endsWith('.css') || url.pathname.endsWith('.js') || url.pathname.endsWith('.html')) {
-      return handleStaticFile(request, url.pathname);
-    }
-    
-    // 404 for everything else
-    return new Response('Not Found', { status: 404 });
   }
 };
 
