@@ -661,6 +661,96 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
     return { prompt, extractedData };
 }
 
+// Enhanced prompt building with user context
+async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, style, extractedData, userContext, env) {
+    const context = [];
+    
+    // Add extracted technical data
+    if (extractedData.photoDateTime) {
+        const photoDate = new Date(extractedData.photoDateTime);
+        context.push('Photo taken: ' + photoDate.toLocaleDateString() + ' ' + photoDate.toLocaleTimeString());
+    }
+    
+    if (extractedData.cameraMake || extractedData.cameraModel) {
+        const camera = (extractedData.cameraMake || '') + ' ' + (extractedData.cameraModel || '');
+        if (camera.trim()) {
+            context.push('Camera/Gear: ' + camera.trim());
+        }
+    }
+    
+    if (extractedData.locationName) {
+        context.push('Location: ' + extractedData.locationName);
+    }
+    
+    if (extractedData.weatherData) {
+        context.push('Weather: ' + extractedData.weatherData);
+    }
+    
+    // Add user-provided context
+    context.push(...userContext);
+    
+    const contextString = context.length > 0 ? '\\n\\nAdditional Context:\\n' + context.join('\\n') : '';
+    
+    // Define style-specific caption instructions
+    const styleInstructions = {
+        creative: {
+            tone: 'Uses artistic and expressive language with creative metaphors',
+            description: 'creative and artistic'
+        },
+        professional: {
+            tone: 'Uses clean, professional language suitable for business contexts',
+            description: 'professional and business-friendly'
+        },
+        casual: {
+            tone: 'Uses relaxed, conversational language like talking to a friend',
+            description: 'casual and friendly'
+        },
+        trendy: {
+            tone: 'Uses current trends, viral language, and popular internet expressions',
+            description: 'trendy and viral'
+        },
+        inspirational: {
+            tone: 'Uses motivational, uplifting, and encouraging language',
+            description: 'inspirational and motivational'
+        },
+        edgy: {
+            tone: 'Uses short, dry, clever language that is a little dark. Keep it deadpan, sarcastic, or emotionally detached—but still tied to the image. No fluff, minimal emojis',
+            description: 'edgy and unconventional'
+        }
+    };
+    
+    const selectedStyle = styleInstructions[style] || styleInstructions.creative;
+    
+    const prompt = 'Analyze this image for Instagram posting. Generate:\\n\\n' +
+        '1. A ' + selectedStyle.description + ' caption that:\\n' +
+        '   - Captures the main subject/scene\\n' +
+        '   - ' + selectedStyle.tone + '\\n' +
+        '   - Is 1-3 sentences\\n' +
+        '   - Includes relevant emojis\\n' +
+        '   - Feels authentic and natural (NO forced questions or call-to-actions)\\n' +
+        '   - Sounds like something a real person would write\\n' +
+        (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
+        '\\n2. 10-15 hashtags that:\\n' +
+        '   - Mix popular (#photography, #instagood) and niche tags\\n' +
+        '   - Are relevant to image content\\n' +
+        '   - Include location-based tags if applicable\\n' +
+        '   - Avoid banned or shadowbanned hashtags\\n' +
+        '   - Range from broad to specific\\n' +
+        (context.length > 0 ? '   - Include relevant hashtags based on the context provided\\n' : '') +
+        '\\n3. Alt text for accessibility (1-2 sentences):\\n' +
+        '   - Describe what is actually visible in the image\\n' +
+        '   - Include important visual details for screen readers\\n' +
+        '   - Focus on objective description, not interpretation\\n' +
+        '   - Keep it concise but descriptive\\n' +
+        contextString + '\\n\\n' +
+        'Format your response as:\\n' +
+        'CAPTION: [your caption here]\\n' +
+        'HASHTAGS: [hashtags separated by spaces]\\n' +
+        'ALT_TEXT: [descriptive alt text for accessibility]';
+    
+    return { prompt };
+}
+
 // Convert DMS (degrees, minutes, seconds) to decimal degrees
 function convertDMSToDD(dmsArray, ref) {
     if (Array.isArray(dmsArray) && dmsArray.length === 3) {
@@ -864,7 +954,7 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
 app.post('/api/generate-caption', authenticateToken, async (c) => {
   try {
     const user = c.get('user');
-    const { prompt, base64Image, style = 'creative', includeWeather = false } = await c.req.json();
+    const { prompt, base64Image, style = 'creative', includeWeather = false, context = {} } = await c.req.json();
     
     if (!c.env.OPENAI_API_KEY) {
       return c.json({ error: 'OpenAI API key not configured' }, 500);
@@ -889,10 +979,38 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     let extractedData = null;
     
     try {
-        // Always extract EXIF data and build enhanced prompt with weather enabled
-        const result = await buildPromptFromImageWithExtraction(base64Image, true, style, c.env);
+        // Use weather from context or default to true
+        const shouldIncludeWeather = context.includeWeather !== undefined ? context.includeWeather : true;
+        
+        // Always extract EXIF data and build enhanced prompt
+        const result = await buildPromptFromImageWithExtraction(base64Image, shouldIncludeWeather, style, c.env);
         finalPrompt = result.prompt;
         extractedData = result.extractedData;
+        
+        // Override extracted data with user-provided context where available
+        if (context.camera) extractedData.cameraMake = context.camera.split(' ')[0] || null;
+        if (context.camera) extractedData.cameraModel = context.camera.split(' ').slice(1).join(' ') || null;
+        if (context.location) extractedData.locationName = context.location;
+        
+        // Build additional context from user input
+        const userContext = [];
+        if (context.event) userContext.push('Event/Occasion: ' + context.event);
+        if (context.mood) userContext.push('Mood/Vibe: ' + context.mood);
+        if (context.subject) userContext.push('Subject/Focus: ' + context.subject);
+        if (context.custom) userContext.push('Additional notes: ' + context.custom);
+        
+        // If user provided context, rebuild the prompt to include it
+        if (userContext.length > 0 || context.camera || context.location) {
+            const enhancedResult = await buildEnhancedPromptWithUserContext(
+                base64Image, 
+                shouldIncludeWeather, 
+                style, 
+                extractedData, 
+                userContext, 
+                c.env
+            );
+            finalPrompt = enhancedResult.prompt;
+        }
         
         // If user provided a custom prompt, we could use it instead, but for now always use enhanced
         if (prompt && prompt.trim() !== '') {
@@ -1104,28 +1222,43 @@ app.get('/', (c) => {
                     </div>
                 </div>
 
-                <div class="advanced-options" style="margin-top: 20px;">
-                    <h3>📍 Enhanced Features</h3>
-                    <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Automatically extracts EXIF data, location, and weather information from your photos</p>
+                <div class="context-section" style="margin-top: 20px;">
+                    <h3>Add Context (Optional)</h3>
+                    <p style="font-size: 14px; color: #666; margin-bottom: 20px;">Provide additional context to help AI generate more personalized captions</p>
                     
-                    <div style="margin-bottom: 15px;">
-                        <label for="locationInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📍 Location</label>
-                        <input type="text" id="locationInput" placeholder="Location will be detected from photo GPS data..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" readonly>
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <label for="cameraInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📷 Camera</label>
-                        <input type="text" id="cameraInput" placeholder="Camera info will be detected from photo EXIF data..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" readonly>
-                    </div>
-                    
-                    <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; border: 1px solid #d0d7ff;">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 20px;">🎯</span>
-                            <div>
-                                <strong>Smart Context Detection</strong>
-                                <div style="font-size: 12px; color: #666;">Camera info, GPS location, photo date & weather data</div>
-                            </div>
+                    <div class="context-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                        <div class="context-field">
+                            <label for="cameraInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📷 Camera/Gear</label>
+                            <input type="text" id="cameraInput" placeholder="Auto-detected or add manually..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
+                        <div class="context-field">
+                            <label for="eventInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">🎉 Event/Occasion</label>
+                            <input type="text" id="eventInput" placeholder="e.g., Wedding, Concert, Vacation, Birthday" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        </div>
+                        <div class="context-field">
+                            <label for="locationInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📍 Location</label>
+                            <input type="text" id="locationInput" placeholder="Auto-detected or add manually..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        </div>
+                        <div class="context-field">
+                            <label for="moodInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">💭 Mood/Vibe</label>
+                            <input type="text" id="moodInput" placeholder="e.g., Nostalgic, Energetic, Peaceful, Fun" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        </div>
+                        <div class="context-field">
+                            <label for="subjectInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">👤 Subject/Focus</label>
+                            <input type="text" id="subjectInput" placeholder="e.g., Portrait, Landscape, Food, Pet" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        </div>
+                        <div class="context-field">
+                            <label for="customInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">✏️ Custom Notes</label>
+                            <input type="text" id="customInput" placeholder="Any other details you want to include" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        </div>
+                    </div>
+                    
+                    <div class="weather-section" style="background: #f0f4ff; padding: 15px; border-radius: 8px; border: 1px solid #d0d7ff; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <input type="checkbox" id="weatherToggle" checked style="margin: 0;">
+                            <label for="weatherToggle" style="font-weight: bold; margin: 0;">🌤️ Include Weather Data</label>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin: 0;">Automatically detect weather conditions from photo location & time for enhanced context</p>
                     </div>
                 </div>
 
@@ -1332,9 +1465,15 @@ app.get('/', (c) => {
                 const locationInput = document.getElementById('locationInput');
                 const cameraInput = document.getElementById('cameraInput');
                 
-                // Clear previous values
-                locationInput.value = '';
-                cameraInput.value = '';
+                // Clear previous auto-detected values (but preserve any user-entered values)
+                if (!locationInput.value || locationInput.dataset.autoDetected === 'true') {
+                    locationInput.value = '';
+                    locationInput.dataset.autoDetected = 'false';
+                }
+                if (!cameraInput.value || cameraInput.dataset.autoDetected === 'true') {
+                    cameraInput.value = '';
+                    cameraInput.dataset.autoDetected = 'false';
+                }
                 
                 // Check if exifr is available
                 if (typeof exifr === 'undefined') {
@@ -1367,10 +1506,12 @@ app.get('/', (c) => {
                     
                     if (locationName) {
                         locationInput.value = locationName;
+                        locationInput.dataset.autoDetected = 'true';
                         hasData = true;
                     } else {
                         // Fallback to showing coordinates
                         locationInput.value = gpsData.latitude.toFixed(4) + ', ' + gpsData.longitude.toFixed(4);
+                        locationInput.dataset.autoDetected = 'true';
                         hasData = true;
                     }
                 }
@@ -1394,6 +1535,7 @@ app.get('/', (c) => {
                     const cameraInfo = cameraParts.join(' ').trim();
                     if (cameraInfo) {
                         cameraInput.value = cameraInfo;
+                        cameraInput.dataset.autoDetected = 'true';
                         hasData = true;
                         console.log('Camera info extracted:', cameraInfo);
                     }
@@ -1469,13 +1611,27 @@ app.get('/', (c) => {
                     headers['Authorization'] = 'Bearer ' + token;
                 }
                 
+                // Collect context data from input fields
+                const contextData = {
+                    camera: document.getElementById('cameraInput').value.trim(),
+                    event: document.getElementById('eventInput').value.trim(),
+                    location: document.getElementById('locationInput').value.trim(),
+                    mood: document.getElementById('moodInput').value.trim(),
+                    subject: document.getElementById('subjectInput').value.trim(),
+                    custom: document.getElementById('customInput').value.trim(),
+                    includeWeather: document.getElementById('weatherToggle').checked
+                };
+                
+                console.log('Context data:', contextData);
+                
                 const response = await fetch('/api/generate-caption', {
                     method: 'POST',
                     headers: headers,
                     credentials: 'include',
                     body: JSON.stringify({
                         base64Image: uploadedImage,
-                        style: selectedStyle
+                        style: selectedStyle,
+                        context: contextData
                     })
                 });
 
