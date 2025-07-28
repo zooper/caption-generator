@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { serveStatic } from 'hono/cloudflare-workers';
 import { getCookie, setCookie } from 'hono/cookie';
 import jwt from 'jsonwebtoken';
+import exifr from 'exifr';
 
 // Import D1 Database class
 class D1Database {
@@ -205,6 +206,54 @@ D1Database.prototype.makeUserAdmin = async function(email) {
     await stmt.bind(email).run();
 };
 
+// Send email using Resend API (Cloudflare Workers compatible)
+async function sendMagicLinkEmail(email, loginUrl, env) {
+    if (!env.SMTP_PASSWORD) {
+        throw new Error('SMTP_PASSWORD (Resend API key) not configured');
+    }
+
+    const emailData = {
+        from: env.SMTP_FROM_EMAIL || 'AI Caption Studio <noreply@resend.dev>',
+        to: email,
+        subject: 'Your Login Link - AI Caption Studio',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2>🔐 Login to AI Caption Studio</h2>
+                <p>Click the link below to securely login to your account:</p>
+                <div style="margin: 30px 0;">
+                    <a href="${loginUrl}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                        🚀 Login to AI Caption Studio
+                    </a>
+                </div>
+                <p><strong>This link expires in 15 minutes</strong> for security.</p>
+                <p>If you didn't request this login, you can safely ignore this email.</p>
+                <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                <p style="color: #666; font-size: 12px;">
+                    Time: ${new Date().toLocaleString()}
+                </p>
+            </div>
+        `
+    };
+
+    const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + env.SMTP_PASSWORD,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(emailData)
+    });
+
+    if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error('Resend API error: ' + response.status + ' - ' + errorData);
+    }
+
+    const result = await response.json();
+    console.log('Email sent successfully via Resend:', result.id);
+    return result;
+}
+
 // Authentication endpoints
 app.post('/api/auth/request-login', async (c) => {
     try {
@@ -227,15 +276,29 @@ app.post('/api/auth/request-login', async (c) => {
         // Store token in database
         await database.createLoginToken(email, token, expiresAt, ipAddress, userAgent);
 
-        // TODO: Send email with magic link using SMTP
-        // const loginUrl = `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
-        // await sendMagicLinkEmail(email, loginUrl);
+        // Create magic link
+        const loginUrl = `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
         
-        return c.json({ 
-            success: true, 
-            message: 'Magic link sent to your email address (email sending not yet configured)',
-            expiresIn: '15 minutes'
-        });
+        // Send email using Resend
+        try {
+            await sendMagicLinkEmail(email, loginUrl, c.env);
+            
+            return c.json({ 
+                success: true, 
+                message: 'Magic link sent to your email address',
+                expiresIn: '15 minutes'
+            });
+        } catch (emailError) {
+            console.error('Email sending failed:', emailError);
+            
+            // Fallback: show link for development if email fails
+            return c.json({ 
+                success: true, 
+                message: 'Magic link generated (email sending failed: ' + emailError.message + ')',
+                expiresIn: '15 minutes',
+                loginUrl: loginUrl // Only shown when email fails
+            });
+        }
 
     } catch (error) {
         console.error('Magic link request error:', error);
@@ -370,11 +433,285 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
     }
 });
 
+// Advanced prompt building with EXIF extraction and weather data
+async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative') {
+    console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
+    console.log('Include weather:', includeWeather);
+    console.log('Caption style:', style);
+    
+    if (!base64Image) {
+        console.error('No base64Image provided to buildPromptFromImageWithExtraction');
+        throw new Error('No image data provided');
+    }
+    
+    const context = [];
+    const extractedData = {
+        exifData: null,
+        cameraMake: null,
+        cameraModel: null,
+        gpsLatitude: null,
+        gpsLongitude: null,
+        locationName: null,
+        weatherData: null,
+        photoDateTime: null,
+        dateTimeSource: null
+    };
+    
+    try {
+        // Convert base64 to buffer for EXIF extraction
+        const imageBuffer = Buffer.from(base64Image, 'base64');
+        console.log('Image buffer size:', imageBuffer.length, 'bytes');
+        
+        // Check image format first
+        const imageHeader = imageBuffer.slice(0, 10);
+        console.log('Image header bytes:', Array.from(imageHeader).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+        
+        // Check if this looks like a valid JPEG with EXIF
+        const isJPEG = imageHeader[0] === 0xFF && imageHeader[1] === 0xD8;
+        const hasEXIFMarker = imageBuffer.includes(Buffer.from([0xFF, 0xE1])); // EXIF APP1 marker
+        console.log('Image format check:', { isJPEG, hasEXIFMarker, bufferSize: imageBuffer.length });
+        
+        // Extract EXIF data with more detailed options
+        const exifData = await exifr.parse(imageBuffer, {
+            tiff: true,
+            ifd0: true,
+            exif: true,
+            gps: true,
+            pick: [
+                'Make', 'Model', 
+                'GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef',
+                'DateTimeOriginal', 'DateTime', 'DateTimeDigitized'
+            ]
+        });
+        console.log('Server EXIF extraction:', exifData ? 'Success' : 'No data');
+        
+        if (exifData) {
+            extractedData.exifData = exifData;
+            console.log('EXIF data keys:', Object.keys(exifData));
+            console.log('EXIF Make:', exifData.Make);
+            console.log('EXIF Model:', exifData.Model);
+            console.log('EXIF GPS:', exifData.GPSLatitude, exifData.GPSLongitude);
+            
+            // Extract photo date/time
+            const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
+            for (const field of dateFields) {
+                if (exifData[field]) {
+                    try {
+                        let dateStr = exifData[field];
+                        let parsedDate;
+                        
+                        if (typeof dateStr === 'string') {
+                            // Standard EXIF format: "2024:01:15 14:30:25"
+                            dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T') + 'Z';
+                            parsedDate = new Date(dateStr);
+                        } else if (dateStr instanceof Date) {
+                            parsedDate = dateStr;
+                        }
+                        
+                        if (parsedDate && !isNaN(parsedDate.getTime())) {
+                            extractedData.photoDateTime = parsedDate.toISOString();
+                            extractedData.dateTimeSource = field;
+                            context.push('Photo taken: ' + parsedDate.toLocaleDateString() + ' ' + parsedDate.toLocaleTimeString());
+                            console.log('Photo date extracted from ' + field + ':', parsedDate);
+                            break;
+                        }
+                    } catch (error) {
+                        console.log('Failed to parse ' + field + ':', error.message);
+                    }
+                }
+            }
+            
+            // Camera/gear context
+            if (exifData.Make || exifData.Model) {
+                const camera = (exifData.Make || '') + ' ' + (exifData.Model || '');
+                if (camera.trim()) {
+                    context.push('Camera/Gear: ' + camera.trim());
+                    extractedData.cameraMake = exifData.Make;
+                    extractedData.cameraModel = exifData.Model;
+                    console.log('Camera detected:', camera);
+                }
+            }
+            
+            // GPS location context
+            if (exifData.GPSLatitude && exifData.GPSLongitude) {
+                console.log('GPS coordinates found:', exifData.GPSLatitude, exifData.GPSLongitude);
+                try {
+                    // Convert DMS (degrees, minutes, seconds) to decimal degrees
+                    const lat = convertDMSToDD(exifData.GPSLatitude, exifData.GPSLatitudeRef);
+                    const lon = convertDMSToDD(exifData.GPSLongitude, exifData.GPSLongitudeRef);
+                    console.log('Converted to decimal degrees:', lat, lon);
+                    
+                    extractedData.gpsLatitude = lat;
+                    extractedData.gpsLongitude = lon;
+                    
+                    if (lat && lon && !isNaN(lat) && !isNaN(lon)) {
+                        console.log('Attempting reverse geocoding...');
+                        const location = await reverseGeocode(lat, lon);
+                        if (location) {
+                            context.push('Location: ' + location);
+                            extractedData.locationName = location;
+                            console.log('Location detected:', location);
+                        }
+                        
+                        // Fetch weather data if requested and we have GPS coordinates
+                        if (includeWeather) {
+                            console.log('Fetching weather data for coordinates:', lat, lon);
+                            const weatherData = await getHistoricalWeather(lat, lon, exifData);
+                            if (weatherData) {
+                                context.push('Weather: ' + weatherData);
+                                extractedData.weatherData = weatherData;
+                                console.log('Weather data added:', weatherData);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log('GPS processing error:', e.message);
+                }
+            }
+        }
+    } catch (error) {
+        console.log('EXIF extraction failed:', error.message);
+    }
+    
+    const contextString = context.length > 0 ? '\n\nAdditional Context:\n' + context.join('\n') : '';
+    
+    // Define style-specific caption instructions
+    const styleInstructions = {
+        creative: {
+            tone: 'Uses artistic and expressive language with creative metaphors',
+            description: 'creative and artistic'
+        },
+        professional: {
+            tone: 'Uses clean, professional language suitable for business contexts',
+            description: 'professional and business-friendly'
+        },
+        casual: {
+            tone: 'Uses relaxed, conversational language like talking to a friend',
+            description: 'casual and friendly'
+        },
+        trendy: {
+            tone: 'Uses current trends, viral language, and popular internet expressions',
+            description: 'trendy and viral'
+        },
+        inspirational: {
+            tone: 'Uses motivational, uplifting, and encouraging language',
+            description: 'inspirational and motivational'
+        },
+        edgy: {
+            tone: 'Uses short, dry, clever language that is a little dark. Keep it deadpan, sarcastic, or emotionally detached—but still tied to the image. No fluff, minimal emojis',
+            description: 'edgy and unconventional'
+        }
+    };
+    
+    const selectedStyle = styleInstructions[style] || styleInstructions.creative;
+    
+    const prompt = 'Analyze this image for Instagram posting. Generate:\n\n' +
+        '1. A ' + selectedStyle.description + ' caption that:\n' +
+        '   - Captures the main subject/scene\n' +
+        '   - ' + selectedStyle.tone + '\n' +
+        '   - Is 1-3 sentences\n' +
+        '   - Includes relevant emojis\n' +
+        '   - Feels authentic and natural (NO forced questions or call-to-actions)\n' +
+        '   - Sounds like something a real person would write\n' +
+        (context.length > 0 ? '   - Incorporates the provided context naturally\n' : '') +
+        '\n2. 10-15 hashtags that:\n' +
+        '   - Mix popular (#photography, #instagood) and niche tags\n' +
+        '   - Are relevant to image content\n' +
+        '   - Include location-based tags if applicable\n' +
+        '   - Avoid banned or shadowbanned hashtags\n' +
+        '   - Range from broad to specific\n' +
+        (context.length > 0 ? '   - Include relevant hashtags based on the context provided\n' : '') +
+        '\n3. Alt text for accessibility (1-2 sentences):\n' +
+        '   - Describe what\'s actually visible in the image\n' +
+        '   - Include important visual details for screen readers\n' +
+        '   - Focus on objective description, not interpretation\n' +
+        '   - Keep it concise but descriptive\n' +
+        contextString + '\n\n' +
+        'Format your response as:\n' +
+        'CAPTION: [your caption here]\n' +
+        'HASHTAGS: [hashtags separated by spaces]\n' +
+        'ALT_TEXT: [descriptive alt text for accessibility]';
+    
+    return { prompt, extractedData };
+}
+
+// Convert DMS (degrees, minutes, seconds) to decimal degrees
+function convertDMSToDD(dmsArray, ref) {
+    if (Array.isArray(dmsArray) && dmsArray.length === 3) {
+        let dd = dmsArray[0] + dmsArray[1]/60 + dmsArray[2]/3600;
+        if (ref === 'S' || ref === 'W') {
+            dd = dd * -1;
+        }
+        return dd;
+    }
+    // If already decimal degrees, return as is
+    return dmsArray;
+}
+
+// Reverse geocoding function
+async function reverseGeocode(latitude, longitude) {
+    try {
+        const response = await fetch(
+            'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=10&addressdetails=1',
+            {
+                headers: {
+                    'User-Agent': 'AI Caption Studio'
+                }
+            }
+        );
+        
+        if (response.ok) {
+            const data = await response.json();
+            
+            if (data && data.address) {
+                const parts = [];
+                if (data.address.city) parts.push(data.address.city);
+                else if (data.address.town) parts.push(data.address.town);
+                else if (data.address.village) parts.push(data.address.village);
+                
+                if (data.address.state) parts.push(data.address.state);
+                if (data.address.country) parts.push(data.address.country);
+                
+                return parts.join(', ') || data.display_name;
+            }
+        }
+    } catch (error) {
+        console.log('Reverse geocoding failed:', error.message);
+    }
+    
+    return null;
+}
+
+// Fetch historical weather data using OpenWeatherMap API
+async function getHistoricalWeather(latitude, longitude, exifData) {
+    try {
+        // Check if OpenWeatherMap API key is configured in environment variables
+        // Note: In Cloudflare Workers, environment variables are accessed via c.env
+        // This function would need the env context passed to it, or we check for it elsewhere
+        console.log('Attempting to fetch weather data for coordinates:', latitude, longitude);
+        
+        // For now, return a placeholder since we don't have OpenWeatherMap API key configured
+        // TODO: Add OPENWEATHER_API_KEY to environment variables and implement weather fetching
+        // When implemented, this should:
+        // 1. Extract photo date from EXIF data
+        // 2. Use historical weather API for past dates
+        // 3. Use current weather API for recent/current dates
+        // 4. Format weather info as human-readable string
+        
+        console.log('Weather API not configured, skipping weather data');
+        return null;
+    } catch (error) {
+        console.log('Weather API request failed:', error.message);
+    }
+    
+    return null;
+}
+
 // Caption generation endpoint - now requires authentication
 app.post('/api/generate-caption', authenticateToken, async (c) => {
   try {
     const user = c.get('user');
-    const { prompt, base64Image, style = 'creative' } = await c.req.json();
+    const { prompt, base64Image, style = 'creative', includeWeather = false } = await c.req.json();
     
     if (!c.env.OPENAI_API_KEY) {
       return c.json({ error: 'OpenAI API key not configured' }, 500);
@@ -394,46 +731,45 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         }, 429);
     }
     
-    // Build prompt based on style
-    const styleInstructions = {
-      creative: 'creative and artistic',
-      professional: 'professional and business-friendly',
-      casual: 'casual and friendly',
-      trendy: 'trendy and viral',
-      inspirational: 'inspirational and motivational',
-      edgy: 'edgy and unconventional'
-    };
+    // Build advanced prompt with EXIF extraction and context
+    let finalPrompt;
+    let extractedData = null;
     
-    const selectedStyle = styleInstructions[style] || styleInstructions.creative;
-    
-    const fullPrompt = prompt || `Analyze this image for Instagram posting. Generate:
-
-1. A ${selectedStyle} caption that:
-   - Captures the main subject/scene
-   - Is 1-3 sentences
-   - Includes relevant emojis
-   - Feels authentic and natural
-
-2. 10-15 hashtags that:
-   - Mix popular and niche tags
-   - Are relevant to image content
-   - Range from broad to specific
-
-3. Alt text for accessibility (1-2 sentences):
-   - Describe what's actually visible in the image
-   - Include important visual details for screen readers
-
-Format your response as:
-CAPTION: [your caption here]
-HASHTAGS: [hashtags separated by spaces]
-ALT_TEXT: [descriptive alt text for accessibility]`;
+    try {
+        if (!prompt || includeWeather) {
+            // Use advanced prompt building with EXIF extraction
+            const result = await buildPromptFromImageWithExtraction(base64Image, includeWeather, style);
+            finalPrompt = result.prompt;
+            extractedData = result.extractedData;
+        } else {
+            // Still extract data for logging, but use provided prompt
+            const result = await buildPromptFromImageWithExtraction(base64Image, false, style);
+            finalPrompt = prompt;
+            extractedData = result.extractedData;
+        }
+    } catch (extractionError) {
+        console.log('EXIF extraction failed, using basic prompt:', extractionError.message);
+        // Fallback to basic prompt if extraction fails
+        const styleInstructions = {
+          creative: 'creative and artistic',
+          professional: 'professional and business-friendly',
+          casual: 'casual and friendly',
+          trendy: 'trendy and viral',
+          inspirational: 'inspirational and motivational',
+          edgy: 'edgy and unconventional'
+        };
+        
+        const selectedStyle = styleInstructions[style] || styleInstructions.creative;
+        
+        finalPrompt = prompt || 'Analyze this image for Instagram posting. Generate:\n\n1. A ' + selectedStyle + ' caption that:\n   - Captures the main subject/scene\n   - Is 1-3 sentences\n   - Includes relevant emojis\n   - Feels authentic and natural\n\n2. 10-15 hashtags that:\n   - Mix popular and niche tags\n   - Are relevant to image content\n   - Range from broad to specific\n\n3. Alt text for accessibility (1-2 sentences):\n   - Describe what\'s actually visible in the image\n   - Include important visual details for screen readers\n\nFormat your response as:\nCAPTION: [your caption here]\nHASHTAGS: [hashtags separated by spaces]\nALT_TEXT: [descriptive alt text for accessibility]';
+    }
 
     // Call OpenAI API
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${c.env.OPENAI_API_KEY}`
+        'Authorization': 'Bearer ' + c.env.OPENAI_API_KEY
       },
       body: JSON.stringify({
         model: 'gpt-4o',
@@ -443,12 +779,12 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             content: [
               {
                 type: 'text',
-                text: fullPrompt
+                text: finalPrompt
               },
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:image/jpeg;base64,${base64Image}`
+                  url: 'data:image/jpeg;base64,' + base64Image
                 }
               }
             ]
@@ -461,7 +797,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
     if (!response.ok) {
       const errorData = await response.text();
       console.error('OpenAI API Error:', response.status, errorData);
-      return c.json({ error: `OpenAI API request failed: ${response.status}` }, response.status);
+      return c.json({ error: 'OpenAI API request failed: ' + response.status }, response.status);
     }
 
     const data = await response.json();
@@ -479,7 +815,21 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
     
     await database.incrementDailyUsage(user.id);
     
-    return c.json({ content: responseContent });
+    // Include extracted data in response if available
+    const responseData = { content: responseContent };
+    if (extractedData) {
+        if (extractedData.weatherData) responseData.weatherData = extractedData.weatherData;
+        if (extractedData.locationName) responseData.locationName = extractedData.locationName;
+        if (extractedData.photoDateTime) responseData.photoDateTime = extractedData.photoDateTime;
+        if (extractedData.cameraMake || extractedData.cameraModel) {
+            responseData.cameraInfo = {
+                make: extractedData.cameraMake,
+                model: extractedData.cameraModel
+            };
+        }
+    }
+    
+    return c.json(responseData);
     
   } catch (error) {
     console.error('Caption generation error:', error);
@@ -769,9 +1119,9 @@ app.get('/', (c) => {
 
                 // Parse the response content
                 const content = data.content;
-                const captionMatch = content.match(/CAPTION:\\s*(.+?)(?=\\n|HASHTAGS:|ALT_TEXT:|$)/s);
-                const hashtagsMatch = content.match(/HASHTAGS:\\s*(.+?)(?=\\n|ALT_TEXT:|$)/s);
-                const altTextMatch = content.match(/ALT_TEXT:\\s*(.+?)$/s);
+                const captionMatch = content.match(/CAPTION:\s*(.+?)(?=\n|HASHTAGS:|ALT_TEXT:|$)/s);
+                const hashtagsMatch = content.match(/HASHTAGS:\s*(.+?)(?=\n|ALT_TEXT:|$)/s);
+                const altTextMatch = content.match(/ALT_TEXT:\s*(.+?)$/s);
 
                 document.getElementById('captionText').textContent = captionMatch ? captionMatch[1].trim() : 'No caption generated';
                 document.getElementById('hashtagsText').textContent = hashtagsMatch ? hashtagsMatch[1].trim() : 'No hashtags generated';
