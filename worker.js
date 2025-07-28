@@ -1,7 +1,7 @@
 // Cloudflare Worker for AI Caption Studio using Hono
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { serveStatic } from 'hono/cloudflare-workers';
+// Remove serveStatic import as we're not using static files
 
 const app = new Hono();
 
