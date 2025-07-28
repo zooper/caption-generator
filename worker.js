@@ -1790,9 +1790,6 @@ app.delete('/api/user/settings/linkedin', authenticateToken, async (c) => {
 
 // Advanced prompt building with EXIF extraction and weather data
 async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null) {
-    console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
-    console.log('Include weather:', includeWeather);
-    console.log('Caption style:', style);
     
     if (!base64Image) {
         console.error('No base64Image provided to buildPromptFromImageWithExtraction');
@@ -1815,16 +1812,13 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
     try {
         // Convert base64 to buffer for EXIF extraction
         const imageBuffer = Buffer.from(base64Image, 'base64');
-        console.log('Image buffer size:', imageBuffer.length, 'bytes');
         
         // Check image format first
         const imageHeader = imageBuffer.slice(0, 10);
-        console.log('Image header bytes:', Array.from(imageHeader).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
         
         // Check if this looks like a valid JPEG with EXIF
         const isJPEG = imageHeader[0] === 0xFF && imageHeader[1] === 0xD8;
         const hasEXIFMarker = imageBuffer.includes(Buffer.from([0xFF, 0xE1])); // EXIF APP1 marker
-        console.log('Image format check:', { isJPEG, hasEXIFMarker, bufferSize: imageBuffer.length });
         
         // Try to extract specific EXIF fields first
         let exifData = await exifr.parse(imageBuffer, {
@@ -1841,29 +1835,20 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         
         // If no date fields found, try extracting all EXIF data to see what's available
         if (exifData && !exifData.DateTimeOriginal && !exifData.DateTime && !exifData.DateTimeDigitized) {
-            console.log('No date fields in targeted extraction, trying full EXIF extraction...');
             const fullExifData = await exifr.parse(imageBuffer, true);
             if (fullExifData) {
-                console.log('Full EXIF keys:', Object.keys(fullExifData));
                 // Look for any date-related fields
                 const dateKeys = Object.keys(fullExifData).filter(key => 
                     key.toLowerCase().includes('date') || key.toLowerCase().includes('time')
                 );
-                console.log('Date-related EXIF keys found:', dateKeys);
                 
                 // Merge the full EXIF data with our targeted data
                 exifData = { ...exifData, ...fullExifData };
             }
         }
-        console.log('Server EXIF extraction:', exifData ? 'Success' : 'No data');
         
         if (exifData) {
             extractedData.exifData = exifData;
-            console.log('EXIF data keys:', Object.keys(exifData));
-            console.log('EXIF Make:', exifData.Make);
-            console.log('EXIF Model:', exifData.Model);
-            console.log('EXIF GPS:', exifData.GPSLatitude, exifData.GPSLongitude);
-            console.log('EXIF Date fields:', {
                 DateTimeOriginal: exifData.DateTimeOriginal,
                 DateTime: exifData.DateTime,
                 DateTimeDigitized: exifData.DateTimeDigitized
