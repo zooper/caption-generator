@@ -386,6 +386,32 @@ app.get('/api/auth/me', authenticateToken, async (c) => {
     });
 });
 
+// Logout endpoint - invalidate session
+app.post('/api/auth/logout', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Delete the session from database
+        const stmt = database.db.prepare('DELETE FROM user_sessions WHERE session_id = ?');
+        await stmt.bind(user.sessionId).run();
+        
+        // Clear the cookie
+        setCookie(c, 'auth_token', '', {
+            httpOnly: false,
+            secure: false,
+            maxAge: 0,
+            expires: new Date(0),
+            sameSite: 'Lax'
+        });
+        
+        return c.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        console.error('Logout error:', error);
+        return c.json({ error: 'Logout failed' }, 500);
+    }
+});
+
 // Admin endpoints
 app.get('/api/admin/users', authenticateToken, requireAdmin, async (c) => {
     try {
@@ -1212,9 +1238,31 @@ app.get('/', (c) => {
             }
         }
 
-        function logout() {
+        async function logout() {
+            try {
+                // Call server logout to invalidate session
+                let headers = {};
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    headers['Authorization'] = 'Bearer ' + token;
+                }
+                
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: headers,
+                    credentials: 'include'
+                });
+            } catch (error) {
+                console.log('Server logout failed:', error);
+            }
+            
+            // Clear local storage regardless of server response
             localStorage.removeItem('auth_token');
             localStorage.removeItem('user_email');
+            
+            // Clear any cookies by setting them to expire
+            document.cookie = 'auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            
             showLoginForm();
         }
 
@@ -1299,6 +1347,7 @@ app.get('/', (c) => {
                 });
 
                 const data = await response.json();
+                console.log('Server response data:', data);
                 
                 if (data.error) {
                     alert('Error: ' + data.error);
@@ -1320,6 +1369,13 @@ app.get('/', (c) => {
                 const metadataContent = document.getElementById('metadataContent');
                 let metadataHtml = '';
                 
+                console.log('Checking metadata:', {
+                    cameraInfo: data.cameraInfo,
+                    locationName: data.locationName,
+                    weatherData: data.weatherData,
+                    photoDateTime: data.photoDateTime
+                });
+                
                 if (data.cameraInfo && (data.cameraInfo.make || data.cameraInfo.model)) {
                     metadataHtml += '<div><strong>📷 Camera:</strong> ' + (data.cameraInfo.make || '') + ' ' + (data.cameraInfo.model || '') + '</div>';
                 }
@@ -1337,11 +1393,15 @@ app.get('/', (c) => {
                     metadataHtml += '<div><strong>📅 Photo Date:</strong> ' + photoDate.toLocaleDateString() + ' ' + photoDate.toLocaleTimeString() + '</div>';
                 }
                 
+                console.log('Generated metadata HTML:', metadataHtml);
+                
                 if (metadataHtml) {
                     metadataContent.innerHTML = metadataHtml;
                     metadataCard.style.display = 'block';
+                    console.log('Metadata card shown');
                 } else {
                     metadataCard.style.display = 'none';
+                    console.log('No metadata to display');
                 }
 
                 document.getElementById('results').classList.remove('hidden');
