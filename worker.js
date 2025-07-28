@@ -400,12 +400,43 @@ D1Database.prototype.setUserTier = async function(userId, tierId) {
 };
 
 D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt) {
-    const stmt = this.db.prepare(`
-        INSERT INTO invite_tokens (email, invited_by, token, expires_at) 
-        VALUES (?, ?, ?, ?)
-    `);
-    await stmt.bind(email, invitedBy, token, expiresAt).run();
-    return { email, token, expiresAt };
+    try {
+        // First ensure the invite_tokens table exists with proper schema
+        await this.ensureInviteTokensTable();
+        
+        const stmt = this.db.prepare(`
+            INSERT INTO invite_tokens (email, invited_by, token, expires_at) 
+            VALUES (?, ?, ?, ?)
+        `);
+        await stmt.bind(email, invitedBy, token, expiresAt).run();
+        return { email, token, expiresAt };
+    } catch (error) {
+        console.error('Error creating invite token:', error);
+        throw error;
+    }
+};
+
+D1Database.prototype.ensureInviteTokensTable = async function() {
+    try {
+        const stmt = this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS invite_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                invited_by INTEGER,
+                token TEXT UNIQUE NOT NULL,
+                expires_at DATETIME NOT NULL,
+                used_at DATETIME,
+                used_by INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (invited_by) REFERENCES users(id),
+                FOREIGN KEY (used_by) REFERENCES users(id)
+            )
+        `);
+        await stmt.run();
+        console.log('invite_tokens table ensured');
+    } catch (error) {
+        console.log('Could not ensure invite_tokens table exists:', error);
+    }
 };
 
 D1Database.prototype.useInviteToken = async function(token, userId) {
@@ -431,14 +462,36 @@ D1Database.prototype.getPendingInvites = async function() {
             return [];
         }
         
-        const stmt = this.db.prepare(`
-            SELECT i.*, COALESCE(u.email, 'Unknown') as invited_by_email 
-            FROM invite_tokens i
-            LEFT JOIN users u ON i.invited_by = u.id
-            WHERE i.used_at IS NULL 
-            AND i.expires_at > datetime('now')
-            ORDER BY i.created_at DESC
+        // Check what columns exist in the table
+        const columnsCheck = this.db.prepare(`
+            PRAGMA table_info(invite_tokens)
         `);
+        const columns = await columnsCheck.all();
+        const columnNames = (columns.results || []).map(col => col.name);
+        console.log('invite_tokens table columns:', columnNames);
+        
+        // Use different query based on available columns
+        let stmt;
+        if (columnNames.includes('invited_by')) {
+            stmt = this.db.prepare(`
+                SELECT i.*, COALESCE(u.email, 'System') as invited_by_email 
+                FROM invite_tokens i
+                LEFT JOIN users u ON i.invited_by = u.id
+                WHERE i.used_at IS NULL 
+                AND i.expires_at > datetime('now')
+                ORDER BY i.created_at DESC
+            `);
+        } else {
+            // Fallback for tables without invited_by column
+            stmt = this.db.prepare(`
+                SELECT *, 'System' as invited_by_email
+                FROM invite_tokens
+                WHERE used_at IS NULL 
+                AND expires_at > datetime('now')
+                ORDER BY created_at DESC
+            `);
+        }
+        
         const result = await stmt.all();
         return result.results || [];
     } catch (error) {
