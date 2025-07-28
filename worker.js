@@ -284,6 +284,126 @@ D1Database.prototype.makeUserAdmin = async function(email) {
     await stmt.bind(email).run();
 };
 
+D1Database.prototype.toggleUserStatus = async function(userId) {
+    const stmt = this.db.prepare(`
+        UPDATE users SET is_active = NOT is_active WHERE id = ?
+    `);
+    const result = await stmt.bind(userId).run();
+    return result.changes > 0;
+};
+
+D1Database.prototype.getAllTiers = async function() {
+    const stmt = this.db.prepare(`
+        SELECT *, 
+        (SELECT COUNT(*) FROM users WHERE tier_id = user_tiers.id) as user_count
+        FROM user_tiers ORDER BY daily_limit ASC
+    `);
+    const result = await stmt.all();
+    return result.results || [];
+};
+
+D1Database.prototype.getTierById = async function(tierId) {
+    const stmt = this.db.prepare(`
+        SELECT * FROM user_tiers WHERE id = ?
+    `);
+    const result = await stmt.bind(tierId).first();
+    return result || null;
+};
+
+D1Database.prototype.createTier = async function(name, dailyLimit, description = null) {
+    const stmt = this.db.prepare(`
+        INSERT INTO user_tiers (name, daily_limit, description) 
+        VALUES (?, ?, ?)
+        RETURNING id
+    `);
+    const result = await stmt.bind(name, dailyLimit, description).first();
+    return result.id;
+};
+
+D1Database.prototype.updateTier = async function(tierId, name, dailyLimit, description = null) {
+    const stmt = this.db.prepare(`
+        UPDATE user_tiers 
+        SET name = ?, daily_limit = ?, description = ?, updated_at = datetime('now')
+        WHERE id = ?
+    `);
+    const result = await stmt.bind(name, dailyLimit, description, tierId).run();
+    return result.changes > 0;
+};
+
+D1Database.prototype.deleteTier = async function(tierId) {
+    // Check if any users are assigned to this tier
+    const usersStmt = this.db.prepare(`
+        SELECT COUNT(*) as count FROM users WHERE tier_id = ?
+    `);
+    const usersResult = await usersStmt.bind(tierId).first();
+    
+    if (usersResult.count > 0) {
+        throw new Error('Cannot delete tier with assigned users');
+    }
+
+    const stmt = this.db.prepare(`
+        DELETE FROM user_tiers WHERE id = ?
+    `);
+    const result = await stmt.bind(tierId).run();
+    return result.changes > 0;
+};
+
+D1Database.prototype.setUserTier = async function(userId, tierId) {
+    const stmt = this.db.prepare(`
+        UPDATE users SET tier_id = ? WHERE id = ?
+    `);
+    const result = await stmt.bind(tierId, userId).run();
+    return result.changes > 0;
+};
+
+D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt) {
+    const stmt = this.db.prepare(`
+        INSERT INTO invite_tokens (email, invited_by, token, expires_at) 
+        VALUES (?, ?, ?, ?)
+    `);
+    await stmt.bind(email, invitedBy, token, expiresAt).run();
+    return { email, token, expiresAt };
+};
+
+D1Database.prototype.useInviteToken = async function(token, userId) {
+    const stmt = this.db.prepare(`
+        UPDATE invite_tokens 
+        SET used_at = datetime('now'), used_by = ? 
+        WHERE token = ?
+    `);
+    const result = await stmt.bind(userId, token).run();
+    return result.changes > 0;
+};
+
+D1Database.prototype.getPendingInvites = async function() {
+    const stmt = this.db.prepare(`
+        SELECT i.*, u.email as invited_by_email 
+        FROM invite_tokens i
+        JOIN users u ON i.invited_by = u.id
+        WHERE i.used_at IS NULL 
+        AND i.expires_at > datetime('now')
+        ORDER BY i.created_at DESC
+    `);
+    const result = await stmt.all();
+    return result.results || [];
+};
+
+D1Database.prototype.getUsersUsageStats = async function() {
+    const stmt = this.db.prepare(`
+        SELECT 
+            u.id, u.email, u.created_at, u.last_login, u.is_active,
+            t.name as tier_name, t.daily_limit,
+            COALESCE(du.usage_count, 0) as usage_today
+        FROM users u
+        LEFT JOIN user_tiers t ON u.tier_id = t.id
+        LEFT JOIN daily_usage du ON u.id = du.user_id AND du.date = date('now')
+        WHERE u.is_active = 1
+        ORDER BY u.created_at DESC
+    `);
+    const result = await stmt.all();
+    return result.results || [];
+};
+
 // Send email using Resend API (Cloudflare Workers compatible)
 async function sendMagicLinkEmail(email, loginUrl, env) {
     if (!env.SMTP_PASSWORD) {
@@ -532,6 +652,21 @@ app.post('/api/admin/users/:userId/make-admin', authenticateToken, requireAdmin,
     }
 });
 
+app.post('/api/admin/users/:userId/toggle', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { userId } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        
+        const success = await database.toggleUserStatus(userId);
+        if (success) {
+            return c.json({ success: true, message: 'User status updated successfully' });
+        } else {
+            return c.json({ error: 'User not found' }, 404);
+        }
+    } catch (error) {
+        return c.json({ error: 'Failed to toggle user status' }, 500);
+    }
+});
 
 app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
     try {
@@ -3580,6 +3715,7 @@ app.get('/admin/users', (c) => {
                         '<td>' +
                         '<div class="flex gap-2">' +
                         (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
+                        '<button class="btn btn-secondary" onclick="changeTier(' + user.id + ')">🏆 Change Tier</button>' +
                         '<button class="btn ' + (user.is_active ? 'btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate' : 'btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate') + '</button>' +
                         '</div>' +
                         '</td>' +
@@ -3661,6 +3797,64 @@ app.get('/admin/users', (c) => {
                 }
             } catch (error) {
                 alert('❌ Failed to send invitation: ' + error.message);
+            }
+        }
+
+        async function changeTier(userId) {
+            try {
+                // First load available tiers
+                const tiersResponse = await fetch('/api/admin/tiers', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (!tiersResponse.ok) {
+                    alert('❌ Failed to load tiers');
+                    return;
+                }
+                
+                const tiers = await tiersResponse.json();
+                if (tiers.length === 0) {
+                    alert('❌ No tiers available. Please create tiers first.');
+                    return;
+                }
+                
+                // Create tier selection prompt
+                let tierOptions = 'Available tiers:\\n';
+                tiers.forEach((tier, index) => {
+                    tierOptions += (index + 1) + '. ' + tier.name + ' (' + (tier.daily_limit === -1 ? 'Unlimited' : tier.daily_limit + ' per day') + ')\\n';
+                });
+                tierOptions += '\\nEnter the number of the tier to assign:';
+                
+                const selection = prompt(tierOptions);
+                if (!selection) return;
+                
+                const tierIndex = parseInt(selection) - 1;
+                if (tierIndex < 0 || tierIndex >= tiers.length) {
+                    alert('❌ Invalid selection');
+                    return;
+                }
+                
+                const selectedTier = tiers[tierIndex];
+                
+                // Update user tier
+                const response = await fetch('/api/admin/users/' + userId + '/tier', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ tierId: selectedTier.id })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ User tier updated successfully!');
+                    loadUsers(); // Refresh the user list
+                } else {
+                    alert('❌ Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to change tier: ' + error.message);
             }
         }
 
