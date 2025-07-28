@@ -183,8 +183,20 @@ const initializeDatabase = async () => {
         console.log('✅ Database initialized successfully');
     } catch (error) {
         console.error('❌ Database initialization failed:', error);
-        process.exit(1);
+        if (require.main === module) {
+            process.exit(1);
+        } else {
+            throw error; // In serverless, throw the error instead of exiting
+        }
     }
+};
+
+// Ensure database is initialized before use
+const ensureDatabase = async () => {
+    if (!database) {
+        await initializeDatabase();
+    }
+    return database;
 };
 
 app.use(cors());
@@ -1310,8 +1322,11 @@ app.post('/api/auth/request-login', async (req, res) => {
             return res.status(400).json({ error: 'Valid email address required' });
         }
 
+        // Ensure database is initialized
+        const db = await ensureDatabase();
+        
         // Check if user exists
-        const existingUser = await database.getUserByEmail(email);
+        const existingUser = await db.getUserByEmail(email);
         
         // If user doesn't exist, check registration rules
         if (!existingUser) {
@@ -1342,7 +1357,7 @@ app.post('/api/auth/request-login', async (req, res) => {
         const userAgent = req.get('User-Agent') || '';
 
         // Store token in database
-        await database.createLoginToken(email, token, expiresAt.toISOString(), ipAddress, userAgent);
+        await db.createLoginToken(email, token, expiresAt.toISOString(), ipAddress, userAgent);
 
         // Create magic link (include invite token if present)
         let loginUrl = `${req.protocol}://${req.get('host')}/auth/verify?token=${token}`;
