@@ -1020,6 +1020,7 @@ app.get('/', (c) => {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Caption Studio</title>
+    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
@@ -1106,6 +1107,17 @@ app.get('/', (c) => {
                 <div class="advanced-options" style="margin-top: 20px;">
                     <h3>📍 Enhanced Features</h3>
                     <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Automatically extracts EXIF data, location, and weather information from your photos</p>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label for="locationInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📍 Location</label>
+                        <input type="text" id="locationInput" placeholder="Location will be detected from photo GPS data..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" readonly>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label for="cameraInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📷 Camera</label>
+                        <input type="text" id="cameraInput" placeholder="Camera info will be detected from photo EXIF data..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;" readonly>
+                    </div>
+                    
                     <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; border: 1px solid #d0d7ff;">
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 20px;">🎯</span>
@@ -1308,8 +1320,129 @@ app.get('/', (c) => {
                 uploadPlaceholder.classList.add('hidden');
                 uploadedImage = e.target.result.split(',')[1]; // Remove data:image/jpeg;base64,
                 generateBtn.disabled = false;
+                
+                // Extract EXIF metadata immediately when image is loaded
+                extractMetadataFromEXIF(file);
             };
             reader.readAsDataURL(file);
+        }
+
+        async function extractMetadataFromEXIF(file) {
+            try {
+                const locationInput = document.getElementById('locationInput');
+                const cameraInput = document.getElementById('cameraInput');
+                
+                // Clear previous values
+                locationInput.value = '';
+                cameraInput.value = '';
+                
+                // Check if exifr is available
+                if (typeof exifr === 'undefined') {
+                    console.log('EXIFR library not loaded');
+                    return;
+                }
+
+                console.log('Attempting to parse file:', file.name, file.type);
+                
+                // Extract both GPS and camera data
+                const [gpsData, allExifData] = await Promise.all([
+                    exifr.gps(file).catch(() => null),
+                    exifr.parse(file).catch(err => {
+                        console.error('EXIF parse error:', err);
+                        return null;
+                    })
+                ]);
+                
+                console.log('GPS data:', gpsData);
+                console.log('All EXIF data:', allExifData);
+                
+                let hasData = false;
+                
+                // Handle GPS/Location data
+                if (gpsData && gpsData.latitude && gpsData.longitude) {
+                    console.log('GPS coordinates found:', gpsData.latitude, gpsData.longitude);
+                    
+                    // Get location name from coordinates
+                    const locationName = await reverseGeocode(gpsData.latitude, gpsData.longitude);
+                    
+                    if (locationName) {
+                        locationInput.value = locationName;
+                        hasData = true;
+                    } else {
+                        // Fallback to showing coordinates
+                        locationInput.value = gpsData.latitude.toFixed(4) + ', ' + gpsData.longitude.toFixed(4);
+                        hasData = true;
+                    }
+                }
+                
+                // Handle Camera data
+                if (allExifData && (allExifData.Make || allExifData.Model)) {
+                    const cameraParts = [];
+                    
+                    if (allExifData.Make) {
+                        cameraParts.push(allExifData.Make);
+                    }
+                    
+                    if (allExifData.Model && (!allExifData.Make || !allExifData.Model.includes(allExifData.Make))) {
+                        cameraParts.push(allExifData.Model);
+                    }
+                    
+                    if (allExifData.LensModel) {
+                        cameraParts.push('(' + allExifData.LensModel + ')');
+                    }
+                    
+                    const cameraInfo = cameraParts.join(' ').trim();
+                    if (cameraInfo) {
+                        cameraInput.value = cameraInfo;
+                        hasData = true;
+                        console.log('Camera info extracted:', cameraInfo);
+                    }
+                } else {
+                    console.log('No camera data found in EXIF');
+                }
+                
+                if (hasData) {
+                    console.log('EXIF metadata extracted successfully');
+                } else {
+                    console.log('No EXIF metadata found in this image');
+                }
+                
+            } catch (error) {
+                console.error('EXIF extraction error:', error);
+            }
+        }
+
+        async function reverseGeocode(latitude, longitude) {
+            try {
+                const response = await fetch(
+                    'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=10&addressdetails=1',
+                    {
+                        headers: {
+                            'User-Agent': 'AI Caption Studio'
+                        }
+                    }
+                );
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data && data.address) {
+                        const parts = [];
+                        if (data.address.city) parts.push(data.address.city);
+                        else if (data.address.town) parts.push(data.address.town);
+                        else if (data.address.village) parts.push(data.address.village);
+                        
+                        if (data.address.state) parts.push(data.address.state);
+                        if (data.address.country) parts.push(data.address.country);
+                        
+                        return parts.join(', ') || data.display_name;
+                    }
+                }
+            } catch (error) {
+                console.log('Reverse geocoding failed:', error.message);
+            }
+            
+            return null;
         }
 
         // Style selection
