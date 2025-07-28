@@ -1,0 +1,12 @@
+name = "ai-caption-studio"
+compatibility_date = "2024-07-28"
+pages_build_output_dir = "."
+
+[env.production]
+compatibility_date = "2024-07-28"
+
+# Environment variables (you'll set these in Cloudflare dashboard)
+[vars]
+NODE_ENV = "production"
+
+# Database and SMTP will be set as secrets in Cloudflare
