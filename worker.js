@@ -629,7 +629,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
             const emailData = {
                 from: c.env.SMTP_FROM_EMAIL || 'AI Caption Studio <noreply@resend.dev>',
                 to: email,
-                subject: 'You\\'re invited to AI Caption Studio',
+                subject: 'You are invited to AI Caption Studio',
                 html: `
                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                         <h2>🎉 You're Invited!</h2>
