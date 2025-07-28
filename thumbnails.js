@@ -5,15 +5,37 @@ const fs = require('fs');
 class ThumbnailGenerator {
     constructor() {
         // Use environment variable for thumbnails path (for Kubernetes persistent volume)
-        this.thumbnailsDir = path.join(process.env.DATA_PATH || './data', 'thumbnails');
+        // Use /tmp directory for serverless environments (Netlify, Vercel, etc.)
+        if (process.env.NETLIFY || process.env.VERCEL) {
+            this.thumbnailsDir = '/tmp/thumbnails';
+        } else {
+            this.thumbnailsDir = path.join(process.env.DATA_PATH || './data', 'thumbnails');
+        }
         
         // Ensure thumbnails directory exists
         if (!fs.existsSync(this.thumbnailsDir)) {
-            fs.mkdirSync(this.thumbnailsDir, { recursive: true });
+            try {
+                fs.mkdirSync(this.thumbnailsDir, { recursive: true });
+            } catch (error) {
+                console.warn('Could not create thumbnails directory:', error.message);
+                // Fallback to /tmp if available
+                if (fs.existsSync('/tmp')) {
+                    this.thumbnailsDir = '/tmp';
+                }
+            }
         }
     }
 
     async generateThumbnail(base64Image, queryId) {
+        // Skip thumbnail generation in serverless environments to avoid file system issues
+        if (process.env.NETLIFY || process.env.VERCEL) {
+            console.log('Skipping thumbnail generation in serverless environment');
+            return {
+                thumbnailPath: null,
+                previewPath: null
+            };
+        }
+        
         try {
             // Remove data URL prefix if present
             const base64Data = base64Image.includes(',') 
