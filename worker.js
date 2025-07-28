@@ -41,7 +41,7 @@ async function handleAPIRoute(request, env, ctx) {
         port: parseInt(env.SMTP_PORT) || 587,
         user: env.SMTP_USER || 'resend',
         hasPassword: !!env.SMTP_PASSWORD,
-        fromEmail: env.SMTP_FROM_EMAIL,
+        fromEmail: env.SMTP_FROM_EMAIL || 'no-reply@jonsson.io',
         fromName: env.SMTP_FROM_NAME
       },
       timestamp: new Date().toISOString()
