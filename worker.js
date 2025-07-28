@@ -3420,5 +3420,570 @@ app.get('/settings', (c) => {
   `);
 });
 
+// Admin Users Page
+app.get('/admin/users', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Users - AI Caption Studio</title>
+    <style>
+        /* Theme System */
+        :root {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e2e8f0;
+        }
+        
+        [data-theme="dark"] {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            --card-background: #2a2a3e;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --border-color: #404040;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--background-gradient); min-height: 100vh; color: var(--text-primary); padding: 20px; transition: all 0.3s ease; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .admin-header { background: var(--card-background); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
+        .admin-header h1 { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 2rem; font-weight: 700; }
+        .nav-links { display: flex; gap: 15px; }
+        .nav-link { padding: 10px 20px; background: var(--primary-gradient); color: white; text-decoration: none; border-radius: 8px; font-weight: 500; transition: transform 0.2s; }
+        .nav-link:hover { transform: translateY(-2px); }
+        .admin-section { background: var(--card-background); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+        .section-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 20px; color: var(--text-primary); }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: var(--primary-gradient); color: white; }
+        .btn-secondary { background: #f1f5f9; color: #475569; }
+        .btn-danger { background: #ef4444; color: white; }
+        .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        .table th { background: #f8fafc; font-weight: 600; color: var(--text-primary); }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+        .badge-admin { background: #8B5CF6; color: white; }
+        .badge-user { background: #e2e8f0; color: #475569; }
+        .badge-active { background: #10b981; color: white; }
+        .badge-inactive { background: #ef4444; color: white; }
+        .hidden { display: none; }
+        .flex { display: flex; }
+        .gap-2 { gap: 8px; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="admin-header">
+            <h1>👥 Manage Users</h1>
+            <div class="nav-links">
+                <a href="/admin" class="nav-link">🏠 Dashboard</a>
+                <a href="/admin/tiers" class="nav-link">🏆 Tiers</a>
+                <a href="/" class="nav-link">🏠 Main App</a>
+                <button class="nav-link" onclick="logout()" style="border: none; cursor: pointer;">🚪 Logout</button>
+            </div>
+        </div>
+
+        <div id="loginRequired" class="admin-section">
+            <h2>🔐 Admin Login Required</h2>
+            <p>Please login with an admin account to access user management.</p>
+        </div>
+
+        <div id="adminContent" class="hidden">
+            <!-- User Management -->
+            <div class="admin-section">
+                <div class="flex justify-between items-center">
+                    <div class="section-title">All Users</div>
+                    <div class="flex gap-2">
+                        <button class="btn btn-primary" onclick="refreshUsers()">🔄 Refresh</button>
+                        <button class="btn btn-secondary" onclick="showInviteModal()">📧 Send Invite</button>
+                    </div>
+                </div>
+                
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Type</th>
+                            <th>Tier</th>
+                            <th>Usage Today</th>
+                            <th>Status</th>
+                            <th>Joined</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTable">
+                        <tr><td colspan="7">Loading users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function checkAdminAuth() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    if (user.isAdmin) {
+                        document.getElementById('loginRequired').classList.add('hidden');
+                        document.getElementById('adminContent').classList.remove('hidden');
+                        loadUsers();
+                    }
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+            }
+        }
+
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const users = await response.json();
+                    const tbody = document.getElementById('usersTable');
+                    tbody.innerHTML = users.map(user => 
+                        '<tr>' +
+                        '<td>' + user.email + '</td>' +
+                        '<td><span class="badge ' + (user.is_admin ? 'badge-admin">🛠️ Admin' : 'badge-user">👤 User') + '</span></td>' +
+                        '<td>' + (user.tier_name || 'No tier') + '</td>' +
+                        '<td>' + (user.usage_today || 0) + '/' + (user.daily_limit === -1 ? '∞' : user.daily_limit || 0) + '</td>' +
+                        '<td><span class="badge ' + (user.is_active ? 'badge-active">✅ Active' : 'badge-inactive">❌ Inactive') + '</span></td>' +
+                        '<td>' + new Date(user.created_at).toLocaleDateString() + '</td>' +
+                        '<td>' +
+                        '<div class="flex gap-2">' +
+                        (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
+                        '<button class="btn ' + (user.is_active ? 'btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate' : 'btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate') + '</button>' +
+                        '</div>' +
+                        '</td>' +
+                        '</tr>'
+                    ).join('');
+                }
+            } catch (error) {
+                document.getElementById('usersTable').innerHTML = '<tr><td colspan="7">Failed to load users</td></tr>';
+            }
+        }
+
+        async function makeAdmin(userId) {
+            if (!confirm('Are you sure you want to make this user an admin?')) return;
+            
+            try {
+                const response = await fetch('/api/admin/users/' + userId + '/make-admin', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ User promoted to admin successfully!');
+                    loadUsers();
+                } else {
+                    alert('❌ Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to promote user: ' + error.message);
+            }
+        }
+
+        async function toggleUser(userId) {
+            try {
+                const response = await fetch('/api/admin/users/' + userId + '/toggle', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ User status updated successfully!');
+                    loadUsers();
+                } else {
+                    alert('❌ Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to update user: ' + error.message);
+            }
+        }
+
+        function refreshUsers() {
+            loadUsers();
+        }
+
+        function showInviteModal() {
+            const email = prompt('Enter email address to invite:');
+            if (email) {
+                sendInvite(email);
+            }
+        }
+
+        async function sendInvite(email) {
+            try {
+                const response = await fetch('/api/admin/invite', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ email })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ Invitation sent successfully!');
+                } else {
+                    alert('❌ Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to send invitation: ' + error.message);
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+            } catch (error) {
+                console.log('Server logout failed:', error);
+            }
+            
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_email');
+            document.cookie = 'auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            window.location.href = '/';
+        }
+
+        document.addEventListener('DOMContentLoaded', checkAdminAuth);
+    </script>
+</body>
+</html>
+  `);
+});
+
+// Admin Tiers Page
+app.get('/admin/tiers', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Tiers - AI Caption Studio</title>
+    <style>
+        /* Theme System */
+        :root {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e2e8f0;
+        }
+        
+        [data-theme="dark"] {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            --card-background: #2a2a3e;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --border-color: #404040;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--background-gradient); min-height: 100vh; color: var(--text-primary); padding: 20px; transition: all 0.3s ease; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .admin-header { background: var(--card-background); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
+        .admin-header h1 { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 2rem; font-weight: 700; }
+        .nav-links { display: flex; gap: 15px; }
+        .nav-link { padding: 10px 20px; background: var(--primary-gradient); color: white; text-decoration: none; border-radius: 8px; font-weight: 500; transition: transform 0.2s; }
+        .nav-link:hover { transform: translateY(-2px); }
+        .admin-section { background: var(--card-background); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+        .section-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 20px; color: var(--text-primary); }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: var(--primary-gradient); color: white; }
+        .btn-secondary { background: #f1f5f9; color: #475569; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-success { background: #10b981; color: white; }
+        .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        .table th { background: #f8fafc; font-weight: 600; color: var(--text-primary); }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; margin-bottom: 5px; font-weight: 500; color: var(--text-primary); }
+        .form-input { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--card-background); color: var(--text-primary); }
+        .form-input:focus { outline: none; border-color: #8B5CF6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); }
+        .modal-content { background-color: var(--card-background); margin: 10% auto; padding: 30px; border-radius: 15px; width: 90%; max-width: 500px; }
+        .hidden { display: none; }
+        .flex { display: flex; }
+        .gap-2 { gap: 8px; }
+        .items-center { align-items: center; }
+        .justify-between { justify-content: space-between; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="admin-header">
+            <h1>🏆 Manage Tiers</h1>
+            <div class="nav-links">
+                <a href="/admin" class="nav-link">🏠 Dashboard</a>
+                <a href="/admin/users" class="nav-link">👥 Users</a>
+                <a href="/" class="nav-link">🏠 Main App</a>
+                <button class="nav-link" onclick="logout()" style="border: none; cursor: pointer;">🚪 Logout</button>
+            </div>
+        </div>
+
+        <div id="loginRequired" class="admin-section">
+            <h2>🔐 Admin Login Required</h2>
+            <p>Please login with an admin account to access tier management.</p>
+        </div>
+
+        <div id="adminContent" class="hidden">
+            <!-- Tier Management -->
+            <div class="admin-section">
+                <div class="flex justify-between items-center">
+                    <div class="section-title">User Tiers</div>
+                    <div class="flex gap-2">
+                        <button class="btn btn-primary" onclick="showCreateTierModal()">➕ Create Tier</button>
+                        <button class="btn btn-secondary" onclick="refreshTiers()">🔄 Refresh</button>
+                    </div>
+                </div>
+                
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Daily Limit</th>
+                            <th>Description</th>
+                            <th>Users</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tiersTable">
+                        <tr><td colspan="6">Loading tiers...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit Tier Modal -->
+    <div id="tierModal" class="modal">
+        <div class="modal-content">
+            <h2 id="modalTitle">Create New Tier</h2>
+            <div class="form-group">
+                <label class="form-label">Tier Name</label>
+                <input type="text" id="tierName" class="form-input" placeholder="e.g., Premium, Enterprise">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Daily Limit</label>
+                <input type="number" id="tierLimit" class="form-input" placeholder="Enter -1 for unlimited">
+                <small style="color: var(--text-secondary);">Enter -1 for unlimited usage</small>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description (Optional)</label>
+                <input type="text" id="tierDescription" class="form-input" placeholder="Brief description of this tier">
+            </div>
+            <div class="flex justify-between gap-2">
+                <button class="btn btn-secondary" onclick="closeTierModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveTier()" id="saveBtn">Create Tier</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let editingTierId = null;
+
+        async function checkAdminAuth() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    if (user.isAdmin) {
+                        document.getElementById('loginRequired').classList.add('hidden');
+                        document.getElementById('adminContent').classList.remove('hidden');
+                        loadTiers();
+                    }
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+            }
+        }
+
+        async function loadTiers() {
+            try {
+                const response = await fetch('/api/admin/tiers', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const tiers = await response.json();
+                    const tbody = document.getElementById('tiersTable');
+                    tbody.innerHTML = tiers.map(tier => 
+                        '<tr>' +
+                        '<td><strong>' + tier.name + '</strong></td>' +
+                        '<td>' + (tier.daily_limit === -1 ? '∞ Unlimited' : tier.daily_limit + ' queries') + '</td>' +
+                        '<td>' + (tier.description || 'No description') + '</td>' +
+                        '<td>' + (tier.user_count || 0) + ' users</td>' +
+                        '<td>' + new Date(tier.created_at).toLocaleDateString() + '</td>' +
+                        '<td>' +
+                        '<div class="flex gap-2">' +
+                        '<button class="btn btn-secondary" onclick="editTier(' + tier.id + ')">✏️ Edit</button>' +
+                        '<button class="btn btn-danger" onclick="deleteTier(' + tier.id + ')">🗑️ Delete</button>' +
+                        '</div>' +
+                        '</td>' +
+                        '</tr>'
+                    ).join('');
+                }
+            } catch (error) {
+                document.getElementById('tiersTable').innerHTML = '<tr><td colspan="6">Failed to load tiers</td></tr>';
+            }
+        }
+
+        function showCreateTierModal() {
+            editingTierId = null;
+            document.getElementById('modalTitle').textContent = 'Create New Tier';
+            document.getElementById('saveBtn').textContent = 'Create Tier';
+            document.getElementById('tierName').value = '';
+            document.getElementById('tierLimit').value = '';
+            document.getElementById('tierDescription').value = '';
+            document.getElementById('tierModal').style.display = 'block';
+        }
+
+        async function editTier(tierId) {
+            try {
+                const response = await fetch('/api/admin/tiers/' + tierId, {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const tier = await response.json();
+                    editingTierId = tierId;
+                    document.getElementById('modalTitle').textContent = 'Edit Tier';
+                    document.getElementById('saveBtn').textContent = 'Update Tier';
+                    document.getElementById('tierName').value = tier.name;
+                    document.getElementById('tierLimit').value = tier.daily_limit;
+                    document.getElementById('tierDescription').value = tier.description || '';
+                    document.getElementById('tierModal').style.display = 'block';
+                }
+            } catch (error) {
+                alert('Failed to load tier details: ' + error.message);
+            }
+        }
+
+        async function saveTier() {
+            const name = document.getElementById('tierName').value;
+            const dailyLimit = parseInt(document.getElementById('tierLimit').value);
+            const description = document.getElementById('tierDescription').value;
+
+            if (!name || isNaN(dailyLimit)) {
+                alert('Please fill in name and daily limit');
+                return;
+            }
+
+            try {
+                const url = editingTierId ? '/api/admin/tiers/' + editingTierId : '/api/admin/tiers';
+                const method = editingTierId ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ name, dailyLimit, description })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ Tier saved successfully!');
+                    closeTierModal();
+                    loadTiers();
+                } else {
+                    alert('❌ Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to save tier: ' + error.message);
+            }
+        }
+
+        async function deleteTier(tierId) {
+            if (!confirm('Are you sure you want to delete this tier? Users assigned to this tier will lose their tier assignment.')) return;
+            
+            try {
+                const response = await fetch('/api/admin/tiers/' + tierId, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ Tier deleted successfully!');
+                    loadTiers();
+                } else {
+                    alert('❌ Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to delete tier: ' + error.message);
+            }
+        }
+
+        function closeTierModal() {
+            document.getElementById('tierModal').style.display = 'none';
+        }
+
+        function refreshTiers() {
+            loadTiers();
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+            } catch (error) {
+                console.log('Server logout failed:', error);
+            }
+            
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_email');
+            document.cookie = 'auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            window.location.href = '/';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('tierModal');
+            if (event.target === modal) {
+                closeTierModal();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', checkAdminAuth);
+    </script>
+</body>
+</html>
+  `);
+});
+
 export default app;
 
