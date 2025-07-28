@@ -1984,7 +1984,13 @@ const startServer = async () => {
     });
 };
 
-startServer().catch(error => {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
-});
+// Export the app for serverless use
+module.exports = app;
+
+// Only start the server if this file is run directly (not imported)
+if (require.main === module) {
+    startServer().catch(error => {
+        console.error('❌ Failed to start server:', error);
+        process.exit(1);
+    });
+}
