@@ -51,12 +51,13 @@ function getCacheKey(imageHash, style) {
 
 // SMTP configuration for magic links
 const smtpTransporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || '10.63.21.25',
-    port: parseInt(process.env.SMTP_PORT) || 25,
-    secure: false, // No SSL/TLS
-    requireTLS: false, // Don't require TLS
-    ignoreTLS: true, // Ignore TLS entirely
-    auth: false // No authentication for internal SMTP server
+    host: process.env.SMTP_HOST || 'smtp.resend.com',
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: false, // true for 465, false for other ports
+    auth: {
+        user: process.env.SMTP_USER || 'resend',
+        pass: process.env.SMTP_PASSWORD // Resend API key
+    }
 });
 
 // Verify SMTP connection on startup
@@ -1332,7 +1333,7 @@ app.post('/api/auth/request-login', async (req, res) => {
 
         // Send email
         const mailOptions = {
-            from: `"${process.env.SMTP_FROM_NAME || 'Caption Generator'}" <${process.env.SMTP_FROM_EMAIL || 'noreply@yourdomain.com'}>`,
+            from: `"${process.env.SMTP_FROM_NAME || 'AI Caption Studio'}" <${process.env.SMTP_FROM_EMAIL || 'noreply@yourdomain.com'}>`,
             to: email,
             subject: 'Your Login Link - Caption Generator',
             html: `
@@ -1575,7 +1576,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (req, res) 
 
         // Send email
         const mailOptions = {
-            from: `"${process.env.SMTP_FROM_NAME || 'Caption Generator'}" <${process.env.SMTP_FROM_EMAIL || 'noreply@jonsson.io'}>`,
+            from: `"${process.env.SMTP_FROM_NAME || 'AI Caption Studio'}" <${process.env.SMTP_FROM_EMAIL || 'noreply@yourdomain.com'}>`,
             to: email,
             subject: 'You\'re invited to Caption Generator',
             html: `
