@@ -776,7 +776,7 @@ D1Database.prototype.createInviteToken = async function(email, invitedBy, token,
         await this.ensureInviteTokensTable();
         
         const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by, token, expires_at, tier_id) 
+            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id) 
             VALUES (?, ?, ?, ?, ?)
         `);
         await stmt.bind(email, invitedBy, token, expiresAt, tierId).run();
@@ -844,7 +844,7 @@ D1Database.prototype.getInviteToken = async function(token) {
 D1Database.prototype.useInviteToken = async function(token, userId) {
     const stmt = this.db.prepare(`
         UPDATE invite_tokens 
-        SET used_at = datetime('now'), used_by = ? 
+        SET used_at = datetime('now'), used_by_user_id = ? 
         WHERE token = ?
     `);
     const result = await stmt.bind(userId, token).run();
@@ -875,7 +875,16 @@ D1Database.prototype.getPendingInvites = async function() {
         
         // Use different query based on available columns
         let stmt;
-        if (columnNames.includes('invited_by')) {
+        if (columnNames.includes('invited_by_user_id')) {
+            stmt = this.db.prepare(`
+                SELECT i.*, COALESCE(u.email, 'System') as invited_by_email 
+                FROM invite_tokens i
+                LEFT JOIN users u ON i.invited_by_user_id = u.id
+                WHERE i.used_at IS NULL 
+                AND i.expires_at > datetime('now')
+                ORDER BY i.created_at DESC
+            `);
+        } else if (columnNames.includes('invited_by')) {
             stmt = this.db.prepare(`
                 SELECT i.*, COALESCE(u.email, 'System') as invited_by_email 
                 FROM invite_tokens i
@@ -3519,7 +3528,7 @@ app.get('/auth', async (c) => {
             }
             
             // Get tier info if assigned in invite
-            const invitedBy = await database.getUserById(invite.invited_by);
+            const invitedBy = await database.getUserById(invite.invited_by_user_id || invite.invited_by);
             const tierName = invite.assigned_tier_id ? 
                 (await database.getTierById(invite.assigned_tier_id))?.name || 'Default' : 'Default';
                 
