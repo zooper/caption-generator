@@ -88,6 +88,30 @@ app.get('/api/smtp-test', (req, res) => {
     });
 });
 
+// Database setup endpoint for initial deployment
+app.get('/api/setup-database', async (req, res) => {
+    try {
+        console.log('Setting up database...');
+        const db = await ensureDatabase();
+        
+        // Get schema info to verify setup
+        const schemaInfo = await db.getSchemaInfo();
+        
+        res.json({
+            message: 'Database setup completed',
+            schemaInfo,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Database setup failed:', error);
+        res.status(500).json({
+            error: 'Database setup failed',
+            message: error.message,
+            details: error.stack?.split('\n')[0]
+        });
+    }
+});
+
 // JWT configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-this';
 const JWT_EXPIRES_IN = '7d'; // Sessions last 7 days
