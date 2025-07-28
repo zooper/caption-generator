@@ -1356,13 +1356,27 @@ app.post('/api/auth/request-login', async (req, res) => {
             `
         };
 
-        await smtpTransporter.sendMail(mailOptions);
+        try {
+            console.log('Attempting to send email to:', email);
+            console.log('SMTP config:', {
+                host: process.env.SMTP_HOST || 'smtp.resend.com',
+                port: parseInt(process.env.SMTP_PORT) || 587,
+                user: process.env.SMTP_USER || 'resend',
+                hasPassword: !!process.env.SMTP_PASSWORD
+            });
+            
+            const emailResult = await smtpTransporter.sendMail(mailOptions);
+            console.log('Email sent successfully:', emailResult.messageId);
 
-        res.json({ 
-            success: true, 
-            message: 'Magic link sent to your email address',
-            expiresIn: '15 minutes'
-        });
+            res.json({ 
+                success: true, 
+                message: 'Magic link sent to your email address',
+                expiresIn: '15 minutes'
+            });
+        } catch (emailError) {
+            console.error('SMTP send error:', emailError);
+            throw emailError; // Re-throw to be caught by outer catch
+        }
 
     } catch (error) {
         console.error('Magic link request error:', error);
@@ -1600,13 +1614,20 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (req, res) 
             `
         };
 
-        await smtpTransporter.sendMail(mailOptions);
+        try {
+            console.log('Attempting to send invite email to:', email);
+            const emailResult = await smtpTransporter.sendMail(mailOptions);
+            console.log('Invite email sent successfully:', emailResult.messageId);
 
-        res.json({ 
-            success: true, 
-            message: `Invitation sent to ${email}`,
-            expiresIn: '7 days'
-        });
+            res.json({ 
+                success: true, 
+                message: `Invitation sent to ${email}`,
+                expiresIn: '7 days'
+            });
+        } catch (emailError) {
+            console.error('SMTP invite send error:', emailError);
+            throw emailError;
+        }
 
     } catch (error) {
         console.error('Invite error:', error);
