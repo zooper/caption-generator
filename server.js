@@ -1,8 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const cookieParser = require('cookie-parser');
 const exifr = require('exifr');
 const { v4: uuidv4 } = require('uuid');
+const nodemailer = require('nodemailer');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const Database = require('./database');
 const ThumbnailGenerator = require('./thumbnails');
 require('dotenv').config();
@@ -45,6 +49,91 @@ function getCacheKey(imageHash, style) {
     return `${imageHash}_${style}`;
 }
 
+// SMTP configuration for magic links
+const smtpTransporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || '10.63.21.25',
+    port: parseInt(process.env.SMTP_PORT) || 25,
+    secure: false, // No SSL/TLS
+    requireTLS: false, // Don't require TLS
+    ignoreTLS: true, // Ignore TLS entirely
+    auth: false // No authentication for internal SMTP server
+});
+
+// Verify SMTP connection on startup
+smtpTransporter.verify((error, success) => {
+    if (error) {
+        console.log('SMTP connection error:', error);
+    } else {
+        console.log('SMTP server ready for magic links');
+    }
+});
+
+// JWT configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-change-this';
+const JWT_EXPIRES_IN = '7d'; // Sessions last 7 days
+
+// Authentication middleware
+const authenticateToken = async (req, res, next) => {
+    // Try to get token from Authorization header or cookie
+    const authHeader = req.headers['authorization'];
+    let token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    
+    // If no auth header, try cookie
+    if (!token) {
+        token = req.cookies.auth_token;
+    }
+
+    if (!token) {
+        return res.status(401).json({ error: 'Access token required' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const session = await database.getSession(decoded.sessionId);
+        
+        if (!session) {
+            return res.status(401).json({ error: 'Invalid or expired session' });
+        }
+
+        req.user = {
+            id: session.user_id,
+            email: session.email,
+            sessionId: session.session_id,
+            isAdmin: session.is_admin === 1
+        };
+        next();
+    } catch (error) {
+        return res.status(403).json({ error: 'Invalid token' });
+    }
+};
+
+// Admin middleware
+const requireAdmin = async (req, res, next) => {
+    if (!req.user || !req.user.isAdmin) {
+        return res.status(403).json({ error: 'Admin access required' });
+    }
+    next();
+};
+
+// Auto-promote first user or configured admin email to admin
+const promoteAdminUser = async (email) => {
+    try {
+        const users = await database.getAllUsers();
+        const isFirstUser = users.length === 0;
+        const isConfiguredAdmin = email === process.env.ADMIN_EMAIL;
+        
+        if (isFirstUser || isConfiguredAdmin) {
+            await database.makeUserAdmin(email);
+            console.log(`Admin privileges granted to: ${email}`);
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('Error promoting admin user:', error);
+        return false;
+    }
+};
+
 function getCachedResponse(cacheKey) {
     const cached = responseCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_EXPIRY_MS) {
@@ -79,15 +168,36 @@ const initializeDatabase = async () => {
 };
 
 app.use(cors());
+app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname)));
 
 // Serve thumbnails
 app.use('/thumbnails', express.static(path.join(process.env.DATA_PATH || './data', 'thumbnails')));
 
-app.post('/api/generate-caption', async (req, res) => {
+app.post('/api/generate-caption', authenticateToken, async (req, res) => {
     const startTime = Date.now();
     const queryId = uuidv4();
+    
+    // Check usage limits first
+    try {
+        const usageCheck = await database.checkUsageLimit(req.user.id);
+        if (!usageCheck.allowed) {
+            return res.status(429).json({
+                error: 'Daily usage limit exceeded',
+                usageInfo: {
+                    used: usageCheck.used,
+                    limit: usageCheck.limit,
+                    remaining: usageCheck.remaining,
+                    tierName: usageCheck.tierName
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error checking usage limits:', error);
+        return res.status(500).json({ error: 'Failed to check usage limits' });
+    }
+    
     let logData = {
         id: queryId,
         source: null, // Will be determined based on prompt presence
@@ -304,6 +414,14 @@ app.post('/api/generate-caption', async (req, res) => {
             responseData.locationName = extractedData.locationName;
         }
         
+        // Increment usage count on successful generation
+        try {
+            await database.incrementDailyUsage(req.user.id);
+        } catch (error) {
+            console.error('Error incrementing usage count:', error);
+            // Don't fail the request if usage tracking fails
+        }
+        
         res.json(responseData);
 
     } catch (error) {
@@ -347,14 +465,14 @@ app.get('/api/get-last-caption', (req, res) => {
     });
 });
 
-app.post('/api/store-caption', (req, res) => {
+app.post('/api/store-caption', authenticateToken, (req, res) => {
     const { caption } = req.body;
     lastGeneratedCaption = caption;
     res.json({ success: true, message: 'Caption stored for extension use' });
 });
 
 // Debug endpoint to test EXIF extraction
-app.post('/api/debug-exif', async (req, res) => {
+app.post('/api/debug-exif', authenticateToken, async (req, res) => {
     try {
         const { base64Image } = req.body;
         console.log('=== DEBUG EXIF EXTRACTION ===');
@@ -987,7 +1105,7 @@ async function reverseGeocode(latitude, longitude) {
             `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
             {
                 headers: {
-                    'User-Agent': 'Instagram Caption Generator'
+                    'User-Agent': 'AI Caption Studio'
                 }
             }
         );
@@ -1086,7 +1204,7 @@ async function getHistoricalWeather(latitude, longitude, exifData) {
         
         const response = await fetch(weatherUrl, {
             headers: {
-                'User-Agent': 'Instagram Caption Generator'
+                'User-Agent': 'AI Caption Studio'
             }
         });
         
@@ -1151,12 +1269,651 @@ async function getHistoricalWeather(latitude, longitude, exifData) {
     return null;
 }
 
+// Authentication endpoints
+
+// Check registration status
+app.get('/api/auth/registration-status', (req, res) => {
+    res.json({
+        registrationOpen: process.env.REGISTRATION_OPEN === 'true',
+        message: process.env.REGISTRATION_OPEN === 'true' 
+            ? 'Registration is open' 
+            : 'Registration is currently closed. Contact an admin for an invite.'
+    });
+});
+
+// Request magic link
+app.post('/api/auth/request-login', async (req, res) => {
+    try {
+        const { email, inviteToken } = req.body;
+        
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ error: 'Valid email address required' });
+        }
+
+        // Check if user exists
+        const existingUser = await database.getUserByEmail(email);
+        
+        // If user doesn't exist, check registration rules
+        if (!existingUser) {
+            const registrationOpen = process.env.REGISTRATION_OPEN === 'true';
+            
+            if (!registrationOpen && !inviteToken) {
+                return res.status(403).json({ 
+                    error: 'Registration is closed. You need an invite to create an account.',
+                    registrationClosed: true
+                });
+            }
+            
+            // If invite token provided, validate it
+            if (inviteToken) {
+                const invite = await database.getInviteToken(inviteToken);
+                if (!invite || invite.email !== email) {
+                    return res.status(400).json({ error: 'Invalid or expired invite token' });
+                }
+            }
+        }
+
+        // Generate secure token
+        const token = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+        
+        // Get client info
+        const ipAddress = req.ip || req.connection.remoteAddress;
+        const userAgent = req.get('User-Agent') || '';
+
+        // Store token in database
+        await database.createLoginToken(email, token, expiresAt.toISOString(), ipAddress, userAgent);
+
+        // Create magic link (include invite token if present)
+        let loginUrl = `${req.protocol}://${req.get('host')}/auth/verify?token=${token}`;
+        if (inviteToken) {
+            loginUrl += `&invite=${inviteToken}`;
+        }
+
+        // Send email
+        const mailOptions = {
+            from: `"${process.env.SMTP_FROM_NAME || 'Caption Generator'}" <${process.env.SMTP_FROM_EMAIL || 'noreply@yourdomain.com'}>`,
+            to: email,
+            subject: 'Your Login Link - Caption Generator',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2>🔐 Login to Caption Generator</h2>
+                    <p>Click the link below to securely login to your account:</p>
+                    <div style="margin: 30px 0;">
+                        <a href="${loginUrl}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                            🚀 Login to Caption Generator
+                        </a>
+                    </div>
+                    <p><strong>This link expires in 15 minutes</strong> for security.</p>
+                    <p>If you didn't request this login, you can safely ignore this email.</p>
+                    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                    <p style="color: #666; font-size: 12px;">
+                        Request from: ${ipAddress}<br>
+                        Time: ${new Date().toLocaleString()}
+                    </p>
+                </div>
+            `
+        };
+
+        await smtpTransporter.sendMail(mailOptions);
+
+        res.json({ 
+            success: true, 
+            message: 'Magic link sent to your email address',
+            expiresIn: '15 minutes'
+        });
+
+    } catch (error) {
+        console.error('Magic link request error:', error);
+        res.status(500).json({ error: 'Failed to send magic link' });
+    }
+});
+
+// Verify magic link and create session
+app.get('/auth/verify', async (req, res) => {
+    try {
+        const { token } = req.query;
+
+        if (!token) {
+            return res.status(400).send('Invalid login link');
+        }
+
+        // Verify token
+        const loginToken = await database.getLoginToken(token);
+        if (!loginToken) {
+            return res.status(400).send(`
+                <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                    <h2>❌ Invalid Login Link</h2>
+                    <p>This login link is invalid or has expired.</p>
+                    <a href="/" style="color: #405de6;">← Back to Caption Generator</a>
+                </div>
+            `);
+        }
+
+        // Mark token as used
+        await database.useLoginToken(token);
+
+        // Get or create user
+        let user;
+        try {
+            user = await database.getUserByEmail(loginToken.email);
+            if (!user) {
+                user = await database.createUser(loginToken.email);
+                
+                // Auto-promote admin user
+                await promoteAdminUser(loginToken.email);
+                
+                // If this was an invite signup, mark invite as used
+                if (req.query.invite) {
+                    const invite = await database.getInviteToken(req.query.invite);
+                    if (invite && invite.email === loginToken.email) {
+                        await database.useInviteToken(req.query.invite, user.id);
+                    }
+                }
+            }
+        } catch (error) {
+            if (error.message === 'USER_EXISTS') {
+                user = await database.getUserByEmail(loginToken.email);
+            } else {
+                throw error;
+            }
+        }
+
+        // Create session
+        const sessionId = crypto.randomBytes(32).toString('hex');
+        const sessionExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+        const ipAddress = req.ip || req.connection.remoteAddress;
+        const userAgent = req.get('User-Agent') || '';
+
+        await database.createSession(sessionId, user.id, sessionExpiresAt.toISOString(), ipAddress, userAgent);
+
+        // Update last login
+        await database.updateUserLastLogin(user.id);
+
+        // Create JWT token
+        const jwtToken = jwt.sign({ sessionId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+        // Set secure cookie and redirect
+        res.cookie('auth_token', jwtToken, {
+            httpOnly: true,
+            secure: req.secure,
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            sameSite: 'lax'
+        });
+
+        res.send(`
+            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                <h2>✅ Login Successful!</h2>
+                <p>Welcome back, ${user.email}!</p>
+                <p>Redirecting to Caption Generator...</p>
+                <script>
+                    localStorage.setItem('auth_token', '${jwtToken}');
+                    localStorage.setItem('user_email', '${user.email}');
+                    setTimeout(() => window.location.href = '/', 2000);
+                </script>
+            </div>
+        `);
+
+    } catch (error) {
+        console.error('Login verification error:', error);
+        res.status(500).send('Login verification failed');
+    }
+});
+
+// Get current user info
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+    try {
+        const userWithTier = await database.getUserWithTier(req.user.id);
+        const usageInfo = await database.checkUsageLimit(req.user.id);
+        
+        res.json({
+            id: req.user.id,
+            email: req.user.email,
+            isAdmin: req.user.isAdmin,
+            tierName: userWithTier.tier_name,
+            dailyLimit: userWithTier.daily_limit,
+            usageToday: usageInfo.used,
+            remaining: usageInfo.remaining
+        });
+    } catch (error) {
+        console.error('Error fetching user info:', error);
+        res.json({
+            id: req.user.id,
+            email: req.user.email,
+            isAdmin: req.user.isAdmin
+        });
+    }
+});
+
+// Logout
+app.post('/api/auth/logout', authenticateToken, async (req, res) => {
+    try {
+        await database.deleteSession(req.user.sessionId);
+        res.clearCookie('auth_token');
+        res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        console.error('Logout error:', error);
+        res.status(500).json({ error: 'Logout failed' });
+    }
+});
+
+// Admin endpoints
+
+// Get all users (admin only)
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const users = await database.getAllUsers();
+        res.json(users);
+    } catch (error) {
+        console.error('Error fetching users:', error);
+        res.status(500).json({ error: 'Failed to fetch users' });
+    }
+});
+
+// Toggle user status (admin only)
+app.post('/api/admin/users/:userId/toggle', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const success = await database.toggleUserStatus(userId);
+        if (success) {
+            res.json({ success: true, message: 'User status updated' });
+        } else {
+            res.status(404).json({ error: 'User not found' });
+        }
+    } catch (error) {
+        console.error('Error toggling user status:', error);
+        res.status(500).json({ error: 'Failed to update user status' });
+    }
+});
+
+// Delete user (admin only)
+app.delete('/api/admin/users/:userId', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Prevent admin from deleting themselves
+        if (parseInt(userId) === req.user.id) {
+            return res.status(400).json({ error: 'Cannot delete your own account' });
+        }
+        
+        const success = await database.deleteUser(userId);
+        if (success) {
+            res.json({ success: true, message: 'User deleted successfully' });
+        } else {
+            res.status(404).json({ error: 'User not found' });
+        }
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ error: 'Failed to delete user' });
+    }
+});
+
+// Send invite (admin only)
+app.post('/api/admin/invite', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { email } = req.body;
+        
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ error: 'Valid email address required' });
+        }
+
+        // Check if user already exists
+        const existingUser = await database.getUserByEmail(email);
+        if (existingUser) {
+            return res.status(400).json({ error: 'User already exists' });
+        }
+
+        // Generate invite token
+        const inviteToken = crypto.randomBytes(32).toString('hex');
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+        
+        // Store invite
+        await database.createInviteToken(email, req.user.id, inviteToken, expiresAt.toISOString());
+
+        // Create invite link
+        const inviteUrl = `${req.protocol}://${req.get('host')}/auth?invite=${inviteToken}&email=${encodeURIComponent(email)}`;
+
+        // Send email
+        const mailOptions = {
+            from: `"${process.env.SMTP_FROM_NAME || 'Caption Generator'}" <${process.env.SMTP_FROM_EMAIL || 'noreply@jonsson.io'}>`,
+            to: email,
+            subject: 'You\'re invited to Caption Generator',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2>🎉 You're Invited!</h2>
+                    <p>Hi there!</p>
+                    <p><strong>${req.user.email}</strong> has invited you to join Caption Generator, an AI-powered tool for creating Instagram captions and hashtags.</p>
+                    <div style="margin: 30px 0;">
+                        <a href="${inviteUrl}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                            🚀 Accept Invitation
+                        </a>
+                    </div>
+                    <p><strong>This invitation expires in 7 days.</strong></p>
+                    <p>If you're not interested, you can safely ignore this email.</p>
+                    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                    <p style="color: #666; font-size: 12px;">
+                        Invited by: ${req.user.email}<br>
+                        Time: ${new Date().toLocaleString()}
+                    </p>
+                </div>
+            `
+        };
+
+        await smtpTransporter.sendMail(mailOptions);
+
+        res.json({ 
+            success: true, 
+            message: `Invitation sent to ${email}`,
+            expiresIn: '7 days'
+        });
+
+    } catch (error) {
+        console.error('Invite error:', error);
+        res.status(500).json({ error: 'Failed to send invitation' });
+    }
+});
+
+// Get pending invites (admin only)
+app.get('/api/admin/invites', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const invites = await database.getPendingInvites();
+        res.json(invites);
+    } catch (error) {
+        console.error('Error fetching invites:', error);
+        res.status(500).json({ error: 'Failed to fetch invites' });
+    }
+});
+
+// Toggle registration status (admin only)
+app.post('/api/admin/registration/toggle', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const currentStatus = process.env.REGISTRATION_OPEN === 'true';
+        const newStatus = !currentStatus;
+        
+        // Note: This only changes runtime behavior, not the .env file
+        // For production, you'd want to update the .env file or use a database setting
+        process.env.REGISTRATION_OPEN = newStatus.toString();
+        
+        res.json({ 
+            success: true, 
+            registrationOpen: newStatus,
+            message: `Registration ${newStatus ? 'opened' : 'closed'} successfully`
+        });
+    } catch (error) {
+        console.error('Error toggling registration:', error);
+        res.status(500).json({ error: 'Failed to toggle registration status' });
+    }
+});
+
+// Tier management endpoints
+
+// Get all tiers (admin only)
+app.get('/api/admin/tiers', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const tiers = await database.getAllTiers();
+        res.json(tiers);
+    } catch (error) {
+        console.error('Error fetching tiers:', error);
+        res.status(500).json({ error: 'Failed to fetch tiers' });
+    }
+});
+
+// Get specific tier (admin only)
+app.get('/api/admin/tiers/:tierId', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { tierId } = req.params;
+        const tier = await database.getTierById(tierId);
+        
+        if (!tier) {
+            return res.status(404).json({ error: 'Tier not found' });
+        }
+        
+        res.json(tier);
+    } catch (error) {
+        console.error('Error fetching tier:', error);
+        res.status(500).json({ error: 'Failed to fetch tier' });
+    }
+});
+
+// Create new tier (admin only)
+app.post('/api/admin/tiers', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { name, dailyLimit, description } = req.body;
+        
+        if (!name || dailyLimit === undefined) {
+            return res.status(400).json({ error: 'Name and daily limit are required' });
+        }
+        
+        if (dailyLimit < -1) {
+            return res.status(400).json({ error: 'Daily limit must be -1 or greater' });
+        }
+        
+        const tierId = await database.createTier(name, dailyLimit, description);
+        res.json({ 
+            success: true, 
+            message: `Tier "${name}" created successfully`,
+            tierId 
+        });
+    } catch (error) {
+        console.error('Error creating tier:', error);
+        if (error.message.includes('UNIQUE constraint')) {
+            res.status(400).json({ error: 'A tier with this name already exists' });
+        } else {
+            res.status(500).json({ error: 'Failed to create tier' });
+        }
+    }
+});
+
+// Update tier (admin only)
+app.put('/api/admin/tiers/:tierId', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { tierId } = req.params;
+        const { name, dailyLimit, description } = req.body;
+        
+        if (!name || dailyLimit === undefined) {
+            return res.status(400).json({ error: 'Name and daily limit are required' });
+        }
+        
+        if (dailyLimit < -1) {
+            return res.status(400).json({ error: 'Daily limit must be -1 or greater' });
+        }
+        
+        const success = await database.updateTier(tierId, name, dailyLimit, description);
+        
+        if (success) {
+            res.json({ 
+                success: true, 
+                message: `Tier "${name}" updated successfully` 
+            });
+        } else {
+            res.status(404).json({ error: 'Tier not found' });
+        }
+    } catch (error) {
+        console.error('Error updating tier:', error);
+        if (error.message.includes('UNIQUE constraint')) {
+            res.status(400).json({ error: 'A tier with this name already exists' });
+        } else {
+            res.status(500).json({ error: 'Failed to update tier' });
+        }
+    }
+});
+
+// Delete tier (admin only)
+app.delete('/api/admin/tiers/:tierId', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { tierId } = req.params;
+        
+        const success = await database.deleteTier(tierId);
+        
+        if (success) {
+            res.json({ 
+                success: true, 
+                message: 'Tier deleted successfully' 
+            });
+        } else {
+            res.status(404).json({ error: 'Tier not found' });
+        }
+    } catch (error) {
+        console.error('Error deleting tier:', error);
+        if (error.message.includes('Cannot delete tier with assigned users')) {
+            res.status(400).json({ error: 'Cannot delete tier that has users assigned to it' });
+        } else {
+            res.status(500).json({ error: 'Failed to delete tier' });
+        }
+    }
+});
+
+// Set user tier (admin only)
+app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { tierId } = req.body;
+        
+        if (!tierId) {
+            return res.status(400).json({ error: 'Tier ID is required' });
+        }
+        
+        // Verify tier exists
+        const tier = await database.getTierById(tierId);
+        if (!tier) {
+            return res.status(400).json({ error: 'Invalid tier ID' });
+        }
+        
+        const success = await database.setUserTier(userId, tierId);
+        
+        if (success) {
+            res.json({ 
+                success: true, 
+                message: `User tier updated to "${tier.name}"` 
+            });
+        } else {
+            res.status(404).json({ error: 'User not found' });
+        }
+    } catch (error) {
+        console.error('Error setting user tier:', error);
+        res.status(500).json({ error: 'Failed to update user tier' });
+    }
+});
+
+// Get usage stats (admin only)
+app.get('/api/admin/usage-stats', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const stats = await database.getUsersUsageStats();
+        res.json(stats);
+    } catch (error) {
+        console.error('Error fetching usage stats:', error);
+        res.status(500).json({ error: 'Failed to fetch usage statistics' });
+    }
+});
+
+// Settings endpoints
+
+// Get user settings for a specific integration
+app.get('/api/settings/:integrationType', authenticateToken, async (req, res) => {
+    try {
+        const { integrationType } = req.params;
+        const settings = await database.getUserSettings(req.user.id, integrationType);
+        
+        // Convert array of settings to object
+        const settingsObject = {};
+        settings.forEach(setting => {
+            settingsObject[setting.setting_key] = setting.setting_value;
+        });
+        
+        res.json(settingsObject);
+    } catch (error) {
+        console.error('Error fetching user settings:', error);
+        res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+});
+
+// Save user settings for Mastodon
+app.post('/api/settings/mastodon', authenticateToken, async (req, res) => {
+    try {
+        const { instance, token } = req.body;
+        
+        if (!instance || !token) {
+            return res.status(400).json({ error: 'Instance URL and access token are required' });
+        }
+        
+        // Validate instance URL format
+        try {
+            new URL(instance);
+        } catch (e) {
+            return res.status(400).json({ error: 'Invalid instance URL format' });
+        }
+        
+        // Save settings
+        await database.setUserSetting(req.user.id, 'mastodon', 'instance', instance);
+        await database.setUserSetting(req.user.id, 'mastodon', 'token', token, true); // Mark as encrypted
+        
+        res.json({ success: true, message: 'Mastodon settings saved successfully' });
+    } catch (error) {
+        console.error('Error saving Mastodon settings:', error);
+        res.status(500).json({ error: 'Failed to save Mastodon settings' });
+    }
+});
+
+// Delete user settings for a specific integration
+app.delete('/api/settings/:integrationType', authenticateToken, async (req, res) => {
+    try {
+        const { integrationType } = req.params;
+        const deletedCount = await database.deleteAllUserSettings(req.user.id, integrationType);
+        
+        res.json({ 
+            success: true, 
+            message: `${integrationType} settings cleared successfully`,
+            deletedCount 
+        });
+    } catch (error) {
+        console.error('Error deleting user settings:', error);
+        res.status(500).json({ error: 'Failed to delete settings' });
+    }
+});
+
+// Get all user settings
+app.get('/api/settings', authenticateToken, async (req, res) => {
+    try {
+        const settings = await database.getUserSettings(req.user.id);
+        
+        // Group settings by integration type
+        const groupedSettings = {};
+        settings.forEach(setting => {
+            if (!groupedSettings[setting.integration_type]) {
+                groupedSettings[setting.integration_type] = {};
+            }
+            groupedSettings[setting.integration_type][setting.setting_key] = setting.setting_value;
+        });
+        
+        res.json(groupedSettings);
+    } catch (error) {
+        console.error('Error fetching all user settings:', error);
+        res.status(500).json({ error: 'Failed to fetch settings' });
+    }
+});
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+app.get('/auth', (req, res) => {
+    res.sendFile(path.join(__dirname, 'auth.html'));
+});
+
 app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+app.get('/admin/users', (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin-users.html'));
+});
+
+app.get('/admin/tiers', (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin-tiers.html'));
+});
+
+app.get('/settings', (req, res) => {
+    res.sendFile(path.join(__dirname, 'settings.html'));
 });
 
 // Start server with database initialization
@@ -1164,7 +1921,7 @@ const startServer = async () => {
     await initializeDatabase();
     
     app.listen(PORT, () => {
-        console.log(`🚀 Instagram Caption Generator running on http://localhost:${PORT}`);
+        console.log(`🚀 AI Caption Studio running on http://localhost:${PORT}`);
         console.log(`📁 Serving files from: ${__dirname}`);
         console.log(`🔑 OpenAI API Key: ${process.env.OPENAI_API_KEY ? 'Configured ✅' : 'Missing ❌'}`);
         console.log(`🗄️ Database schema version: ${database.CURRENT_SCHEMA_VERSION}`);

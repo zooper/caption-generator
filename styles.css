@@ -6,9 +6,9 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--background-gradient);
     min-height: 100vh;
-    color: #333;
+    color: var(--text-primary);
 }
 
 .container {
@@ -19,12 +19,12 @@ body {
 
 .header {
     text-align: center;
-    background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+    background: var(--primary-gradient);
     color: white;
     padding: 30px 20px;
     border-radius: 20px;
     margin-bottom: 30px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 10px 30px var(--shadow-color);
 }
 
 .header h1 {
@@ -46,14 +46,14 @@ body {
 }
 
 .upload-section, .results-section {
-    background: white;
+    background: var(--card-background);
     border-radius: 20px;
     padding: 30px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 10px 30px var(--shadow-color);
 }
 
 .upload-area {
-    border: 3px dashed #ddd;
+    border: 3px dashed var(--border-color);
     border-radius: 15px;
     padding: 40px 20px;
     text-align: center;
@@ -65,12 +65,12 @@ body {
 }
 
 .upload-area:hover {
-    border-color: #405de6;
+    border-color: var(--accent-color);
     background: #f8f9ff;
 }
 
 .upload-area.dragover {
-    border-color: #405de6;
+    border-color: var(--accent-color);
     background: #f0f4ff;
     transform: scale(1.02);
 }
@@ -87,11 +87,11 @@ body {
 .upload-placeholder h3 {
     font-size: 1.3rem;
     margin-bottom: 8px;
-    color: #333;
+    color: var(--text-primary);
 }
 
 .upload-placeholder p {
-    color: #666;
+    color: var(--text-secondary);
     margin-bottom: 5px;
 }
 
@@ -113,7 +113,7 @@ body {
 
 .style-options h3 {
     margin-bottom: 15px;
-    color: #333;
+    color: var(--text-primary);
     font-size: 1.2rem;
 }
 
@@ -140,7 +140,7 @@ body {
 }
 
 .style-btn.active {
-    background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+    background: var(--primary-gradient);
     color: white;
     border-color: transparent;
 }
@@ -150,12 +150,12 @@ body {
     background: #f8f9ff;
     border-radius: 15px;
     padding: 25px;
-    border-left: 4px solid #405de6;
+    border-left: 4px solid var(--accent-color);
 }
 
 .context-section h3 {
     margin-bottom: 20px;
-    color: #333;
+    color: var(--text-primary);
     font-size: 1.2rem;
     display: flex;
     align-items: center;
@@ -195,8 +195,8 @@ body {
 
 .context-field input:focus {
     outline: none;
-    border-color: #405de6;
-    box-shadow: 0 0 0 3px rgba(64, 93, 230, 0.1);
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
 }
 
 .context-field input::placeholder {
@@ -243,7 +243,7 @@ body {
 
 .template-section h4 {
     margin: 0 0 15px 0;
-    color: #333;
+    color: var(--text-primary);
     font-size: 1rem;
 }
 
@@ -303,7 +303,7 @@ body {
 
 .generate-btn {
     width: 100%;
-    background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+    background: var(--primary-gradient);
     color: white;
     border: none;
     border-radius: 25px;
@@ -318,7 +318,7 @@ body {
 
 .generate-btn:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 10px 25px rgba(64, 93, 230, 0.3);
+    box-shadow: 0 10px 25px var(--hover-shadow);
 }
 
 .generate-btn:disabled {
@@ -346,7 +346,7 @@ body {
 .results-placeholder {
     text-align: center;
     padding: 60px 20px;
-    color: #666;
+    color: var(--text-secondary);
 }
 
 .placeholder-icon {
@@ -356,7 +356,7 @@ body {
 
 .results-placeholder h3 {
     margin-bottom: 10px;
-    color: #333;
+    color: var(--text-primary);
 }
 
 .caption-card, .hashtags-card {
@@ -364,7 +364,7 @@ body {
     border-radius: 15px;
     padding: 25px;
     margin-bottom: 20px;
-    border-left: 4px solid #405de6;
+    border-left: 4px solid var(--accent-color);
 }
 
 .card-header {
@@ -375,13 +375,13 @@ body {
 }
 
 .card-header h3 {
-    color: #333;
+    color: var(--text-primary);
     font-size: 1.2rem;
 }
 
 .char-count, .hashtag-count {
     font-size: 0.9rem;
-    color: #666;
+    color: var(--text-secondary);
     background: white;
     padding: 5px 10px;
     border-radius: 10px;
@@ -393,7 +393,7 @@ body {
     padding: 20px;
     margin-bottom: 15px;
     line-height: 1.6;
-    color: #333;
+    color: var(--text-primary);
     min-height: 80px;
     border: 1px solid #eee;
 }
@@ -453,7 +453,7 @@ body {
 }
 
 .pro-tips h4 {
-    color: #333;
+    color: var(--text-primary);
     margin-bottom: 15px;
     font-size: 1.2rem;
 }
@@ -464,7 +464,7 @@ body {
 
 .pro-tips li {
     padding: 8px 0;
-    color: #666;
+    color: var(--text-secondary);
     position: relative;
     padding-left: 25px;
 }
@@ -578,7 +578,7 @@ body {
     margin-bottom: 15px;
     font-size: 14px;
     line-height: 1.4;
-    color: #333;
+    color: var(--text-primary);
     border-left: 4px solid #9c27b0;
     font-style: italic;
 }
@@ -613,7 +613,7 @@ body {
 
 .config-field label {
     font-weight: 600;
-    color: #333;
+    color: var(--text-primary);
 }
 
 .config-field input {
@@ -630,7 +630,7 @@ body {
 }
 
 .config-field small {
-    color: #666;
+    color: var(--text-secondary);
     font-size: 12px;
 }
 
@@ -699,12 +699,12 @@ body {
 }
 
 .post-preview {
-    color: #333;
+    color: var(--text-primary);
     line-height: 1.4;
 }
 
 .post-preview em {
-    color: #666;
+    color: var(--text-secondary);
 }
 
 .mastodon-actions {
@@ -771,7 +771,7 @@ body {
 }
 
 .weather-description {
-    color: #666;
+    color: var(--text-secondary);
     font-size: 14px;
     font-style: italic;
 }
@@ -782,7 +782,7 @@ body {
     border-radius: 15px;
     padding: 25px;
     margin-bottom: 20px;
-    border-left: 4px solid #405de6;
+    border-left: 4px solid var(--accent-color);
 }
 
 .weather-details {
@@ -820,7 +820,7 @@ body {
 .weather-humidity,
 .weather-wind {
     font-size: 14px;
-    color: #666;
+    color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 5px;

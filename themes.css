@@ -1,0 +1,134 @@
+/* AI Caption Studio - Theme System */
+
+:root {
+  /* Default theme (Purple Creative) */
+  --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+  --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --accent-color: #8B5CF6;
+  --accent-rgb: 139, 92, 246;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --card-background: #ffffff;
+  --border-color: #e1e5e9;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --hover-shadow: rgba(139, 92, 246, 0.3);
+}
+
+/* Theme 1: Purple Creative (Default) */
+[data-theme="purple-creative"] {
+  --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+  --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --accent-color: #8B5CF6;
+  --accent-rgb: 139, 92, 246;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --card-background: #ffffff;
+  --border-color: #e1e5e9;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --hover-shadow: rgba(139, 92, 246, 0.3);
+}
+
+/* Theme 2: Ocean Breeze */
+[data-theme="ocean-breeze"] {
+  --primary-gradient: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%);
+  --background-gradient: linear-gradient(135deg, #4338ca 0%, #06b6d4 100%);
+  --accent-color: #06B6D4;
+  --accent-rgb: 6, 182, 212;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --card-background: #ffffff;
+  --border-color: #e1e5e9;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --hover-shadow: rgba(6, 182, 212, 0.3);
+}
+
+/* Theme 3: Sunset Warm */
+[data-theme="sunset-warm"] {
+  --primary-gradient: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+  --background-gradient: linear-gradient(135deg, #f97316 0%, #dc2626 100%);
+  --accent-color: #F59E0B;
+  --accent-rgb: 245, 158, 11;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --card-background: #ffffff;
+  --border-color: #e1e5e9;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --hover-shadow: rgba(245, 158, 11, 0.3);
+}
+
+/* Theme 4: Dark Purple */
+[data-theme="dark-purple"] {
+  --primary-gradient: linear-gradient(135deg, #7C3AED 0%, #DB2777 100%);
+  --background-gradient: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  --accent-color: #7C3AED;
+  --accent-rgb: 124, 58, 237;
+  --text-primary: #ffffff;
+  --text-secondary: #e5e7eb;
+  --card-background: #374151;
+  --border-color: #4b5563;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --hover-shadow: rgba(124, 58, 237, 0.4);
+}
+
+/* Theme 5: Dark Ocean */
+[data-theme="dark-ocean"] {
+  --primary-gradient: linear-gradient(135deg, #0891B2 0%, #1D4ED8 100%);
+  --background-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  --accent-color: #0891B2;
+  --accent-rgb: 8, 145, 178;
+  --text-primary: #ffffff;
+  --text-secondary: #e5e7eb;
+  --card-background: #374151;
+  --border-color: #4b5563;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --hover-shadow: rgba(8, 145, 178, 0.4);
+}
+
+/* Theme 6: Dark Forest */
+[data-theme="dark-forest"] {
+  --primary-gradient: linear-gradient(135deg, #059669 0%, #7C2D12 100%);
+  --background-gradient: linear-gradient(135deg, #064e3b 0%, #1f2937 100%);
+  --accent-color: #059669;
+  --accent-rgb: 5, 150, 105;
+  --text-primary: #ffffff;
+  --text-secondary: #e5e7eb;
+  --card-background: #374151;
+  --border-color: #4b5563;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --hover-shadow: rgba(5, 150, 105, 0.4);
+}
+
+/* Dark theme adjustments */
+[data-theme="dark-purple"],
+[data-theme="dark-ocean"], 
+[data-theme="dark-forest"] {
+  /* Notification styles for dark themes */
+  --notification-success-bg: rgba(34, 197, 94, 0.2);
+  --notification-success-text: #4ade80;
+  --notification-success-border: #22c55e;
+  
+  --notification-error-bg: rgba(239, 68, 68, 0.2);
+  --notification-error-text: #f87171;
+  --notification-error-border: #ef4444;
+  
+  --notification-info-bg: rgba(59, 130, 246, 0.2);
+  --notification-info-text: #60a5fa;
+  --notification-info-border: #3b82f6;
+}
+
+/* Light theme notifications */
+[data-theme="purple-creative"],
+[data-theme="ocean-breeze"],
+[data-theme="sunset-warm"] {
+  --notification-success-bg: #d4edda;
+  --notification-success-text: #155724;
+  --notification-success-border: #c3e6cb;
+  
+  --notification-error-bg: #f8d7da;
+  --notification-error-text: #721c24;
+  --notification-error-border: #f5c6cb;
+  
+  --notification-info-bg: #d1ecf1;
+  --notification-info-text: #0c5460;
+  --notification-info-border: #bee5eb;
+}

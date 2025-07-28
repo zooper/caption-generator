@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - AI Caption Studio</title>
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme-loader.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--background-gradient);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-primary);
+        }
+
+        .auth-container {
+            background: var(--card-background);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            margin: 20px;
+        }
+
+        .auth-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .auth-header h1 {
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .auth-header p {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .form-group input {
+            padding: 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        .magic-link-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .magic-link-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(64, 93, 230, 0.3);
+        }
+
+        .magic-link-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .notification {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            display: none;
+        }
+
+        .notification.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .notification.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .back-link {
+            text-align: center;
+            margin-top: 30px;
+        }
+
+        .back-link a {
+            color: #8B5CF6;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+
+        .loading-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ffffff;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .email-sent {
+            text-align: center;
+            display: none;
+        }
+
+        .email-sent h2 {
+            color: #8B5CF6;
+            margin-bottom: 15px;
+        }
+
+        .email-sent p {
+            color: #666;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>🎨 AI Caption Studio</h1>
+            <p>Sign in with your email address</p>
+        </div>
+
+        <div class="notification" id="notification"></div>
+
+        <div id="loginForm">
+            <form class="auth-form" id="authForm">
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" name="email" required placeholder="your@email.com">
+                </div>
+                
+                <button type="submit" class="magic-link-btn" id="submitBtn">
+                    <span id="btnText">🔗 Send Magic Link</span>
+                    <span class="loading-spinner" id="loadingSpinner" style="display: none;"></span>
+                </button>
+            </form>
+        </div>
+
+        <div class="email-sent" id="emailSent">
+            <h2>✉️ Check Your Email</h2>
+            <p>We've sent a magic link to <strong id="sentEmail"></strong></p>
+            <p>Click the link in your email to sign in. The link expires in 15 minutes.</p>
+            <button type="button" class="magic-link-btn" id="sendAnotherBtn" style="margin-top: 20px;">
+                Send Another Link
+            </button>
+        </div>
+
+        <div class="back-link">
+            <a href="/">← Back to AI Caption Studio</a>
+        </div>
+    </div>
+
+    <script>
+        class AuthManager {
+            constructor() {
+                this.form = document.getElementById('authForm');
+                this.emailInput = document.getElementById('email');
+                this.submitBtn = document.getElementById('submitBtn');
+                this.btnText = document.getElementById('btnText');
+                this.loadingSpinner = document.getElementById('loadingSpinner');
+                this.notification = document.getElementById('notification');
+                this.loginForm = document.getElementById('loginForm');
+                this.emailSent = document.getElementById('emailSent');
+                this.sentEmail = document.getElementById('sentEmail');
+                this.sendAnotherBtn = document.getElementById('sendAnotherBtn');
+
+                this.bindEvents();
+                this.checkExistingAuth();
+                this.init();
+            }
+
+            bindEvents() {
+                this.form.addEventListener('submit', this.handleSubmit.bind(this));
+                this.sendAnotherBtn.addEventListener('click', this.showLoginForm.bind(this));
+            }
+
+            async init() {
+                // Check URL parameters for invite
+                const urlParams = new URLSearchParams(window.location.search);
+                const inviteToken = urlParams.get('invite');
+                const inviteEmail = urlParams.get('email');
+                
+                if (inviteToken && inviteEmail) {
+                    this.emailInput.value = inviteEmail;
+                    this.inviteToken = inviteToken;
+                    this.showNotification(`You have been invited! Please enter ${inviteEmail} to continue.`, 'success');
+                }
+
+                // Check registration status
+                try {
+                    const response = await fetch('/api/auth/registration-status');
+                    const data = await response.json();
+                    
+                    if (!data.registrationOpen && !inviteToken) {
+                        this.showNotification(data.message, 'error');
+                        this.submitBtn.disabled = true;
+                        this.btnText.textContent = '🔒 Registration Closed';
+                    }
+                } catch (error) {
+                    console.error('Failed to check registration status:', error);
+                }
+            }
+
+            checkExistingAuth() {
+                const token = localStorage.getItem('auth_token');
+                const email = localStorage.getItem('user_email');
+                
+                if (token && email) {
+                    // User is already logged in, redirect to main app
+                    window.location.href = '/';
+                }
+            }
+
+            async handleSubmit(e) {
+                e.preventDefault();
+                
+                const email = this.emailInput.value.trim();
+                if (!email) {
+                    this.showNotification('Please enter your email address', 'error');
+                    return;
+                }
+
+                this.setLoading(true);
+
+                try {
+                    const requestBody = { email };
+                    if (this.inviteToken) {
+                        requestBody.inviteToken = this.inviteToken;
+                    }
+
+                    const response = await fetch('/api/auth/request-login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        this.showEmailSent(email);
+                    } else {
+                        this.showNotification(data.error || 'Failed to send magic link', 'error');
+                    }
+                } catch (error) {
+                    console.error('Auth error:', error);
+                    this.showNotification('Network error. Please try again.', 'error');
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            setLoading(loading) {
+                this.submitBtn.disabled = loading;
+                this.btnText.style.display = loading ? 'none' : 'inline';
+                this.loadingSpinner.style.display = loading ? 'inline-block' : 'none';
+            }
+
+            showNotification(message, type) {
+                this.notification.textContent = message;
+                this.notification.className = `notification ${type}`;
+                this.notification.style.display = 'block';
+
+                setTimeout(() => {
+                    this.notification.style.display = 'none';
+                }, 5000);
+            }
+
+            showEmailSent(email) {
+                this.sentEmail.textContent = email;
+                this.loginForm.style.display = 'none';
+                this.emailSent.style.display = 'block';
+                this.notification.style.display = 'none';
+            }
+
+            showLoginForm() {
+                this.loginForm.style.display = 'block';
+                this.emailSent.style.display = 'none';
+                this.emailInput.value = '';
+                this.emailInput.focus();
+            }
+        }
+
+        // Initialize auth manager when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new AuthManager();
+        });
+    </script>
+</body>
+</html>

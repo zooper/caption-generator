@@ -2,11 +2,12 @@ class CaptionGenerator {
     constructor() {
         this.currentFile = null;
         this.currentStyle = 'creative';
+        this.currentUser = null;
+        this.authToken = null;
+        this.isMastodonConfigured = false;
         this.initializeElements();
         this.bindEvents();
-        this.checkServerHealth();
-        this.loadTemplateList();
-        this.loadMastodonConfig();
+        this.checkAuthentication();
     }
 
     initializeElements() {
@@ -59,6 +60,7 @@ class CaptionGenerator {
         this.postMastodonBtn = document.getElementById('postMastodonBtn');
         this.mastodonStatus = document.getElementById('mastodonStatus');
         this.postPreview = document.getElementById('postPreview');
+        this.mastodonCard = document.querySelector('.mastodon-card');
         
     }
 
@@ -106,22 +108,38 @@ class CaptionGenerator {
 
     async loadMastodonConfig() {
         try {
-            const response = await fetch('/api/mastodon-config');
-            const config = await response.json();
+            const response = await fetch('/api/settings/mastodon', {
+                headers: { 'Authorization': `Bearer ${this.authToken}` }
+            });
             
-            if (config.configured) {
-                this.mastodonInstance.value = config.instance;
-                this.mastodonToken.value = config.token;
-                this.updateMastodonStatus('Loaded from server ✓', 'success');
-                this.postMastodonBtn.disabled = false;
-                this.showNotification('🐘 Mastodon configuration loaded from server', 'success');
+            if (response.ok) {
+                const settings = await response.json();
+                
+                if (settings.instance && settings.token) {
+                    this.mastodonInstance.value = settings.instance;
+                    this.mastodonToken.value = settings.token;
+                    this.updateMastodonStatus('Connected ✓', 'success');
+                    this.postMastodonBtn.disabled = false;
+                    this.isMastodonConfigured = true;
+                } else {
+                    this.updateMastodonStatus('Not configured', 'error');
+                    this.postMastodonBtn.disabled = true;
+                    this.isMastodonConfigured = false;
+                }
             } else {
                 this.updateMastodonStatus('Not configured', 'error');
-                this.showNotification('Mastodon not configured in server secrets', 'info');
+                this.postMastodonBtn.disabled = true;
+                this.isMastodonConfigured = false;
             }
+            
+            // Update visibility of Mastodon preview card
+            this.updateMastodonCardVisibility();
         } catch (error) {
-            console.error('Failed to load Mastodon config:', error);
-            this.updateMastodonStatus('Failed to load config', 'error');
+            console.error('Failed to load Mastodon settings:', error);
+            this.updateMastodonStatus('Failed to load settings', 'error');
+            this.postMastodonBtn.disabled = true;
+            this.isMastodonConfigured = false;
+            this.updateMastodonCardVisibility();
         }
     }
 
@@ -293,7 +311,7 @@ class CaptionGenerator {
                 `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
                 {
                     headers: {
-                        'User-Agent': 'Instagram Caption Generator'
+                        'User-Agent': 'AI Caption Studio'
                     }
                 }
             );
@@ -372,7 +390,7 @@ class CaptionGenerator {
         const context = this.getContextInfo();
         const contextString = context.length > 0 ? `\n\nAdditional Context:\n${context.join('\n')}` : '';
 
-        return `Analyze this image for Instagram posting. Generate:
+        return `Analyze this image for social media posting. Generate:
 
 1. A ${style} caption that:
    - Captures the main subject/scene
@@ -531,9 +549,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
     async callLocalAPI(prompt, base64Image) {
         const response = await fetch('/api/generate-caption', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: this.getAuthHeaders(),
             body: JSON.stringify({
                 prompt: prompt,
                 base64Image: base64Image,
@@ -584,8 +600,277 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         // Store caption for browser extension
         this.storeCaptionForExtension(caption, hashtags);
         
-        // Auto-update Mastodon preview when caption is generated
-        this.updateMastodonPreview();
+        // Auto-update Mastodon preview when caption is generated (only if configured)
+        if (this.isMastodonConfigured) {
+            this.updateMastodonPreview();
+        }
+    }
+
+    // Authentication methods
+    async checkAuthentication() {
+        try {
+            this.authToken = localStorage.getItem('auth_token');
+            
+            if (!this.authToken) {
+                this.redirectToLogin();
+                return;
+            }
+
+            // Verify token with server
+            const response = await fetch('/api/auth/me', {
+                headers: {
+                    'Authorization': `Bearer ${this.authToken}`
+                }
+            });
+
+            if (response.ok) {
+                this.currentUser = await response.json();
+                this.onAuthenticationSuccess();
+            } else {
+                // Token invalid, clear and redirect
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('user_email');
+                this.redirectToLogin();
+            }
+        } catch (error) {
+            console.error('Authentication check failed:', error);
+            this.redirectToLogin();
+        }
+    }
+
+    onAuthenticationSuccess() {
+        // Initialize the app components after successful auth
+        this.checkServerHealth();
+        this.loadTemplateList();
+        this.loadMastodonConfig();
+        this.updateUserInterface();
+    }
+
+    updateUserInterface() {
+        // Show user info in the interface
+        if (this.currentUser) {
+            // You can add a user info display here
+            console.log('Logged in as:', this.currentUser.email);
+            
+            // Add logout button to the interface if needed
+            this.addUserControls();
+        }
+    }
+
+    getUserUsageDisplay() {
+        if (!this.currentUser.tierName) {
+            return '';
+        }
+        
+        if (this.currentUser.dailyLimit === -1) {
+            return '<div style="color: #28a745;">🚀 Unlimited</div>';
+        }
+        
+        const used = this.currentUser.usageToday || 0;
+        const remaining = this.currentUser.remaining || 0;
+        const limit = this.currentUser.dailyLimit;
+        const percentage = (used / limit) * 100;
+        
+        let color = '#28a745'; // Green
+        if (percentage > 80) color = '#dc3545'; // Red
+        else if (percentage > 60) color = '#ffc107'; // Yellow
+        
+        return `<div style="color: ${color};">💎 ${this.currentUser.tierName}: ${used}/${limit}</div>`;
+    }
+
+    addUserControls() {
+        // Add user controls to header if not already present
+        const header = document.querySelector('.header');
+        if (header && !document.getElementById('userControls')) {
+            const userControls = document.createElement('div');
+            userControls.id = 'userControls';
+            userControls.style.cssText = `
+                position: absolute; 
+                top: 10px; 
+                right: 15px; 
+                color: white; 
+                display: flex; 
+                align-items: flex-start; 
+                gap: 6px;
+                flex-direction: column;
+                max-width: 250px;
+                z-index: 10;
+            `;
+            
+            // Build admin menu if user is admin
+            const adminMenu = this.currentUser.isAdmin ? `
+                <div class="admin-menu" style="position: relative; order: 1;">
+                    <button id="adminMenuBtn" style="
+                        background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%); 
+                        color: #333; 
+                        border: none; 
+                        padding: 6px 12px; 
+                        border-radius: 6px; 
+                        cursor: pointer; 
+                        font-weight: 600;
+                        font-size: 12px;
+                        transition: all 0.2s ease;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    ">
+                        👑 Admin
+                    </button>
+                    <div id="adminDropdown" style="
+                        display: none; 
+                        position: absolute; 
+                        top: calc(100% + 8px); 
+                        right: 0; 
+                        background: white; 
+                        border-radius: 8px; 
+                        box-shadow: 0 8px 24px rgba(0,0,0,0.15); 
+                        min-width: 160px; 
+                        z-index: 1000;
+                        overflow: hidden;
+                        border: 1px solid #e1e5e9;
+                    ">
+                        <a href="/admin" style="
+                            display: block; 
+                            padding: 10px 14px; 
+                            color: #333; 
+                            text-decoration: none; 
+                            border-bottom: 1px solid #f0f0f0;
+                            font-size: 13px;
+                            transition: background-color 0.2s;
+                        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+                            📊 Analytics
+                        </a>
+                        <a href="/admin/users" style="
+                            display: block; 
+                            padding: 10px 14px; 
+                            color: #333; 
+                            text-decoration: none; 
+                            border-bottom: 1px solid #f0f0f0;
+                            font-size: 13px;
+                            transition: background-color 0.2s;
+                        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+                            👥 User Management
+                        </a>
+                        <a href="/admin/tiers" style="
+                            display: block; 
+                            padding: 10px 14px; 
+                            color: #333; 
+                            text-decoration: none;
+                            font-size: 13px;
+                            transition: background-color 0.2s;
+                        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+                            🏷️ Tier Management
+                        </a>
+                    </div>
+                </div>
+            ` : '';
+            
+            userControls.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                    ${adminMenu}
+                    <a href="/settings" style="
+                        background: rgba(255,255,255,0.2); 
+                        color: white; 
+                        border: none; 
+                        padding: 4px 8px; 
+                        border-radius: 4px; 
+                        cursor: pointer;
+                        font-size: 11px;
+                        text-decoration: none;
+                        transition: background-color 0.2s;
+                    " onmouseover="this.style.backgroundColor='rgba(255,255,255,0.3)'" onmouseout="this.style.backgroundColor='rgba(255,255,255,0.2)'">
+                        ⚙️ Settings
+                    </a>
+                    <button id="logoutBtn" style="
+                        background: rgba(255,255,255,0.2); 
+                        color: white; 
+                        border: none; 
+                        padding: 4px 8px; 
+                        border-radius: 4px; 
+                        cursor: pointer;
+                        font-size: 11px;
+                        transition: background-color 0.2s;
+                    " onmouseover="this.style.backgroundColor='rgba(255,255,255,0.3)'" onmouseout="this.style.backgroundColor='rgba(255,255,255,0.2)'">
+                        Logout
+                    </button>
+                </div>
+                <div style="font-size: 11px; opacity: 0.9; text-align: right;">
+                    <div>👋 ${this.currentUser.email}</div>
+                    ${this.getUserUsageDisplay()}
+                </div>
+            `;
+            
+            header.style.position = 'relative';
+            header.appendChild(userControls);
+            
+            // Add logout functionality
+            document.getElementById('logoutBtn').addEventListener('click', this.logout.bind(this));
+            
+            // Add admin menu functionality if admin
+            if (this.currentUser.isAdmin) {
+                const adminMenuBtn = document.getElementById('adminMenuBtn');
+                const adminDropdown = document.getElementById('adminDropdown');
+                
+                adminMenuBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    adminDropdown.style.display = adminDropdown.style.display === 'none' ? 'block' : 'none';
+                });
+                
+                // Close dropdown when clicking outside
+                document.addEventListener('click', () => {
+                    adminDropdown.style.display = 'none';
+                });
+                
+                // Prevent dropdown from closing when clicking inside it
+                adminDropdown.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+                
+                // Add hover effect to admin button
+                adminMenuBtn.addEventListener('mouseover', () => {
+                    adminMenuBtn.style.transform = 'translateY(-1px)';
+                    adminMenuBtn.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+                });
+                
+                adminMenuBtn.addEventListener('mouseout', () => {
+                    adminMenuBtn.style.transform = 'translateY(0)';
+                    adminMenuBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                });
+            }
+        }
+    }
+
+    async logout() {
+        try {
+            await fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.authToken}`
+                }
+            });
+        } catch (error) {
+            console.error('Logout request failed:', error);
+        } finally {
+            // Clear local storage and redirect regardless of server response
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_email');
+            window.location.href = '/auth';
+        }
+    }
+
+    redirectToLogin() {
+        window.location.href = '/auth';
+    }
+
+    // Update API calls to include authentication headers
+    getAuthHeaders() {
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        
+        if (this.authToken) {
+            headers['Authorization'] = `Bearer ${this.authToken}`;
+        }
+        
+        return headers;
     }
 
     displayWeatherInfo(data) {
@@ -727,6 +1012,8 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
                 this.updateMastodonStatus('Connected ✓', 'success');
                 this.showNotification(`🐘 Connected to @${account.username}`, 'success');
                 this.postMastodonBtn.disabled = false;
+                this.isMastodonConfigured = true;
+                this.updateMastodonCardVisibility();
             } else {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
@@ -735,12 +1022,20 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             this.updateMastodonStatus('Connection failed', 'error');
             this.showNotification('❌ Failed to connect to Mastodon. Check your instance URL and token.', 'error');
             this.postMastodonBtn.disabled = true;
+            this.isMastodonConfigured = false;
+            this.updateMastodonCardVisibility();
         }
     }
 
     updateMastodonStatus(message, type = 'success') {
         this.mastodonStatus.textContent = message;
         this.mastodonStatus.className = `mastodon-status ${type}`;
+    }
+
+    updateMastodonCardVisibility() {
+        if (this.mastodonCard) {
+            this.mastodonCard.style.display = this.isMastodonConfigured ? 'block' : 'none';
+        }
     }
 
     updateMastodonPreview() {
@@ -808,7 +1103,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         formData.append('file', file);
         
         // Use generated alt text if available, otherwise fallback
-        const altText = this.currentAltText || 'Image uploaded via Caption Generator';
+        const altText = this.currentAltText || 'Image uploaded via AI Caption Studio';
         formData.append('description', altText);
 
         const response = await fetch(`${instance}/api/v1/media`, {
@@ -870,9 +1165,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             const fullCaption = `${caption}\n\n${hashtags}`;
             await fetch('/api/store-caption', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: this.getAuthHeaders(),
                 body: JSON.stringify({ caption: fullCaption })
             });
         } catch (error) {

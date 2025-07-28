@@ -1,6 +1,6 @@
-# Instagram Caption Generator 📸✨
+# AI Caption Studio 🎨✨
 
-AI-powered web application that generates Instagram-ready captions, hashtags, and alt text from uploaded images. Features automatic EXIF data extraction and direct Mastodon posting capabilities.
+AI-powered web application that generates social media captions, hashtags, and alt text from uploaded images. Features automatic EXIF data extraction and direct Mastodon posting capabilities.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Node.js](https://img.shields.io/badge/node.js-18+-green.svg)
