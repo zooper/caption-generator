@@ -521,7 +521,7 @@ app.get('/', (c) => {
             try {
                 const response = await fetch('/api/auth/me', {
                     headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
                     }
                 });
                 
@@ -657,7 +657,7 @@ app.get('/', (c) => {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
                     },
                     body: JSON.stringify({
                         base64Image: uploadedImage,
