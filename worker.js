@@ -833,7 +833,7 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
         // Add tier_id column if it doesn't exist (for existing tables)
         try {
             const alterStmt = this.db.prepare(`
-                ALTER TABLE invite_tokens ADD COLUMN tier_id INTEGER REFERENCES user_tiers(id)
+                ALTER TABLE invite_tokens ADD COLUMN tier_id INTEGER
             `);
             await alterStmt.run();
             console.log('Added tier_id column to invite_tokens table');
