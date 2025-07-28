@@ -285,6 +285,189 @@ class D1Database {
         return result.changes > 0;
     }
 
+    // Tier management methods
+    async getAllTiers() {
+        const stmt = this.db.prepare(`
+            SELECT * FROM user_tiers ORDER BY daily_limit ASC
+        `);
+        const result = await stmt.all();
+        return result.results || [];
+    }
+
+    async getTierById(tierId) {
+        const stmt = this.db.prepare(`
+            SELECT * FROM user_tiers WHERE id = ?
+        `);
+        const result = await stmt.bind(tierId).first();
+        return result || null;
+    }
+
+    async createTier(name, dailyLimit, description = null) {
+        const stmt = this.db.prepare(`
+            INSERT INTO user_tiers (name, daily_limit, description) 
+            VALUES (?, ?, ?)
+            RETURNING id
+        `);
+        const result = await stmt.bind(name, dailyLimit, description).first();
+        return result.id;
+    }
+
+    async updateTier(tierId, name, dailyLimit, description = null) {
+        const stmt = this.db.prepare(`
+            UPDATE user_tiers 
+            SET name = ?, daily_limit = ?, description = ?, updated_at = datetime('now')
+            WHERE id = ?
+        `);
+        const result = await stmt.bind(name, dailyLimit, description, tierId).run();
+        return result.changes > 0;
+    }
+
+    async deleteTier(tierId) {
+        // Check if any users are assigned to this tier
+        const usersStmt = this.db.prepare(`
+            SELECT COUNT(*) as count FROM users WHERE tier_id = ?
+        `);
+        const usersResult = await usersStmt.bind(tierId).first();
+        
+        if (usersResult.count > 0) {
+            throw new Error('Cannot delete tier with assigned users');
+        }
+
+        const stmt = this.db.prepare(`
+            DELETE FROM user_tiers WHERE id = ?
+        `);
+        const result = await stmt.bind(tierId).run();
+        return result.changes > 0;
+    }
+
+    async setUserTier(userId, tierId) {
+        const stmt = this.db.prepare(`
+            UPDATE users SET tier_id = ? WHERE id = ?
+        `);
+        const result = await stmt.bind(tierId, userId).run();
+        return result.changes > 0;
+    }
+
+    // User management methods  
+    async getAllUsers() {
+        const stmt = this.db.prepare(`
+            SELECT u.*, t.name as tier_name, t.daily_limit, t.description as tier_description
+            FROM users u 
+            LEFT JOIN user_tiers t ON u.tier_id = t.id
+            ORDER BY u.created_at DESC
+        `);
+        const result = await stmt.all();
+        return result.results || [];
+    }
+
+    async makeUserAdmin(email) {
+        const stmt = this.db.prepare(`
+            UPDATE users SET is_admin = 1 WHERE email = ?
+        `);
+        const result = await stmt.bind(email).run();
+        return result.changes > 0;
+    }
+
+    async toggleUserStatus(userId) {
+        const stmt = this.db.prepare(`
+            UPDATE users SET is_active = NOT is_active WHERE id = ?
+        `);
+        const result = await stmt.bind(userId).run();
+        return result.changes > 0;
+    }
+
+    async deleteUser(userId) {
+        const stmt = this.db.prepare(`
+            DELETE FROM users WHERE id = ?
+        `);
+        const result = await stmt.bind(userId).run();
+        return result.changes > 0;
+    }
+
+    // Invite system methods
+    async createInviteToken(email, invitedBy, token, expiresAt) {
+        const stmt = this.db.prepare(`
+            INSERT INTO invite_tokens (email, invited_by, token, expires_at) 
+            VALUES (?, ?, ?, ?)
+        `);
+        await stmt.bind(email, invitedBy, token, expiresAt).run();
+        return { email, token, expiresAt };
+    }
+
+    async getInviteToken(token) {
+        const stmt = this.db.prepare(`
+            SELECT * FROM invite_tokens 
+            WHERE token = ? 
+            AND used_at IS NULL 
+            AND expires_at > datetime('now')
+        `);
+        const result = await stmt.bind(token).first();
+        return result || null;
+    }
+
+    async useInviteToken(token, userId) {
+        const stmt = this.db.prepare(`
+            UPDATE invite_tokens 
+            SET used_at = datetime('now'), used_by = ? 
+            WHERE token = ?
+        `);
+        const result = await stmt.bind(userId, token).run();
+        return result.changes > 0;
+    }
+
+    async getPendingInvites() {
+        const stmt = this.db.prepare(`
+            SELECT i.*, u.email as invited_by_email 
+            FROM invite_tokens i
+            JOIN users u ON i.invited_by = u.id
+            WHERE i.used_at IS NULL 
+            AND i.expires_at > datetime('now')
+            ORDER BY i.created_at DESC
+        `);
+        const result = await stmt.all();
+        return result.results || [];
+    }
+
+    // Usage statistics methods
+    async getUsersUsageStats() {
+        const stmt = this.db.prepare(`
+            SELECT 
+                u.id, u.email, u.created_at, u.last_login,
+                t.name as tier_name, t.daily_limit,
+                COALESCE(du.usage_count, 0) as usage_today
+            FROM users u
+            LEFT JOIN user_tiers t ON u.tier_id = t.id
+            LEFT JOIN daily_usage du ON u.id = du.user_id AND du.date = date('now')
+            WHERE u.is_active = 1
+            ORDER BY u.created_at DESC
+        `);
+        const result = await stmt.all();
+        return result.results || [];
+    }
+
+    async deleteAllUserSettings(userId, integrationType) {
+        const stmt = this.db.prepare(`
+            DELETE FROM user_settings 
+            WHERE user_id = ? AND integration_type = ?
+        `);
+        const result = await stmt.bind(userId, integrationType).run();
+        return result.changes;
+    }
+
+    async getUserSettings(userId, integrationType = null) {
+        let query = `SELECT * FROM user_settings WHERE user_id = ?`;
+        let params = [userId];
+        
+        if (integrationType) {
+            query += ` AND integration_type = ?`;
+            params.push(integrationType);
+        }
+        
+        const stmt = this.db.prepare(query);
+        const result = await stmt.bind(...params).all();
+        return result.results || [];
+    }
+
     async close() {
         // D1 doesn't require explicit closing
         console.log('D1 Database connection closed');

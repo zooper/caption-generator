@@ -459,6 +459,252 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
     }
 });
 
+// Tier management endpoints
+app.get('/api/admin/tiers', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        const tiers = await database.getAllTiers();
+        return c.json(tiers);
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch tiers' }, 500);
+    }
+});
+
+app.get('/api/admin/tiers/:tierId', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { tierId } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        const tier = await database.getTierById(tierId);
+        
+        if (!tier) {
+            return c.json({ error: 'Tier not found' }, 404);
+        }
+        
+        return c.json(tier);
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch tier' }, 500);
+    }
+});
+
+app.post('/api/admin/tiers', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { name, dailyLimit, description } = await c.req.json();
+        
+        if (!name || dailyLimit === undefined) {
+            return c.json({ error: 'Name and daily limit are required' }, 400);
+        }
+        
+        if (dailyLimit < -1) {
+            return c.json({ error: 'Daily limit must be -1 or greater' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        const tierId = await database.createTier(name, dailyLimit, description);
+        return c.json({ 
+            success: true, 
+            message: `Tier "${name}" created successfully`,
+            tierId 
+        });
+    } catch (error) {
+        if (error.message.includes('UNIQUE constraint')) {
+            return c.json({ error: 'A tier with this name already exists' }, 400);
+        }
+        return c.json({ error: 'Failed to create tier' }, 500);
+    }
+});
+
+app.put('/api/admin/tiers/:tierId', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { tierId } = c.req.param();
+        const { name, dailyLimit, description } = await c.req.json();
+        
+        if (!name || dailyLimit === undefined) {
+            return c.json({ error: 'Name and daily limit are required' }, 400);
+        }
+        
+        if (dailyLimit < -1) {
+            return c.json({ error: 'Daily limit must be -1 or greater' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        const success = await database.updateTier(tierId, name, dailyLimit, description);
+        
+        if (success) {
+            return c.json({ 
+                success: true, 
+                message: `Tier "${name}" updated successfully` 
+            });
+        } else {
+            return c.json({ error: 'Tier not found' }, 404);
+        }
+    } catch (error) {
+        if (error.message.includes('UNIQUE constraint')) {
+            return c.json({ error: 'A tier with this name already exists' }, 400);
+        }
+        return c.json({ error: 'Failed to update tier' }, 500);
+    }
+});
+
+app.delete('/api/admin/tiers/:tierId', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { tierId } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        const success = await database.deleteTier(tierId);
+        
+        if (success) {
+            return c.json({ 
+                success: true, 
+                message: 'Tier deleted successfully' 
+            });
+        } else {
+            return c.json({ error: 'Tier not found' }, 404);
+        }
+    } catch (error) {
+        if (error.message.includes('Cannot delete tier with assigned users')) {
+            return c.json({ error: 'Cannot delete tier that has users assigned to it' }, 400);
+        }
+        return c.json({ error: 'Failed to delete tier' }, 500);
+    }
+});
+
+app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { userId } = c.req.param();
+        const { tierId } = await c.req.json();
+        
+        if (!tierId) {
+            return c.json({ error: 'Tier ID is required' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        // Verify tier exists
+        const tier = await database.getTierById(tierId);
+        if (!tier) {
+            return c.json({ error: 'Invalid tier ID' }, 400);
+        }
+        
+        const success = await database.setUserTier(userId, tierId);
+        
+        if (success) {
+            return c.json({ 
+                success: true, 
+                message: `User tier updated to "${tier.name}"` 
+            });
+        } else {
+            return c.json({ error: 'User not found' }, 404);
+        }
+    } catch (error) {
+        return c.json({ error: 'Failed to update user tier' }, 500);
+    }
+});
+
+// Invite system endpoints
+app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { email } = await c.req.json();
+        
+        if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+            return c.json({ error: 'Valid email address required' }, 400);
+        }
+
+        const database = new D1Database(c.env.DB);
+        // Check if user already exists
+        const existingUser = await database.getUserByEmail(email);
+        if (existingUser) {
+            return c.json({ error: 'User already exists' }, 400);
+        }
+
+        // Generate invite token
+        const token = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+        
+        const user = c.get('user');
+        await database.createInviteToken(email, user.id, token, expiresAt);
+
+        // Create invite link
+        const inviteUrl = `${new URL(c.req.url).origin}/auth?invite=${token}&email=${encodeURIComponent(email)}`;
+
+        // Send email using Resend
+        try {
+            const emailData = {
+                from: c.env.SMTP_FROM_EMAIL || 'AI Caption Studio <noreply@resend.dev>',
+                to: email,
+                subject: 'You\\'re invited to AI Caption Studio',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2>🎉 You're Invited!</h2>
+                        <p>Hi there!</p>
+                        <p><strong>${user.email}</strong> has invited you to join AI Caption Studio, an AI-powered tool for creating Instagram captions and hashtags.</p>
+                        <div style="margin: 30px 0;">
+                            <a href="${inviteUrl}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                                🚀 Accept Invitation
+                            </a>
+                        </div>
+                        <p><strong>This invitation expires in 7 days.</strong></p>
+                        <p>If you're not interested, you can safely ignore this email.</p>
+                        <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                        <p style="color: #666; font-size: 12px;">
+                            Invited by: ${user.email}<br>
+                            Time: ${new Date().toLocaleString()}
+                        </p>
+                    </div>
+                `
+            };
+
+            const response = await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + c.env.SMTP_PASSWORD,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(emailData)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.text();
+                throw new Error('Resend API error: ' + response.status + ' - ' + errorData);
+            }
+
+            return c.json({ 
+                success: true, 
+                message: `Invitation sent to ${email}`,
+                expiresIn: '7 days'
+            });
+        } catch (emailError) {
+            console.error('Email sending failed:', emailError);
+            return c.json({ 
+                success: true, 
+                message: `Invitation created but email sending failed: ${emailError.message}`,
+                inviteUrl: inviteUrl // Fallback: show link for manual sharing
+            });
+        }
+
+    } catch (error) {
+        console.error('Invite error:', error);
+        return c.json({ error: 'Failed to send invitation' }, 500);
+    }
+});
+
+app.get('/api/admin/invites', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        const invites = await database.getPendingInvites();
+        return c.json(invites);
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch invites' }, 500);
+    }
+});
+
+app.get('/api/admin/usage-stats', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        const stats = await database.getUsersUsageStats();
+        return c.json(stats);
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch usage statistics' }, 500);
+    }
+});
+
 // Advanced prompt building with EXIF extraction and weather data
 async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null) {
     console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
@@ -1162,11 +1408,65 @@ app.get('/', (c) => {
     <title>AI Caption Studio</title>
     <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
     <style>
+        /* Theme System */
+        :root {
+            --primary-gradient: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --accent-color: #405de6;
+            --accent-rgb: 64, 93, 230;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --card-background: #ffffff;
+            --border-color: #e1e5e9;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --hover-shadow: rgba(64, 93, 230, 0.3);
+        }
+        
+        [data-theme="dark"] {
+            --primary-gradient: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            --background-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            --accent-color: #405de6;
+            --accent-rgb: 64, 93, 230;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --card-background: #2a2a3e;
+            --border-color: #404040;
+            --shadow-color: rgba(0, 0, 0, 0.3);
+            --hover-shadow: rgba(64, 93, 230, 0.5);
+        }
+        
+        [data-theme="purple-creative"] {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --accent-color: #8B5CF6;
+            --accent-rgb: 139, 92, 246;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --card-background: #ffffff;
+            --border-color: #e1e5e9;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --hover-shadow: rgba(139, 92, 246, 0.3);
+        }
+        
+        [data-theme="ocean-blue"] {
+            --primary-gradient: linear-gradient(135deg, #2196F3 0%, #21CBF3 100%);
+            --background-gradient: linear-gradient(135deg, #0c4a6e 0%, #0891b2 100%);
+            --accent-color: #2196F3;
+            --accent-rgb: 33, 150, 243;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --card-background: #ffffff;
+            --border-color: #e1e5e9;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --hover-shadow: rgba(33, 150, 243, 0.3);
+        }
+        </style>
+    <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--card-background); color: var(--text-primary); transition: all 0.3s ease; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .header { text-align: center; margin-bottom: 40px; position: relative; }
-        .header h1 { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3em; margin-bottom: 10px; }
+        .header h1 { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 3em; margin-bottom: 10px; }
         .auth-section { position: absolute; top: 0; right: 0; padding: 20px; }
         .auth-form { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); min-width: 300px; }
         .auth-input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
