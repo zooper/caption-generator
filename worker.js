@@ -332,7 +332,8 @@ D1Database.prototype.toggleUserStatus = async function(userId) {
         UPDATE users SET is_active = NOT is_active WHERE id = ?
     `);
     const result = await stmt.bind(userId).run();
-    return result.changes > 0;
+    const changes = result.meta?.changes || result.changes || 0;
+    return changes > 0;
 };
 
 D1Database.prototype.getAllTiers = async function() {
@@ -370,7 +371,8 @@ D1Database.prototype.updateTier = async function(tierId, name, dailyLimit, descr
         WHERE id = ?
     `);
     const result = await stmt.bind(name, dailyLimit, description, tierId).run();
-    return result.changes > 0;
+    const changes = result.meta?.changes || result.changes || 0;
+    return changes > 0;
 };
 
 D1Database.prototype.deleteTier = async function(tierId) {
@@ -388,7 +390,8 @@ D1Database.prototype.deleteTier = async function(tierId) {
         DELETE FROM user_tiers WHERE id = ?
     `);
     const result = await stmt.bind(tierId).run();
-    return result.changes > 0;
+    const changes = result.meta?.changes || result.changes || 0;
+    return changes > 0;
 };
 
 D1Database.prototype.setUserTier = async function(userId, tierId) {
@@ -399,7 +402,11 @@ D1Database.prototype.setUserTier = async function(userId, tierId) {
         `);
         const result = await stmt.bind(tierId, userId).run();
         console.log('setUserTier result:', result);
-        return result.changes > 0;
+        
+        // D1 result structure: result.meta.changes or result.changes
+        const changes = result.meta?.changes || result.changes || 0;
+        console.log('Changes detected:', changes);
+        return changes > 0;
     } catch (error) {
         console.error('Error in setUserTier:', error);
         throw error;
@@ -453,7 +460,8 @@ D1Database.prototype.useInviteToken = async function(token, userId) {
         WHERE token = ?
     `);
     const result = await stmt.bind(userId, token).run();
-    return result.changes > 0;
+    const changes = result.meta?.changes || result.changes || 0;
+    return changes > 0;
 };
 
 D1Database.prototype.getPendingInvites = async function() {
