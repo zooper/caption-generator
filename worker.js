@@ -2701,7 +2701,7 @@ app.get('/', (c) => {
                 <h2>🔐 Login to Continue</h2>
                 <p>Enter your email to receive a magic login link</p>
                 <input type="email" id="emailInput" class="auth-input" placeholder="your@email.com" required>
-                <button onclick="requestLogin()" class="auth-btn">Send Magic Link</button>
+                <button id="loginButton" class="auth-btn">Send Magic Link</button>
                 <div id="loginMessage" style="margin-top: 15px;"></div>
             </div>
         </div>
@@ -3344,9 +3344,7 @@ app.get('/', (c) => {
                     console.log('Response data:', data);
                     
                     if (data.success) {
-                        messageDiv.innerHTML = 
-                            '<p style="color: green;">✅ ' + data.message + '</p>' +
-                            '<p style="font-size: 12px; color: #666;">Link expires in ' + data.expiresIn + '</p>';
+                        messageDiv.innerHTML = '<p style="color: green;">✅ ' + data.message + '</p>' + '<p style="font-size: 12px; color: #666;">Link expires in ' + data.expiresIn + '</p>';
                         if (data.loginUrl) {
                             messageDiv.innerHTML += '<p style="font-size: 12px; margin-top: 10px;"><a href="' + data.loginUrl + '" target="_blank">Click here if email fails</a></p>';
                         }
@@ -3395,8 +3393,8 @@ app.get('/', (c) => {
                 logout: typeof window.logout
             });
             
-            // Debug: Add event listener as alternative to onclick
-            const loginButton = document.querySelector('button[onclick="requestLogin()"]');
+            // Add event listener to login button
+            const loginButton = document.getElementById('loginButton');
             if (loginButton) {
                 console.log('Found login button, adding event listener');
                 loginButton.addEventListener('click', function(e) {
@@ -3406,6 +3404,18 @@ app.get('/', (c) => {
                 });
             } else {
                 console.log('Login button not found');
+            }
+            
+            // Add Enter key listener to email input
+            const emailInput = document.getElementById('emailInput');
+            if (emailInput) {
+                emailInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        console.log('Enter key pressed in email input');
+                        requestLogin();
+                    }
+                });
             }
             
         }); // End of DOMContentLoaded callback
