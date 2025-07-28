@@ -999,32 +999,44 @@ app.get('/', (c) => {
         }
 
         async function requestLogin() {
+            console.log('requestLogin function called');
             const email = document.getElementById('emailInput').value;
             const messageDiv = document.getElementById('loginMessage');
+            
+            console.log('Email value:', email);
             
             if (!email) {
                 messageDiv.innerHTML = '<p style="color: red;">Please enter your email address</p>';
                 return;
             }
 
+            messageDiv.innerHTML = '<p style="color: blue;">Sending magic link...</p>';
+
             try {
+                console.log('Making fetch request to /api/auth/request-login');
                 const response = await fetch('/api/auth/request-login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email })
                 });
 
+                console.log('Response status:', response.status);
                 const data = await response.json();
+                console.log('Response data:', data);
                 
                 if (data.success) {
                     messageDiv.innerHTML = 
                         '<p style="color: green;">✅ ' + data.message + '</p>' +
                         '<p style="font-size: 12px; color: #666;">Link expires in ' + data.expiresIn + '</p>';
+                    if (data.loginUrl) {
+                        messageDiv.innerHTML += '<p style="font-size: 12px; margin-top: 10px;"><a href="' + data.loginUrl + '" target="_blank">Click here if email fails</a></p>';
+                    }
                 } else {
                     messageDiv.innerHTML = '<p style="color: red;">❌ ' + data.error + '</p>';
                 }
             } catch (error) {
-                messageDiv.innerHTML = '<p style="color: red;">❌ Failed to send magic link</p>';
+                console.error('Fetch error:', error);
+                messageDiv.innerHTML = '<p style="color: red;">❌ Failed to send magic link: ' + error.message + '</p>';
             }
         }
 
