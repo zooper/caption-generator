@@ -2805,15 +2805,22 @@ app.get('/admin', (c) => {
         }
 
         async function loadAdminData() {
-            await Promise.all([
-                loadStats(),
-                loadRecentUsers(),
-                loadRecentInvites(),
-                loadSystemSettings()
-            ]);
+            console.log('Loading admin data...');
+            try {
+                await Promise.all([
+                    loadStats(),
+                    loadRecentUsers(),
+                    loadRecentInvites(),
+                    loadSystemSettings()
+                ]);
+                console.log('Admin data loading completed');
+            } catch (error) {
+                console.error('Error loading admin data:', error);
+            }
         }
 
         async function loadStats() {
+            console.log('Loading stats...');
             try {
                 const [statsResponse, invitesResponse, tiersResponse] = await Promise.all([
                     fetch('/api/admin/stats', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') } }),
@@ -2821,20 +2828,35 @@ app.get('/admin', (c) => {
                     fetch('/api/admin/tiers', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') } })
                 ]);
 
+                console.log('Stats responses:', {
+                    statsOk: statsResponse.ok,
+                    invitesOk: invitesResponse.ok,
+                    tiersOk: tiersResponse.ok
+                });
+
                 if (statsResponse.ok) {
                     const stats = await statsResponse.json();
+                    console.log('Stats data:', stats);
                     document.getElementById('totalUsers').textContent = stats.totalUsers;
                     document.getElementById('totalQueries').textContent = stats.totalQueries;
+                } else {
+                    console.error('Stats response not ok:', statsResponse.status, await statsResponse.text());
                 }
 
                 if (invitesResponse.ok) {
                     const invites = await invitesResponse.json();
+                    console.log('Invites data:', invites);
                     document.getElementById('pendingInvites').textContent = invites.length;
+                } else {
+                    console.error('Invites response not ok:', invitesResponse.status, await invitesResponse.text());
                 }
 
                 if (tiersResponse.ok) {
                     const tiers = await tiersResponse.json();
+                    console.log('Tiers data:', tiers);
                     document.getElementById('activeTiers').textContent = tiers.length;
+                } else {
+                    console.error('Tiers response not ok:', tiersResponse.status, await tiersResponse.text());
                 }
             } catch (error) {
                 console.error('Error loading stats:', error);
@@ -2842,13 +2864,17 @@ app.get('/admin', (c) => {
         }
 
         async function loadRecentUsers() {
+            console.log('Loading recent users...');
             try {
                 const response = await fetch('/api/admin/usage-stats', {
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
+                console.log('Recent users response:', response.ok, response.status);
+                
                 if (response.ok) {
                     const users = await response.json();
+                    console.log('Recent users data:', users);
                     const tbody = document.getElementById('recentUsers');
                     tbody.innerHTML = users.slice(0, 10).map(user => 
                         '<tr>' +
@@ -2859,20 +2885,28 @@ app.get('/admin', (c) => {
                         '<td><span style="color: green;">●</span> Active</td>' +
                         '</tr>'
                     ).join('');
+                } else {
+                    console.error('Recent users response not ok:', response.status, await response.text());
+                    document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users (Status: ' + response.status + ')</td></tr>';
                 }
             } catch (error) {
-                document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users</td></tr>';
+                console.error('Error loading recent users:', error);
+                document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users: ' + error.message + '</td></tr>';
             }
         }
 
         async function loadRecentInvites() {
+            console.log('Loading recent invites...');
             try {
                 const response = await fetch('/api/admin/invites', {
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
+                console.log('Recent invites response:', response.ok, response.status);
+                
                 if (response.ok) {
                     const invites = await response.json();
+                    console.log('Recent invites data:', invites);
                     const tbody = document.getElementById('recentInvites');
                     tbody.innerHTML = invites.slice(0, 5).map(invite => 
                         '<tr>' +
@@ -2882,9 +2916,13 @@ app.get('/admin', (c) => {
                         '<td>' + new Date(invite.expires_at).toLocaleDateString() + '</td>' +
                         '</tr>'
                     ).join('');
+                } else {
+                    console.error('Recent invites response not ok:', response.status, await response.text());
+                    document.getElementById('recentInvites').innerHTML = '<tr><td colspan="4">Failed to load invites (Status: ' + response.status + ')</td></tr>';
                 }
             } catch (error) {
-                document.getElementById('recentInvites').innerHTML = '<tr><td colspan="4">Failed to load invites</td></tr>';
+                console.error('Error loading recent invites:', error);
+                document.getElementById('recentInvites').innerHTML = '<tr><td colspan="4">Failed to load invites: ' + error.message + '</td></tr>';
             }
         }
 
