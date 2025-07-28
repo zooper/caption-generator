@@ -81,8 +81,7 @@ CREATE TABLE IF NOT EXISTS invite_tokens (
     used_at DATETIME,
     used_by_user_id INTEGER,
     FOREIGN KEY (invited_by_user_id) REFERENCES users (id),
-    FOREIGN KEY (used_by_user_id) REFERENCES users (id),
-    FOREIGN KEY (tier_id) REFERENCES user_tiers (id)
+    FOREIGN KEY (used_by_user_id) REFERENCES users (id)
 );
 
 -- User settings for integrations

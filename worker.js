@@ -824,8 +824,7 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
                 used_by INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (invited_by) REFERENCES users(id),
-                FOREIGN KEY (used_by) REFERENCES users(id),
-                FOREIGN KEY (tier_id) REFERENCES user_tiers(id)
+                FOREIGN KEY (used_by) REFERENCES users(id)
             )
         `);
         await stmt.run();
