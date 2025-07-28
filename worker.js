@@ -925,14 +925,23 @@ D1Database.prototype.getInviteToken = async function(token) {
 };
 
 D1Database.prototype.useInviteToken = async function(token, userId) {
-    const stmt = this.db.prepare(`
-        UPDATE invite_tokens 
-        SET used_at = datetime('now'), used_by = ? 
-        WHERE token = ?
-    `);
-    const result = await stmt.bind(userId, token).run();
-    const changes = result.meta?.changes || result.changes || 0;
-    return changes > 0;
+    console.log('useInviteToken called with:', { token, userId, userIdType: typeof userId });
+    
+    try {
+        const stmt = this.db.prepare(`
+            UPDATE invite_tokens 
+            SET used_at = datetime('now'), used_by = ? 
+            WHERE token = ?
+        `);
+        console.log('About to bind parameters:', { userId, token });
+        const result = await stmt.bind(userId, token).run();
+        console.log('useInviteToken result:', result);
+        const changes = result.meta?.changes || result.changes || 0;
+        return changes > 0;
+    } catch (error) {
+        console.error('Error in useInviteToken:', error);
+        throw error;
+    }
 };
 
 D1Database.prototype.getPendingInvites = async function() {
