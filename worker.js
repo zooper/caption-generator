@@ -376,16 +376,32 @@ D1Database.prototype.useInviteToken = async function(token, userId) {
 };
 
 D1Database.prototype.getPendingInvites = async function() {
-    const stmt = this.db.prepare(`
-        SELECT i.*, u.email as invited_by_email 
-        FROM invite_tokens i
-        JOIN users u ON i.invited_by = u.id
-        WHERE i.used_at IS NULL 
-        AND i.expires_at > datetime('now')
-        ORDER BY i.created_at DESC
-    `);
-    const result = await stmt.all();
-    return result.results || [];
+    try {
+        // First check if the invite_tokens table exists
+        const tableCheck = this.db.prepare(`
+            SELECT name FROM sqlite_master WHERE type='table' AND name='invite_tokens'
+        `);
+        const tableExists = await tableCheck.first();
+        
+        if (!tableExists) {
+            console.log('invite_tokens table does not exist, returning empty array');
+            return [];
+        }
+        
+        const stmt = this.db.prepare(`
+            SELECT i.*, COALESCE(u.email, 'Unknown') as invited_by_email 
+            FROM invite_tokens i
+            LEFT JOIN users u ON i.invited_by = u.id
+            WHERE i.used_at IS NULL 
+            AND i.expires_at > datetime('now')
+            ORDER BY i.created_at DESC
+        `);
+        const result = await stmt.all();
+        return result.results || [];
+    } catch (error) {
+        console.error('Error in getPendingInvites:', error);
+        return [];
+    }
 };
 
 D1Database.prototype.getUsersUsageStats = async function() {
@@ -916,9 +932,11 @@ app.get('/api/admin/invites', authenticateToken, requireAdmin, async (c) => {
     try {
         const database = new D1Database(c.env.DB);
         const invites = await database.getPendingInvites();
+        console.log('Invites fetched successfully:', invites.length, 'invites');
         return c.json(invites);
     } catch (error) {
-        return c.json({ error: 'Failed to fetch invites' }, 500);
+        console.error('Error in /api/admin/invites:', error);
+        return c.json({ error: 'Failed to fetch invites: ' + error.message }, 500);
     }
 });
 
