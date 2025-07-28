@@ -13,13 +13,21 @@ class D1Database {
         this.CURRENT_SCHEMA_VERSION = 8;
     }
 
-    async createUser(email) {
+    async createUser(email, env = null) {
         try {
+            // Check if this email should be admin based on ADMIN_EMAIL env var
+            const isAdmin = env && env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? 1 : 0;
+            
             const stmt = this.db.prepare(`
-                INSERT INTO users (email, is_active) VALUES (?, 1)
-                RETURNING id, email
+                INSERT INTO users (email, is_active, is_admin) VALUES (?, 1, ?)
+                RETURNING id, email, is_admin
             `);
-            const result = await stmt.bind(email).first();
+            const result = await stmt.bind(email, isAdmin).first();
+            
+            if (isAdmin) {
+                console.log('Admin user created:', email);
+            }
+            
             return result;
         } catch (error) {
             if (error.message.includes('UNIQUE constraint failed')) {
@@ -93,6 +101,52 @@ class D1Database {
     async incrementDailyUsage(userId) {
         // Placeholder for usage increment
         console.log('Usage incremented for user:', userId);
+    }
+
+    // System settings methods
+    async getSystemSetting(key, defaultValue = null) {
+        try {
+            const stmt = this.db.prepare(`
+                SELECT setting_value FROM system_settings WHERE setting_key = ?
+            `);
+            const result = await stmt.bind(key).first();
+            return result ? result.setting_value : defaultValue;
+        } catch (error) {
+            // If table doesn't exist yet, return default
+            console.log('System settings table may not exist:', error.message);
+            return defaultValue;
+        }
+    }
+
+    async setSystemSetting(key, value) {
+        try {
+            const stmt = this.db.prepare(`
+                INSERT INTO system_settings (setting_key, setting_value, updated_at) 
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(setting_key) 
+                DO UPDATE SET 
+                    setting_value = excluded.setting_value,
+                    updated_at = datetime('now')
+            `);
+            await stmt.bind(key, value).run();
+            return true;
+        } catch (error) {
+            console.error('Failed to set system setting:', error);
+            return false;
+        }
+    }
+
+    async getAllSystemSettings() {
+        try {
+            const stmt = this.db.prepare(`
+                SELECT * FROM system_settings ORDER BY setting_key
+            `);
+            const result = await stmt.all();
+            return result.results || [];
+        } catch (error) {
+            console.log('System settings table may not exist:', error.message);
+            return [];
+        }
     }
 }
 
@@ -329,7 +383,7 @@ app.get('/auth/verify', async (c) => {
         try {
             user = await database.getUserByEmail(loginToken.email);
             if (!user) {
-                user = await database.createUser(loginToken.email);
+                user = await database.createUser(loginToken.email, c.env);
             }
         } catch (error) {
             if (error.message === 'USER_EXISTS') {
@@ -705,6 +759,52 @@ app.get('/api/admin/usage-stats', authenticateToken, requireAdmin, async (c) => 
     }
 });
 
+// System settings endpoints
+app.get('/api/admin/settings', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        const settings = await database.getAllSystemSettings();
+        
+        // Add some default settings if they don't exist
+        const settingsMap = {};
+        settings.forEach(setting => {
+            settingsMap[setting.setting_key] = setting.setting_value;
+        });
+        
+        // Ensure we have registration setting
+        if (!settingsMap.hasOwnProperty('registration_open')) {
+            await database.setSystemSetting('registration_open', 'true');
+            settingsMap.registration_open = 'true';
+        }
+        
+        return c.json({
+            settings: settingsMap,
+            adminEmail: c.env.ADMIN_EMAIL || 'Not configured'
+        });
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch system settings' }, 500);
+    }
+});
+
+app.post('/api/admin/settings', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { settings } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        // Update each setting
+        for (const [key, value] of Object.entries(settings)) {
+            await database.setSystemSetting(key, value);
+        }
+        
+        return c.json({ 
+            success: true, 
+            message: 'System settings updated successfully' 
+        });
+    } catch (error) {
+        return c.json({ error: 'Failed to update system settings' }, 500);
+    }
+});
+
 // Advanced prompt building with EXIF extraction and weather data
 async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null) {
     console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
@@ -796,7 +896,8 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                         
                         if (typeof dateStr === 'string') {
                             // Standard EXIF format: "2024:01:15 14:30:25"
-                            dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T') + 'Z';
+                            // Convert to ISO format but treat as local time (no Z suffix)
+                            dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
                             parsedDate = new Date(dateStr);
                         } else if (dateStr instanceof Date) {
                             parsedDate = dateStr;
@@ -806,7 +907,12 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                             extractedData.photoDateTime = parsedDate.toISOString();
                             extractedData.dateTimeSource = field;
                             context.push('Photo taken: ' + parsedDate.toLocaleDateString() + ' ' + parsedDate.toLocaleTimeString());
-                            console.log('Photo date extracted from ' + field + ':', parsedDate);
+                            console.log('Photo date extracted from ' + field + ':', {
+                                original: exifData[field],
+                                converted: dateStr,
+                                parsed: parsedDate,
+                                iso: parsedDate.toISOString()
+                            });
                             break;
                         }
                     } catch (error) {
@@ -1093,7 +1199,8 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                     
                     if (typeof dateStr === 'string') {
                         // Standard EXIF format: "2024:01:15 14:30:25"
-                        dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T') + 'Z';
+                        // Convert to ISO format but treat as local time (no Z suffix)
+                        dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
                         parsedDate = new Date(dateStr);
                     } else if (dateStr instanceof Date) {
                         parsedDate = dateStr;
@@ -1102,7 +1209,12 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                     if (parsedDate && !isNaN(parsedDate.getTime())) {
                         photoTimestamp = parsedDate.getTime();
                         dateSource = field;
-                        console.log('Successfully parsed ' + field + ':', new Date(photoTimestamp));
+                        console.log('Weather: Photo date extracted from ' + field + ':', {
+                            original: exifData[field],
+                            converted: dateStr,
+                            parsed: parsedDate,
+                            timestamp: photoTimestamp
+                        });
                         break;
                     }
                 } catch (dateError) {
@@ -1501,7 +1613,15 @@ app.get('/', (c) => {
             <div class="auth-section">
                 <div id="authStatus" class="user-info hidden">
                     <p>Welcome, <span id="userEmail"></span>!</p>
-                    <button onclick="logout()" style="margin-top: 10px; padding: 5px 10px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Logout</button>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center;">
+                        <select id="themeSelector" onchange="changeTheme()" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                            <option value="default">🎨 Default</option>
+                            <option value="dark">🌙 Dark</option>
+                            <option value="purple-creative">💜 Purple</option>
+                            <option value="ocean-blue">🌊 Ocean</option>
+                        </select>
+                        <button onclick="logout()" style="padding: 5px 10px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;">Logout</button>
+                    </div>
                 </div>
             </div>
             <h1>🎨 AI Caption Studio</h1>
@@ -1733,8 +1853,44 @@ app.get('/', (c) => {
             showLoginForm();
         }
 
+        // Theme management functions
+        function changeTheme() {
+            const themeSelector = document.getElementById('themeSelector');
+            const selectedTheme = themeSelector.value;
+            
+            // Remove existing theme classes
+            document.body.removeAttribute('data-theme');
+            
+            // Apply new theme
+            if (selectedTheme !== 'default') {
+                document.body.setAttribute('data-theme', selectedTheme);
+            }
+            
+            // Save theme preference
+            localStorage.setItem('selectedTheme', selectedTheme);
+            
+            console.log('Theme changed to:', selectedTheme);
+        }
+        
+        function loadSavedTheme() {
+            const savedTheme = localStorage.getItem('selectedTheme') || 'default';
+            const themeSelector = document.getElementById('themeSelector');
+            
+            if (themeSelector) {
+                themeSelector.value = savedTheme;
+                
+                // Apply the saved theme
+                if (savedTheme !== 'default') {
+                    document.body.setAttribute('data-theme', savedTheme);
+                }
+            }
+        }
+
         // Check authentication on page load
-        document.addEventListener('DOMContentLoaded', checkAuth);
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+            loadSavedTheme();
+        });
 
         // File upload handling
         const uploadArea = document.getElementById('uploadArea');
@@ -2052,23 +2208,98 @@ app.get('/admin', (c) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - AI Caption Studio</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 40px; }
-        .header h1 { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .admin-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        .users-table { width: 100%; border-collapse: collapse; }
-        .users-table th, .users-table td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-        .btn { padding: 8px 16px; background: #405de6; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        .btn:hover { background: #3a52d1; }
+        /* Theme System */
+        :root {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e2e8f0;
+        }
+        
+        [data-theme="dark"] {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            --card-background: #2a2a3e;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --border-color: #404040;
+        }
+        
+        [data-theme="purple-creative"] {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e2e8f0;
+        }
+        
+        [data-theme="ocean-blue"] {
+            --primary-gradient: linear-gradient(135deg, #2196F3 0%, #21CBF3 100%);
+            --background-gradient: linear-gradient(135deg, #0c4a6e 0%, #0891b2 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e2e8f0;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--background-gradient); min-height: 100vh; color: var(--text-primary); padding: 20px; transition: all 0.3s ease; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .admin-header { background: var(--card-background); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
+        .admin-header h1 { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 2rem; font-weight: 700; }
+        .nav-links { display: flex; gap: 15px; }
+        .nav-link { padding: 10px 20px; background: var(--primary-gradient); color: white; text-decoration: none; border-radius: 8px; font-weight: 500; transition: transform 0.2s; }
+        .nav-link:hover { transform: translateY(-2px); }
+        .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .admin-card { background: var(--card-background); border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+        .card-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 15px; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+        .stat-value { font-size: 2.5rem; font-weight: 700; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .stat-label { color: var(--text-secondary); font-size: 0.9rem; margin-top: 5px; }
+        .admin-section { background: var(--card-background); border-radius: 15px; padding: 30px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+        .section-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 20px; color: var(--text-primary); }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: var(--primary-gradient); color: white; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(139, 92, 246, 0.4); }
+        .btn-secondary { background: #f1f5f9; color: #475569; }
+        .btn-secondary:hover { background: #e2e8f0; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
+        .table th { background: #f8fafc; font-weight: 600; color: var(--text-primary); }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; margin-bottom: 5px; font-weight: 500; color: var(--text-primary); }
+        .form-input { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--card-background); color: var(--text-primary); }
+        .form-input:focus { outline: none; border-color: #8B5CF6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); }
+        .modal-content { background-color: var(--card-background); margin: 10% auto; padding: 30px; border-radius: 15px; width: 90%; max-width: 500px; }
         .hidden { display: none; }
+        .flex { display: flex; }
+        .justify-between { justify-content: space-between; }
+        .items-center { align-items: center; }
+        .gap-3 { gap: 12px; }
+        .mb-4 { margin-bottom: 16px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
+        <div class="admin-header">
             <h1>🛠️ Admin Dashboard</h1>
-            <nav><a href="/">← Back to Main</a></nav>
+            <div class="nav-links">
+                <select id="themeSelector" onchange="changeTheme()" style="padding: 10px 20px; border: none; border-radius: 8px; margin-right: 10px; cursor: pointer; font-weight: 500;">
+                    <option value="default">🎨 Default</option>
+                    <option value="dark">🌙 Dark</option>
+                    <option value="purple-creative">💜 Purple</option>
+                    <option value="ocean-blue">🌊 Ocean</option>
+                </select>
+                <a href="/" class="nav-link">🏠 Main App</a>
+                <a href="/admin/users" class="nav-link">👥 Users</a>
+                <a href="/admin/tiers" class="nav-link">🏆 Tiers</a>
+                <button class="nav-link" onclick="logout()" style="border: none; cursor: pointer;">🚪 Logout</button>
+            </div>
         </div>
 
         <div id="loginRequired" class="admin-section">
@@ -2077,26 +2308,126 @@ app.get('/admin', (c) => {
         </div>
 
         <div id="adminContent" class="hidden">
-            <div class="admin-section">
-                <h2>📊 Statistics</h2>
-                <div id="stats">Loading...</div>
+            <!-- Stats Grid -->
+            <div class="admin-grid">
+                <div class="admin-card">
+                    <div class="card-title">👥 Total Users</div>
+                    <div class="stat-value" id="totalUsers">-</div>
+                    <div class="stat-label">Registered users</div>
+                </div>
+                <div class="admin-card">
+                    <div class="card-title">📊 Total Queries</div>
+                    <div class="stat-value" id="totalQueries">-</div>
+                    <div class="stat-label">AI generations</div>
+                </div>
+                <div class="admin-card">
+                    <div class="card-title">🎫 Pending Invites</div>
+                    <div class="stat-value" id="pendingInvites">-</div>
+                    <div class="stat-label">Awaiting acceptance</div>
+                </div>
+                <div class="admin-card">
+                    <div class="card-title">🏆 Active Tiers</div>
+                    <div class="stat-value" id="activeTiers">-</div>
+                    <div class="stat-label">User tier levels</div>
+                </div>
             </div>
 
+            <!-- Quick Actions -->
             <div class="admin-section">
-                <h2>👥 Users</h2>
-                <table class="users-table">
+                <div class="section-title">⚡ Quick Actions</div>
+                <div class="flex gap-3">
+                    <button class="btn btn-primary" onclick="showInviteModal()">📧 Send Invite</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/admin/tiers'">🏆 Manage Tiers</button>
+                    <button class="btn btn-secondary" onclick="window.location.href='/admin/users'">👥 Manage Users</button>
+                    <button class="btn btn-secondary" onclick="refreshData()">🔄 Refresh Data</button>
+                </div>
+            </div>
+
+            <!-- Recent Users -->
+            <div class="admin-section">
+                <div class="section-title">👥 Recent Users</div>
+                <table class="table">
                     <thead>
                         <tr>
                             <th>Email</th>
-                            <th>Created</th>
-                            <th>Admin</th>
-                            <th>Actions</th>
+                            <th>Tier</th>
+                            <th>Usage Today</th>
+                            <th>Joined</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
-                    <tbody id="usersTable">
+                    <tbody id="recentUsers">
+                        <tr><td colspan="5">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Recent Invites -->
+            <div class="admin-section">
+                <div class="section-title">📧 Recent Invites</div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Invited By</th>
+                            <th>Created</th>
+                            <th>Expires</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentInvites">
                         <tr><td colspan="4">Loading...</td></tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- System Settings -->
+            <div class="admin-section">
+                <div class="section-title">⚙️ System Settings</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label">👤 Admin Email</label>
+                            <input type="text" id="adminEmailDisplay" class="form-input" readonly style="background: #f8f9fa;">
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Set via ADMIN_EMAIL environment variable</p>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">🔓 Registration Status</label>
+                            <select id="registrationOpen" class="form-input">
+                                <option value="true">Open - Anyone can register</option>
+                                <option value="false">Closed - Invite only</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label">📊 System Status</label>
+                            <div style="padding: 10px; background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px;">
+                                <p><strong>Version:</strong> 1.0.0</p>
+                                <p><strong>Database:</strong> Cloudflare D1</p>
+                                <p><strong>Runtime:</strong> Cloudflare Workers</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-3" style="margin-top: 20px;">
+                    <button class="btn btn-primary" onclick="saveSystemSettings()">💾 Save Settings</button>
+                    <button class="btn btn-secondary" onclick="loadSystemSettings()">🔄 Reload Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invite Modal -->
+    <div id="inviteModal" class="modal">
+        <div class="modal-content">
+            <h2 class="mb-4">📧 Send Invitation</h2>
+            <div class="form-group">
+                <label class="form-label">Email Address</label>
+                <input type="email" id="inviteEmail" class="form-input" placeholder="user@example.com">
+            </div>
+            <div class="flex justify-between gap-3">
+                <button class="btn btn-secondary" onclick="closeInviteModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="sendInvite()">Send Invite</button>
             </div>
         </div>
     </div>
@@ -2105,7 +2436,8 @@ app.get('/admin', (c) => {
         async function checkAdminAuth() {
             try {
                 const response = await fetch('/api/auth/me', {
-                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
+                    credentials: 'include'
                 });
                 
                 if (response.ok) {
@@ -2122,61 +2454,233 @@ app.get('/admin', (c) => {
         }
 
         async function loadAdminData() {
-            // Load stats
+            await Promise.all([
+                loadStats(),
+                loadRecentUsers(),
+                loadRecentInvites(),
+                loadSystemSettings()
+            ]);
+        }
+
+        async function loadStats() {
             try {
-                const statsResponse = await fetch('/api/admin/stats', {
-                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
-                });
+                const [statsResponse, invitesResponse, tiersResponse] = await Promise.all([
+                    fetch('/api/admin/stats', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') } }),
+                    fetch('/api/admin/invites', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') } }),
+                    fetch('/api/admin/tiers', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') } })
+                ]);
+
                 if (statsResponse.ok) {
                     const stats = await statsResponse.json();
-                    document.getElementById('stats').innerHTML = 
-                        '<p>Total Users: ' + stats.totalUsers + '</p>' +
-                        '<p>Total Queries: ' + stats.totalQueries + '</p>';
+                    document.getElementById('totalUsers').textContent = stats.totalUsers;
+                    document.getElementById('totalQueries').textContent = stats.totalQueries;
+                }
+
+                if (invitesResponse.ok) {
+                    const invites = await invitesResponse.json();
+                    document.getElementById('pendingInvites').textContent = invites.length;
+                }
+
+                if (tiersResponse.ok) {
+                    const tiers = await tiersResponse.json();
+                    document.getElementById('activeTiers').textContent = tiers.length;
                 }
             } catch (error) {
-                document.getElementById('stats').innerHTML = '<p>Failed to load stats</p>';
+                console.error('Error loading stats:', error);
             }
+        }
 
-            // Load users
+        async function loadRecentUsers() {
             try {
-                const usersResponse = await fetch('/api/admin/users', {
+                const response = await fetch('/api/admin/usage-stats', {
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
-                if (usersResponse.ok) {
-                    const users = await usersResponse.json();
-                    const tbody = document.getElementById('usersTable');
-                    tbody.innerHTML = users.map(user => 
+                
+                if (response.ok) {
+                    const users = await response.json();
+                    const tbody = document.getElementById('recentUsers');
+                    tbody.innerHTML = users.slice(0, 10).map(user => 
                         '<tr>' +
                         '<td>' + user.email + '</td>' +
+                        '<td>' + (user.tier_name || 'No tier') + '</td>' +
+                        '<td>' + user.usage_today + '/' + (user.daily_limit === -1 ? '∞' : user.daily_limit) + '</td>' +
                         '<td>' + new Date(user.created_at).toLocaleDateString() + '</td>' +
-                        '<td>' + (user.is_admin ? '✅ Admin' : '👤 User') + '</td>' +
-                        '<td>' + (user.is_admin ? '' : '<button class="btn" onclick="makeAdmin(' + user.id + ')">Make Admin</button>') + '</td>' +
+                        '<td><span style="color: green;">●</span> Active</td>' +
                         '</tr>'
                     ).join('');
                 }
             } catch (error) {
-                document.getElementById('usersTable').innerHTML = '<tr><td colspan="4">Failed to load users</td></tr>';
+                document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users</td></tr>';
             }
         }
 
-        async function makeAdmin(userId) {
+        async function loadRecentInvites() {
             try {
-                const response = await fetch('/api/admin/users/' + userId + '/make-admin', {
-                    method: 'POST',
+                const response = await fetch('/api/admin/invites', {
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
+                
                 if (response.ok) {
-                    alert('User promoted to admin');
-                    loadAdminData();
-                } else {
-                    alert('Failed to promote user');
+                    const invites = await response.json();
+                    const tbody = document.getElementById('recentInvites');
+                    tbody.innerHTML = invites.slice(0, 5).map(invite => 
+                        '<tr>' +
+                        '<td>' + invite.email + '</td>' +
+                        '<td>' + invite.invited_by_email + '</td>' +
+                        '<td>' + new Date(invite.created_at).toLocaleDateString() + '</td>' +
+                        '<td>' + new Date(invite.expires_at).toLocaleDateString() + '</td>' +
+                        '</tr>'
+                    ).join('');
                 }
             } catch (error) {
-                alert('Error promoting user');
+                document.getElementById('recentInvites').innerHTML = '<tr><td colspan="4">Failed to load invites</td></tr>';
             }
         }
 
-        document.addEventListener('DOMContentLoaded', checkAdminAuth);
+        function showInviteModal() {
+            document.getElementById('inviteModal').style.display = 'block';
+        }
+
+        function closeInviteModal() {
+            document.getElementById('inviteModal').style.display = 'none';
+            document.getElementById('inviteEmail').value = '';
+        }
+
+        async function sendInvite() {
+            const email = document.getElementById('inviteEmail').value;
+            if (!email) {
+                alert('Please enter an email address');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/admin/invite', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ email })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert('Invitation sent successfully!');
+                    closeInviteModal();
+                    loadAdminData();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to send invitation: ' + error.message);
+            }
+        }
+
+        function refreshData() {
+            loadAdminData();
+        }
+
+        async function loadSystemSettings() {
+            try {
+                const response = await fetch('/api/admin/settings', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('adminEmailDisplay').value = data.adminEmail;
+                    document.getElementById('registrationOpen').value = data.settings.registration_open || 'true';
+                }
+            } catch (error) {
+                console.error('Error loading system settings:', error);
+            }
+        }
+
+        async function saveSystemSettings() {
+            try {
+                const settings = {
+                    registration_open: document.getElementById('registrationOpen').value
+                };
+
+                const response = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ settings })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert('System settings saved successfully!');
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to save system settings: ' + error.message);
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+            } catch (error) {
+                console.log('Server logout failed:', error);
+            }
+            
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_email');
+            document.cookie = 'auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            window.location.href = '/';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('inviteModal');
+            if (event.target === modal) {
+                closeInviteModal();
+            }
+        }
+
+        // Theme management functions
+        function changeTheme() {
+            const themeSelector = document.getElementById('themeSelector');
+            const selectedTheme = themeSelector.value;
+            
+            // Remove existing theme classes
+            document.body.removeAttribute('data-theme');
+            
+            // Apply new theme
+            if (selectedTheme !== 'default') {
+                document.body.setAttribute('data-theme', selectedTheme);
+            }
+            
+            // Save theme preference
+            localStorage.setItem('selectedTheme', selectedTheme);
+        }
+        
+        function loadSavedTheme() {
+            const savedTheme = localStorage.getItem('selectedTheme') || 'default';
+            const themeSelector = document.getElementById('themeSelector');
+            
+            if (themeSelector) {
+                themeSelector.value = savedTheme;
+                
+                // Apply the saved theme
+                if (savedTheme !== 'default') {
+                    document.body.setAttribute('data-theme', savedTheme);
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAdminAuth();
+            loadSavedTheme();
+        });
     </script>
 </body>
 </html>

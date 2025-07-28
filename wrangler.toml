@@ -27,3 +27,4 @@ SMTP_FROM_NAME = "AI Caption Studio"
 # - OPENAI_API_KEY  
 # - SMTP_PASSWORD (Resend API key)
 # - OPENWEATHER_API_KEY
+# - ADMIN_EMAIL (email address that gets admin privileges)
