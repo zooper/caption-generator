@@ -2,11 +2,146 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serveStatic } from 'hono/cloudflare-workers';
+import { getCookie, setCookie } from 'hono/cookie';
+import jwt from 'jsonwebtoken';
+
+// Import D1 Database class
+class D1Database {
+    constructor(db) {
+        this.db = db;
+        this.CURRENT_SCHEMA_VERSION = 8;
+    }
+
+    async createUser(email) {
+        try {
+            const stmt = this.db.prepare(`
+                INSERT INTO users (email) VALUES (?)
+                RETURNING id, email
+            `);
+            const result = await stmt.bind(email).first();
+            return result;
+        } catch (error) {
+            if (error.message.includes('UNIQUE constraint failed')) {
+                throw new Error('USER_EXISTS');
+            }
+            throw error;
+        }
+    }
+
+    async getUserByEmail(email) {
+        const stmt = this.db.prepare(`
+            SELECT u.*, t.name as tier_name, t.daily_limit 
+            FROM users u 
+            LEFT JOIN tiers t ON u.tier_id = t.id
+            WHERE u.email = ? AND u.is_active = 1
+        `);
+        return await stmt.bind(email).first();
+    }
+
+    async createLoginToken(email, token, expiresAt, ipAddress, userAgent) {
+        const stmt = this.db.prepare(`
+            INSERT INTO login_tokens (email, token, expires_at, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?)
+        `);
+        await stmt.bind(email, token, expiresAt, ipAddress, userAgent).run();
+    }
+
+    async getLoginToken(token) {
+        const stmt = this.db.prepare(`
+            SELECT * FROM login_tokens 
+            WHERE token = ? AND expires_at > datetime('now') AND used_at IS NULL
+        `);
+        return await stmt.bind(token).first();
+    }
+
+    async useLoginToken(token) {
+        const stmt = this.db.prepare(`
+            UPDATE login_tokens 
+            SET used_at = datetime('now') 
+            WHERE token = ?
+        `);
+        await stmt.bind(token).run();
+    }
+
+    async createSession(sessionId, userId, expiresAt, ipAddress, userAgent) {
+        const stmt = this.db.prepare(`
+            INSERT INTO sessions (session_id, user_id, expires_at, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?)
+        `);
+        await stmt.bind(sessionId, userId, expiresAt, ipAddress, userAgent).run();
+    }
+
+    async getSession(sessionId) {
+        const stmt = this.db.prepare(`
+            SELECT s.*, u.email, u.is_admin 
+            FROM sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.session_id = ? AND s.expires_at > datetime('now')
+        `);
+        return await stmt.bind(sessionId).first();
+    }
+
+    async logQuery(logData) {
+        // Simplified logging for now
+        console.log('Query logged:', logData.id);
+    }
+
+    async checkUsageLimit(userId) {
+        // Simplified usage check - return unlimited for now
+        return { allowed: true, used: 0, limit: -1, remaining: -1 };
+    }
+
+    async incrementDailyUsage(userId) {
+        // Placeholder for usage increment
+        console.log('Usage incremented for user:', userId);
+    }
+}
 
 const app = new Hono();
 
 // Enable CORS
 app.use('/*', cors());
+
+// JWT Configuration
+const JWT_SECRET = 'default-secret-change-this'; // In production, use environment variable
+const JWT_EXPIRES_IN = '7d';
+
+// Authentication middleware
+const authenticateToken = async (c, next) => {
+    try {
+        // Try to get token from Authorization header or cookie
+        const authHeader = c.req.header('authorization');
+        let token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+        
+        // If no auth header, try cookie
+        if (!token) {
+            token = getCookie(c, 'auth_token');
+        }
+
+        if (!token) {
+            return c.json({ error: 'Access token required' }, 401);
+        }
+
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const database = new D1Database(c.env.DB);
+        const session = await database.getSession(decoded.sessionId);
+        
+        if (!session) {
+            return c.json({ error: 'Invalid or expired session' }, 401);
+        }
+
+        c.set('user', {
+            id: session.user_id,
+            email: session.email,
+            sessionId: session.session_id,
+            isAdmin: session.is_admin === 1
+        });
+        
+        await next();
+    } catch (error) {
+        return c.json({ error: 'Invalid token' }, 403);
+    }
+};
 
 // API Routes (must come before static file serving)
 
@@ -20,9 +155,128 @@ app.get('/api/health', (c) => {
   });
 });
 
-// Caption generation endpoint - simplified for now
-app.post('/api/generate-caption', async (c) => {
+// Authentication endpoints
+app.post('/api/auth/request-login', async (c) => {
+    try {
+        const { email } = await c.req.json();
+        
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return c.json({ error: 'Valid email address required' }, 400);
+        }
+
+        const database = new D1Database(c.env.DB);
+        
+        // Generate secure token
+        const token = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
+        
+        // Get client info
+        const ipAddress = c.req.header('cf-connecting-ip') || 'unknown';
+        const userAgent = c.req.header('user-agent') || '';
+
+        // Store token in database
+        await database.createLoginToken(email, token, expiresAt, ipAddress, userAgent);
+
+        // For demo purposes, return the login URL (normally this would be sent via email)
+        const loginUrl = `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+        
+        return c.json({ 
+            success: true, 
+            message: 'Magic link generated (in production this would be sent via email)',
+            loginUrl, // Remove this in production
+            expiresIn: '15 minutes'
+        });
+
+    } catch (error) {
+        console.error('Magic link request error:', error);
+        return c.json({ error: 'Failed to generate magic link' }, 500);
+    }
+});
+
+app.get('/auth/verify', async (c) => {
+    try {
+        const token = c.req.query('token');
+
+        if (!token) {
+            return c.html('<h1>❌ Invalid Login Link</h1><p>This login link is invalid.</p><a href="/">← Back</a>');
+        }
+
+        const database = new D1Database(c.env.DB);
+        const loginToken = await database.getLoginToken(token);
+        
+        if (!loginToken) {
+            return c.html('<h1>❌ Invalid or Expired Link</h1><p>This login link is invalid or has expired.</p><a href="/">← Back</a>');
+        }
+
+        // Mark token as used
+        await database.useLoginToken(token);
+
+        // Get or create user
+        let user;
+        try {
+            user = await database.getUserByEmail(loginToken.email);
+            if (!user) {
+                user = await database.createUser(loginToken.email);
+            }
+        } catch (error) {
+            if (error.message === 'USER_EXISTS') {
+                user = await database.getUserByEmail(loginToken.email);
+            } else {
+                throw error;
+            }
+        }
+
+        // Create session
+        const sessionId = crypto.randomUUID();
+        const sessionExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+        const ipAddress = c.req.header('cf-connecting-ip') || 'unknown';
+        const userAgent = c.req.header('user-agent') || '';
+
+        await database.createSession(sessionId, user.id, sessionExpiresAt, ipAddress, userAgent);
+
+        // Create JWT token
+        const jwtToken = jwt.sign({ sessionId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+        // Set secure cookie
+        setCookie(c, 'auth_token', jwtToken, {
+            httpOnly: true,
+            secure: true,
+            maxAge: 7 * 24 * 60 * 60, // 7 days
+            sameSite: 'Lax'
+        });
+
+        return c.html(`
+            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                <h2>✅ Login Successful!</h2>
+                <p>Welcome, ${user.email}!</p>
+                <p>Redirecting to Caption Generator...</p>
+                <script>
+                    localStorage.setItem('auth_token', '${jwtToken}');
+                    localStorage.setItem('user_email', '${user.email}');
+                    setTimeout(() => window.location.href = '/', 2000);
+                </script>
+            </div>
+        `);
+
+    } catch (error) {
+        console.error('Login verification error:', error);
+        return c.html('<h1>❌ Login Failed</h1><p>Login verification failed.</p><a href="/">← Back</a>');
+    }
+});
+
+app.get('/api/auth/me', authenticateToken, async (c) => {
+    const user = c.get('user');
+    return c.json({
+        id: user.id,
+        email: user.email,
+        isAdmin: user.isAdmin
+    });
+});
+
+// Caption generation endpoint - now requires authentication
+app.post('/api/generate-caption', authenticateToken, async (c) => {
   try {
+    const user = c.get('user');
     const { prompt, base64Image, style = 'creative' } = await c.req.json();
     
     if (!c.env.OPENAI_API_KEY) {
@@ -31,6 +285,16 @@ app.post('/api/generate-caption', async (c) => {
     
     if (!base64Image) {
       return c.json({ error: 'Missing image data' }, 400);
+    }
+
+    // Check usage limits
+    const database = new D1Database(c.env.DB);
+    const usageCheck = await database.checkUsageLimit(user.id);
+    if (!usageCheck.allowed) {
+        return c.json({
+            error: 'Daily usage limit exceeded',
+            usageInfo: usageCheck
+        }, 429);
     }
     
     // Build prompt based on style
@@ -106,6 +370,18 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
     const data = await response.json();
     const responseContent = data.choices[0].message.content;
     
+    // Log the query and increment usage
+    await database.logQuery({
+        id: crypto.randomUUID(),
+        source: 'web',
+        userId: user.id,
+        email: user.email,
+        processingTimeMs: Date.now() - Date.now(), // Simplified
+        responseLength: responseContent.length
+    });
+    
+    await database.incrementDailyUsage(user.id);
+    
     return c.json({ content: responseContent });
     
   } catch (error) {
@@ -127,8 +403,15 @@ app.get('/', (c) => {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { text-align: center; margin-bottom: 40px; }
+        .header { text-align: center; margin-bottom: 40px; position: relative; }
         .header h1 { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 3em; margin-bottom: 10px; }
+        .auth-section { position: absolute; top: 0; right: 0; padding: 20px; }
+        .auth-form { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); min-width: 300px; }
+        .auth-input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        .auth-btn { width: 100%; padding: 10px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .user-info { text-align: right; }
+        .login-section { text-align: center; margin: 40px 0; }
+        .login-form { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
         .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
         .upload-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
         .upload-area { border: 3px dashed #e0e0e0; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
@@ -153,9 +436,26 @@ app.get('/', (c) => {
 <body>
     <div class="container">
         <header class="header">
+            <div class="auth-section">
+                <div id="authStatus" class="user-info hidden">
+                    <p>Welcome, <span id="userEmail"></span>!</p>
+                    <button onclick="logout()" style="margin-top: 10px; padding: 5px 10px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Logout</button>
+                </div>
+            </div>
             <h1>🎨 AI Caption Studio</h1>
             <p>AI-powered captions, hashtags, and alt text for any social platform</p>
         </header>
+
+        <!-- Login Section (shown when not authenticated) -->
+        <div id="loginSection" class="login-section">
+            <div class="login-form">
+                <h2>🔐 Login to Continue</h2>
+                <p>Enter your email to receive a magic login link</p>
+                <input type="email" id="emailInput" class="auth-input" placeholder="your@email.com" required>
+                <button onclick="requestLogin()" class="auth-btn">Send Magic Link</button>
+                <div id="loginMessage" style="margin-top: 15px;"></div>
+            </div>
+        </div>
 
         <main class="main-content">
             <div class="upload-section">
@@ -214,6 +514,83 @@ app.get('/', (c) => {
     <script>
         let selectedStyle = 'creative';
         let uploadedImage = null;
+        let isAuthenticated = false;
+
+        // Authentication functions
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    showAuthenticatedState(user);
+                } else {
+                    showLoginForm();
+                }
+            } catch (error) {
+                showLoginForm();
+            }
+        }
+
+        function showAuthenticatedState(user) {
+            isAuthenticated = true;
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('authStatus').classList.remove('hidden');
+            document.getElementById('userEmail').textContent = user.email;
+            document.querySelector('.main-content').style.display = 'grid';
+        }
+
+        function showLoginForm() {
+            isAuthenticated = false;
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('authStatus').classList.add('hidden');
+            document.querySelector('.main-content').style.display = 'none';
+        }
+
+        async function requestLogin() {
+            const email = document.getElementById('emailInput').value;
+            const messageDiv = document.getElementById('loginMessage');
+            
+            if (!email) {
+                messageDiv.innerHTML = '<p style="color: red;">Please enter your email address</p>';
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/request-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageDiv.innerHTML = `
+                        <p style="color: green;">✅ Magic link generated!</p>
+                        <p><a href="${data.loginUrl}" target="_blank">Click here to login</a></p>
+                        <p style="font-size: 12px; color: #666;">Link expires in ${data.expiresIn}</p>
+                    `;
+                } else {
+                    messageDiv.innerHTML = `<p style="color: red;">❌ ${data.error}</p>`;
+                }
+            } catch (error) {
+                messageDiv.innerHTML = '<p style="color: red;">❌ Failed to send magic link</p>';
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_email');
+            showLoginForm();
+        }
+
+        // Check authentication on page load
+        document.addEventListener('DOMContentLoaded', checkAuth);
 
         // File upload handling
         const uploadArea = document.getElementById('uploadArea');
@@ -278,7 +655,10 @@ app.get('/', (c) => {
             try {
                 const response = await fetch('/api/generate-caption', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                    },
                     body: JSON.stringify({
                         base64Image: uploadedImage,
                         style: selectedStyle
