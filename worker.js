@@ -1450,7 +1450,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
     try {
         const { email, tierId, personalMessage } = await c.req.json();
         
-        if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             return c.json({ error: 'Valid email address required' }, 400);
         }
 
