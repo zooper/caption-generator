@@ -55,3 +55,9 @@ ehthumbs.db
 *.swp
 *.swo
 *~
+
+# Cloudflare Wrangler
+.wrangler/
+
+# Secret setup scripts (contains API keys when modified)
+set-secrets-with-values.sh
