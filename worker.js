@@ -280,19 +280,29 @@ class D1Database {
                 await stmt.run();
                 console.log('Created new user_settings table with category column');
             } else {
-                // Table exists, check if it has the category column
-                const hasCategory = tableInfo.results.some(col => col.name === 'category');
+                // Table exists, check what columns we need to add
+                const columns = tableInfo.results.map(col => col.name);
+                console.log('Existing user_settings columns:', columns);
                 
-                if (!hasCategory) {
+                // Add missing columns one by one
+                if (!columns.includes('category')) {
                     console.log('Adding category column to existing user_settings table');
-                    // Add the category column if it doesn't exist
                     await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN category TEXT DEFAULT 'general'`).run();
-                    
-                    // Also add encrypted column if it doesn't exist
-                    const hasEncrypted = tableInfo.results.some(col => col.name === 'encrypted');
-                    if (!hasEncrypted) {
-                        await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN encrypted BOOLEAN DEFAULT 0`).run();
-                    }
+                }
+                
+                if (!columns.includes('encrypted')) {
+                    console.log('Adding encrypted column to existing user_settings table');
+                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN encrypted BOOLEAN DEFAULT 0`).run();
+                }
+                
+                if (!columns.includes('updated_at')) {
+                    console.log('Adding updated_at column to existing user_settings table');
+                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`).run();
+                }
+                
+                if (!columns.includes('created_at')) {
+                    console.log('Adding created_at column to existing user_settings table');
+                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP`).run();
                 }
             }
         } catch (error) {
@@ -321,18 +331,33 @@ class D1Database {
         try {
             await this.ensureUserSettingsTable();
             
-            const stmt = this.db.prepare(`
-                INSERT INTO user_settings (user_id, category, setting_key, setting_value, encrypted, updated_at) 
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
-                ON CONFLICT(user_id, category, setting_key) 
-                DO UPDATE SET 
-                    setting_value = excluded.setting_value,
-                    encrypted = excluded.encrypted,
-                    updated_at = datetime('now')
+            // Use a more compatible approach - check if exists then update or insert
+            const existingStmt = this.db.prepare(`
+                SELECT id FROM user_settings 
+                WHERE user_id = ? AND category = ? AND setting_key = ?
             `);
-            const result = await stmt.bind(userId, category, settingKey, settingValue, encrypted ? 1 : 0).run();
-            console.log(`User setting ${category}.${settingKey} saved for user ${userId}`);
-            return true;
+            const existing = await existingStmt.bind(userId, category, settingKey).first();
+            
+            if (existing) {
+                // Update existing record
+                const updateStmt = this.db.prepare(`
+                    UPDATE user_settings 
+                    SET setting_value = ?, encrypted = ?, updated_at = datetime('now')
+                    WHERE id = ?
+                `);
+                const result = await updateStmt.bind(settingValue, encrypted ? 1 : 0, existing.id).run();
+                console.log(`User setting ${category}.${settingKey} updated for user ${userId}`);
+                return (result.meta?.changes || result.changes || 0) > 0;
+            } else {
+                // Insert new record
+                const insertStmt = this.db.prepare(`
+                    INSERT INTO user_settings (user_id, category, setting_key, setting_value, encrypted, updated_at) 
+                    VALUES (?, ?, ?, ?, ?, datetime('now'))
+                `);
+                const result = await insertStmt.bind(userId, category, settingKey, settingValue, encrypted ? 1 : 0).run();
+                console.log(`User setting ${category}.${settingKey} created for user ${userId}`);
+                return (result.meta?.changes || result.changes || 0) > 0;
+            }
         } catch (error) {
             console.error('Failed to set user setting:', error);
             return false;
