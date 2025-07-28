@@ -215,6 +215,86 @@ class D1Database {
             return [];
         }
     }
+
+    // User settings methods
+    async ensureUserSettingsTable() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    category TEXT NOT NULL,
+                    setting_key TEXT NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    encrypted BOOLEAN DEFAULT 0,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, category, setting_key),
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.log('Could not ensure user_settings table exists:', error);
+        }
+    }
+
+    async getUserSettings(userId, category) {
+        try {
+            await this.ensureUserSettingsTable();
+            
+            const stmt = this.db.prepare(`
+                SELECT * FROM user_settings 
+                WHERE user_id = ? AND category = ?
+                ORDER BY setting_key
+            `);
+            const result = await stmt.bind(userId, category).all();
+            return result.results || [];
+        } catch (error) {
+            console.error('Failed to get user settings:', error);
+            return [];
+        }
+    }
+
+    async setUserSetting(userId, category, settingKey, settingValue, encrypted = false) {
+        try {
+            await this.ensureUserSettingsTable();
+            
+            const stmt = this.db.prepare(`
+                INSERT INTO user_settings (user_id, category, setting_key, setting_value, encrypted, updated_at) 
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(user_id, category, setting_key) 
+                DO UPDATE SET 
+                    setting_value = excluded.setting_value,
+                    encrypted = excluded.encrypted,
+                    updated_at = datetime('now')
+            `);
+            const result = await stmt.bind(userId, category, settingKey, settingValue, encrypted ? 1 : 0).run();
+            console.log(`User setting ${category}.${settingKey} saved for user ${userId}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to set user setting:', error);
+            return false;
+        }
+    }
+
+    async deleteUserSetting(userId, category, settingKey) {
+        try {
+            await this.ensureUserSettingsTable();
+            
+            const stmt = this.db.prepare(`
+                DELETE FROM user_settings 
+                WHERE user_id = ? AND category = ? AND setting_key = ?
+            `);
+            const result = await stmt.bind(userId, category, settingKey).run();
+            const changes = result.meta?.changes || result.changes || 0;
+            console.log(`User setting ${category}.${settingKey} deleted for user ${userId}, changes: ${changes}`);
+            return changes > 0;
+        } catch (error) {
+            console.error('Failed to delete user setting:', error);
+            return false;
+        }
+    }
 }
 
 const app = new Hono();
@@ -1193,15 +1273,38 @@ app.post('/api/user/settings/mastodon', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
         const { instance, token } = await c.req.json();
+        
+        console.log('Mastodon settings save request:', {
+            userId: user.id,
+            instance: instance ? instance.substring(0, 20) + '...' : 'null',
+            tokenLength: token ? token.length : 0
+        });
+        
+        if (!instance || !token) {
+            console.log('Missing instance or token');
+            return c.json({ error: 'Instance URL and token are required' }, 400);
+        }
+        
         const database = new D1Database(c.env.DB);
         
         // Save Mastodon settings
-        await database.setUserSetting(user.id, 'social', 'mastodon_instance', instance, false);
-        await database.setUserSetting(user.id, 'social', 'mastodon_token', token, true);
+        const instanceResult = await database.setUserSetting(user.id, 'social', 'mastodon_instance', instance, false);
+        const tokenResult = await database.setUserSetting(user.id, 'social', 'mastodon_token', token, true);
         
-        return c.json({ success: true, message: 'Mastodon settings saved' });
+        console.log('Mastodon settings save results:', {
+            instanceSaved: instanceResult,
+            tokenSaved: tokenResult
+        });
+        
+        if (instanceResult && tokenResult) {
+            return c.json({ success: true, message: 'Mastodon settings saved' });
+        } else {
+            console.error('One or both settings failed to save');
+            return c.json({ error: 'Failed to save one or more settings' }, 500);
+        }
     } catch (error) {
-        return c.json({ error: 'Failed to save Mastodon settings' }, 500);
+        console.error('Mastodon settings save error:', error);
+        return c.json({ error: 'Failed to save Mastodon settings: ' + error.message }, 500);
     }
 });
 
