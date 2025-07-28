@@ -495,6 +495,7 @@ app.post('/api/admin/users/:userId/make-admin', authenticateToken, requireAdmin,
     }
 });
 
+
 app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
     try {
         const database = new D1Database(c.env.DB);

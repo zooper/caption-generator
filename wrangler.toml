@@ -21,10 +21,10 @@ SMTP_PORT = "587"
 SMTP_USER = "resend"
 SMTP_FROM_EMAIL = "no-reply@jonsson.io"
 SMTP_FROM_NAME = "AI Caption Studio"
+ADMIN_EMAIL = "tomas@jonsson.io"
 
 # Required secrets (set with `wrangler secret put <NAME>`):
 # - JWT_SECRET
 # - OPENAI_API_KEY  
 # - SMTP_PASSWORD (Resend API key)
 # - OPENWEATHER_API_KEY
-# - ADMIN_EMAIL (email address that gets admin privileges)
