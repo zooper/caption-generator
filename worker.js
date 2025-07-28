@@ -178,6 +178,139 @@ app.get('/api/debug/schema', async (c) => {
   }
 });
 
+// Database initialization endpoint
+app.post('/api/debug/init-database', async (c) => {
+  try {
+    const database = new D1Database(c.env.DB);
+    
+    // Create all tables
+    const schemaSql = \`
+-- Schema version tracking
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Query logs for analytics and debugging  
+CREATE TABLE IF NOT EXISTS query_logs (
+    id TEXT PRIMARY KEY,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    source TEXT NOT NULL,
+    image_size INTEGER,
+    image_type TEXT,
+    thumbnail_path TEXT,
+    preview_path TEXT,
+    exif_data TEXT,
+    camera_make TEXT,
+    camera_model TEXT,
+    gps_latitude REAL,
+    gps_longitude REAL,
+    location_name TEXT,
+    prompt_length INTEGER,
+    response_length INTEGER,
+    processing_time_ms INTEGER,
+    error_message TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    estimated_cost_usd REAL,
+    include_weather BOOLEAN DEFAULT FALSE,
+    weather_data TEXT
+);
+
+-- Users table for authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME,
+    is_active BOOLEAN DEFAULT TRUE,
+    is_admin BOOLEAN DEFAULT FALSE,
+    tier_id INTEGER DEFAULT 1
+);
+
+-- Login tokens for magic link authentication
+CREATE TABLE IF NOT EXISTS login_tokens (
+    token TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME,
+    ip_address TEXT,
+    user_agent TEXT
+);
+
+-- User sessions
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT
+);
+
+-- User tiers for usage limits
+CREATE TABLE IF NOT EXISTS user_tiers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    daily_limit INTEGER NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Daily usage tracking
+CREATE TABLE IF NOT EXISTS daily_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    date DATE NOT NULL,
+    usage_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, date)
+);
+\`;
+
+    // Split by semicolons and execute each statement
+    const statements = schemaSql.split(';').filter(stmt => stmt.trim());
+    
+    for (const statement of statements) {
+      if (statement.trim()) {
+        await database.db.prepare(statement.trim()).run();
+      }
+    }
+    
+    // Insert default tiers
+    await database.db.prepare(\`
+      INSERT OR IGNORE INTO user_tiers (id, name, daily_limit, description) VALUES 
+      (1, 'Free', 10, 'Free tier with 10 captions per day'),
+      (2, 'Pro', 100, 'Pro tier with 100 captions per day'),
+      (3, 'Unlimited', -1, 'Unlimited captions per day')
+    \`).run();
+    
+    // Set schema version
+    await database.db.prepare(\`
+      INSERT OR IGNORE INTO schema_version (version) VALUES (8)
+    \`).run();
+    
+    return c.json({
+      success: true,
+      message: 'Database schema initialized successfully',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    return c.json({
+      error: 'Failed to initialize database',
+      message: error.message,
+      stack: error.stack
+    }, 500);
+  }
+});
+
 // Authentication endpoints
 app.post('/api/auth/request-login', async (c) => {
     try {
