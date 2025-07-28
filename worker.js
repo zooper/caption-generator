@@ -90,8 +90,6 @@ class D1Database {
 
     async logQuery(logData) {
         try {
-            console.log('=== logQuery called ===');
-            console.log('logData:', logData);
             
             // Create the query_logs table if it doesn't exist
             await this.ensureQueryLogsTable();
@@ -103,7 +101,6 @@ class D1Database {
             // Check what columns exist in the table to build the correct INSERT
             const tableInfo = await this.db.prepare(`PRAGMA table_info(query_logs)`).all();
             const columns = (tableInfo.results || []).map(col => col.name);
-            console.log('Available columns for query log INSERT:', columns);
             
             // Build INSERT statement based on available columns
             let insertColumns = ['id'];
@@ -155,19 +152,14 @@ class D1Database {
                 VALUES (${placeholders.join(', ')})
             `;
             
-            console.log('Query log INSERT SQL:', insertSQL);
-            console.log('Query log INSERT values:', insertValues);
             
             const stmt = this.db.prepare(insertSQL);
             const result = await stmt.bind(...insertValues).run();
 
-            console.log('Query logged successfully:', id);
-            console.log('Insert result:', result);
             
             // Verify the query was actually inserted
             const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM query_logs');
             const countResult = await countStmt.first();
-            console.log('Total queries in database:', countResult?.count);
             
             return id;
         } catch (error) {
@@ -183,18 +175,15 @@ class D1Database {
 
     async ensureQueryLogsTable() {
         try {
-            console.log('=== ensureQueryLogsTable started ===');
             
             // First check if the table exists and what columns it has
             const tableInfo = await this.db.prepare(`
                 PRAGMA table_info(query_logs)
             `).all();
             
-            console.log('Existing query_logs table info:', tableInfo.results || []);
             
             if (!tableInfo.results || tableInfo.results.length === 0) {
                 // Table doesn't exist, create it with our schema
-                console.log('Creating new query_logs table');
                 const stmt = this.db.prepare(`
                     CREATE TABLE query_logs (
                         id TEXT PRIMARY KEY,
@@ -208,11 +197,9 @@ class D1Database {
                     )
                 `);
                 await stmt.run();
-                console.log('Created new query_logs table');
             } else {
                 // Table exists, check what columns we need to add
                 const columns = tableInfo.results.map(col => col.name);
-                console.log('Existing query_logs columns:', columns);
                 
                 // Add missing columns one by one
                 const requiredColumns = [
@@ -226,23 +213,17 @@ class D1Database {
                 
                 for (const col of requiredColumns) {
                     if (!columns.includes(col.name)) {
-                        console.log(`Adding ${col.name} column to existing query_logs table`);
                         try {
-                            const alterResult = await this.db.prepare(`ALTER TABLE query_logs ADD COLUMN ${col.name} ${col.definition}`).run();
-                            console.log(`Successfully added ${col.name} column:`, alterResult);
+                            await this.db.prepare(`ALTER TABLE query_logs ADD COLUMN ${col.name} ${col.definition}`).run();
                         } catch (alterError) {
                             console.error(`Failed to add ${col.name} column:`, alterError);
                         }
-                    } else {
-                        console.log(`Column ${col.name} already exists`);
                     }
                 }
             }
             
             // Verify final table structure
             const finalTableInfo = await this.db.prepare(`PRAGMA table_info(query_logs)`).all();
-            console.log('Final query_logs table structure:', finalTableInfo.results || []);
-            console.log('=== ensureQueryLogsTable completed ===');
             
         } catch (error) {
             console.error('Error in ensureQueryLogsTable:', error);
@@ -367,19 +348,15 @@ class D1Database {
     // User settings methods
     async ensureUserSettingsTable() {
         try {
-            console.log('=== ensureUserSettingsTable started ===');
             
             // First check if the table exists and what columns it has
             const tableInfo = await this.db.prepare(`
                 PRAGMA table_info(user_settings)
             `).all();
             
-            console.log('Raw table info result:', tableInfo);
-            console.log('Table info results:', tableInfo.results || []);
             
             if (!tableInfo.results || tableInfo.results.length === 0) {
                 // Table doesn't exist, create it with our schema
-                console.log('Table does not exist, creating new user_settings table');
                 const stmt = this.db.prepare(`
                     CREATE TABLE user_settings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -395,12 +372,9 @@ class D1Database {
                     )
                 `);
                 const createResult = await stmt.run();
-                console.log('Create table result:', createResult);
-                console.log('Created new user_settings table with all required columns');
             } else {
                 // Table exists, check what columns we need to add
                 const columns = tableInfo.results.map(col => col.name);
-                console.log('Existing user_settings columns:', columns);
                 
                 // Add missing columns one by one
                 const requiredColumns = [
@@ -412,23 +386,18 @@ class D1Database {
                 
                 for (const col of requiredColumns) {
                     if (!columns.includes(col.name)) {
-                        console.log(`Adding ${col.name} column to existing user_settings table`);
                         try {
                             const alterResult = await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN ${col.name} ${col.definition}`).run();
-                            console.log(`Successfully added ${col.name} column:`, alterResult);
                         } catch (alterError) {
                             console.error(`Failed to add ${col.name} column:`, alterError);
                         }
                     } else {
-                        console.log(`Column ${col.name} already exists`);
                     }
                 }
             }
             
             // Verify final table structure
             const finalTableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
-            console.log('Final user_settings table structure:', finalTableInfo.results || []);
-            console.log('=== ensureUserSettingsTable completed ===');
             
         } catch (error) {
             console.error('Error in ensureUserSettingsTable:', error);
