@@ -806,6 +806,170 @@ app.post('/api/admin/settings', authenticateToken, requireAdmin, async (c) => {
     }
 });
 
+// Social media integration endpoints
+app.get('/api/user/settings/social', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Get social media settings for the user
+        const settings = await database.getUserSettings(user.id, 'social');
+        
+        const socialSettings = {
+            mastodon: {},
+            linkedin: {}
+        };
+        
+        settings.forEach(setting => {
+            const [platform, key] = setting.setting_key.split('_');
+            if (platform === 'mastodon') {
+                socialSettings.mastodon[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
+            } else if (platform === 'linkedin') {
+                socialSettings.linkedin[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
+            }
+        });
+        
+        return c.json(socialSettings);
+    } catch (error) {
+        return c.json({ error: 'Failed to load social settings' }, 500);
+    }
+});
+
+app.post('/api/user/settings/test-mastodon', authenticateToken, async (c) => {
+    try {
+        const { instance, token } = await c.req.json();
+        
+        if (!instance || !token) {
+            return c.json({ error: 'Instance URL and token are required' }, 400);
+        }
+        
+        // Test Mastodon connection
+        const testUrl = `${instance}/api/v1/accounts/verify_credentials`;
+        const response = await fetch(testUrl, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const userData = await response.json();
+            return c.json({ 
+                success: true, 
+                message: `Connected as @${userData.username}` 
+            });
+        } else {
+            return c.json({ 
+                success: false, 
+                error: 'Invalid credentials or instance URL' 
+            });
+        }
+    } catch (error) {
+        return c.json({ 
+            success: false, 
+            error: 'Connection test failed: ' + error.message 
+        });
+    }
+});
+
+app.post('/api/user/settings/mastodon', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { instance, token } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        // Save Mastodon settings
+        await database.setUserSetting(user.id, 'social', 'mastodon_instance', instance, false);
+        await database.setUserSetting(user.id, 'social', 'mastodon_token', token, true);
+        
+        return c.json({ success: true, message: 'Mastodon settings saved' });
+    } catch (error) {
+        return c.json({ error: 'Failed to save Mastodon settings' }, 500);
+    }
+});
+
+app.delete('/api/user/settings/mastodon', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Delete Mastodon settings
+        await database.deleteUserSetting(user.id, 'social', 'mastodon_instance');
+        await database.deleteUserSetting(user.id, 'social', 'mastodon_token');
+        
+        return c.json({ success: true, message: 'Mastodon disconnected' });
+    } catch (error) {
+        return c.json({ error: 'Failed to disconnect Mastodon' }, 500);
+    }
+});
+
+app.post('/api/user/settings/test-linkedin', authenticateToken, async (c) => {
+    try {
+        const { token } = await c.req.json();
+        
+        if (!token) {
+            return c.json({ error: 'Token is required' }, 400);
+        }
+        
+        // Test LinkedIn connection
+        const testUrl = 'https://api.linkedin.com/v2/me';
+        const response = await fetch(testUrl, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'X-Restli-Protocol-Version': '2.0.0'
+            }
+        });
+        
+        if (response.ok) {
+            const userData = await response.json();
+            return c.json({ 
+                success: true, 
+                message: `Connected as ${userData.firstName?.localized?.en_US} ${userData.lastName?.localized?.en_US}` 
+            });
+        } else {
+            return c.json({ 
+                success: false, 
+                error: 'Invalid LinkedIn access token' 
+            });
+        }
+    } catch (error) {
+        return c.json({ 
+            success: false, 
+            error: 'Connection test failed: ' + error.message 
+        });
+    }
+});
+
+app.post('/api/user/settings/linkedin', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { token, autoPost } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        // Save LinkedIn settings
+        await database.setUserSetting(user.id, 'social', 'linkedin_token', token, true);
+        await database.setUserSetting(user.id, 'social', 'linkedin_autopost', autoPost ? 'true' : 'false', false);
+        
+        return c.json({ success: true, message: 'LinkedIn settings saved' });
+    } catch (error) {
+        return c.json({ error: 'Failed to save LinkedIn settings' }, 500);
+    }
+});
+
+app.delete('/api/user/settings/linkedin', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Delete LinkedIn settings
+        await database.deleteUserSetting(user.id, 'social', 'linkedin_token');
+        await database.deleteUserSetting(user.id, 'social', 'linkedin_autopost');
+        
+        return c.json({ success: true, message: 'LinkedIn disconnected' });
+    } catch (error) {
+        return c.json({ error: 'Failed to disconnect LinkedIn' }, 500);
+    }
+});
+
 // Advanced prompt building with EXIF extraction and weather data
 async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null) {
     console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
@@ -1621,6 +1785,8 @@ app.get('/', (c) => {
                             <option value="purple-creative">💜 Purple</option>
                             <option value="ocean-blue">🌊 Ocean</option>
                         </select>
+                        <button id="adminButton" onclick="window.location.href='/admin'" style="padding: 5px 10px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">🛠️ Admin</button>
+                        <button onclick="window.location.href='/settings'" style="padding: 5px 10px; background: #e2e8f0; color: #475569; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">⚙️ Settings</button>
                         <button onclick="logout()" style="padding: 5px 10px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;">Logout</button>
                     </div>
                 </div>
@@ -1775,6 +1941,12 @@ app.get('/', (c) => {
             document.getElementById('authStatus').classList.remove('hidden');
             document.getElementById('userEmail').textContent = user.email;
             document.querySelector('.main-content').style.display = 'grid';
+            
+            // Show admin button if user is admin
+            const adminButton = document.getElementById('adminButton');
+            if (user.isAdmin && adminButton) {
+                adminButton.style.display = 'inline-block';
+            }
         }
 
         function showLoginForm() {
@@ -1782,6 +1954,12 @@ app.get('/', (c) => {
             document.getElementById('loginSection').classList.remove('hidden');
             document.getElementById('authStatus').classList.add('hidden');
             document.querySelector('.main-content').style.display = 'none';
+            
+            // Hide admin button
+            const adminButton = document.getElementById('adminButton');
+            if (adminButton) {
+                adminButton.style.display = 'none';
+            }
         }
 
         async function requestLogin() {
@@ -2697,51 +2875,206 @@ app.get('/settings', (c) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - AI Caption Studio</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 40px; }
-        .header h1 { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .settings-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        /* Theme System */
+        :root {
+            --primary-gradient: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e1e5e9;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --error-color: #ef4444;
+        }
+        
+        [data-theme="dark"] {
+            --primary-gradient: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            --background-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            --card-background: #2a2a3e;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --border-color: #404040;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--background-gradient); color: var(--text-primary); min-height: 100vh; padding: 20px; transition: all 0.3s ease; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; background: var(--card-background); padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+        .header h1 { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 2.5rem; margin-bottom: 10px; }
+        .nav-link { color: var(--text-secondary); text-decoration: none; font-weight: 500; }
+        .nav-link:hover { color: var(--text-primary); }
+        .settings-section { background: var(--card-background); padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); margin-bottom: 25px; }
+        .section-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 25px; color: var(--text-primary); display: flex; align-items: center; gap: 10px; }
+        .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 25px; }
         .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-        .btn { padding: 12px 24px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .form-label { display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-primary); font-size: 14px; }
+        .form-input, .form-select, .form-textarea { width: 100%; padding: 12px; border: 2px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--card-background); color: var(--text-primary); transition: border-color 0.2s; }
+        .form-input:focus, .form-select:focus, .form-textarea:focus { outline: none; border-color: #405de6; box-shadow: 0 0 0 3px rgba(64, 93, 230, 0.1); }
+        .form-textarea { min-height: 100px; resize: vertical; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 14px; }
+        .btn-primary { background: var(--primary-gradient); color: white; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(64, 93, 230, 0.4); }
+        .btn-secondary { background: var(--border-color); color: var(--text-primary); }
+        .btn-secondary:hover { background: #d1d5db; }
+        .btn-success { background: var(--success-color); color: white; }
+        .btn-warning { background: var(--warning-color); color: white; }
+        .btn-danger { background: var(--error-color); color: white; }
+        .integration-card { border: 2px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 15px; transition: border-color 0.2s; }
+        .integration-card.connected { border-color: var(--success-color); background: rgba(16, 185, 129, 0.05); }
+        .integration-card.error { border-color: var(--error-color); background: rgba(239, 68, 68, 0.05); }
+        .integration-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+        .integration-title { font-weight: 600; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+        .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .status-connected { background: var(--success-color); color: white; }
+        .status-disconnected { background: var(--border-color); color: var(--text-primary); }
+        .status-error { background: var(--error-color); color: white; }
         .hidden { display: none; }
+        .flex { display: flex; }
+        .gap-2 { gap: 8px; }
+        .gap-3 { gap: 12px; }
+        .mt-3 { margin-top: 12px; }
+        .mb-3 { margin-bottom: 12px; }
+        .text-sm { font-size: 12px; }
+        .text-muted { color: var(--text-secondary); }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>⚙️ Settings</h1>
-            <nav><a href="/">← Back to Main</a></nav>
+            <nav><a href="/" class="nav-link">← Back to Main</a></nav>
         </div>
 
         <div id="loginRequired" class="settings-section">
-            <h2>🔐 Login Required</h2>
+            <div class="section-title">🔐 Login Required</div>
             <p>Please login to access your settings.</p>
         </div>
 
         <div id="settingsContent" class="hidden">
+            <!-- Account Information -->
             <div class="settings-section">
-                <h2>👤 Account Information</h2>
-                <p>Email: <span id="userEmail">Loading...</span></p>
-                <p>Account Type: <span id="userType">Loading...</span></p>
+                <div class="section-title">👤 Account Information</div>
+                <div class="settings-grid">
+                    <div>
+                        <p><strong>Email:</strong> <span id="userEmail">Loading...</span></p>
+                        <p><strong>Account Type:</strong> <span id="userType">Loading...</span></p>
+                        <p><strong>Member Since:</strong> <span id="memberSince">Loading...</span></p>
+                    </div>
+                </div>
             </div>
 
+            <!-- Preferences -->
             <div class="settings-section">
-                <h2>🔧 Preferences</h2>
-                <div class="form-group">
-                    <label for="defaultStyle">Default Caption Style:</label>
-                    <select id="defaultStyle">
-                        <option value="creative">✨ Creative</option>
-                        <option value="professional">💼 Professional</option>
-                        <option value="casual">😄 Casual</option>
-                        <option value="trendy">🔥 Trendy</option>
-                        <option value="inspirational">💭 Inspirational</option>
-                        <option value="edgy">🖤 Edgy</option>
-                    </select>
+                <div class="section-title">🎨 Preferences</div>
+                <div class="settings-grid">
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label" for="defaultStyle">Default Caption Style</label>
+                            <select id="defaultStyle" class="form-select">
+                                <option value="creative">✨ Creative</option>
+                                <option value="professional">💼 Professional</option>
+                                <option value="casual">😄 Casual</option>
+                                <option value="trendy">🔥 Trendy</option>
+                                <option value="inspirational">💭 Inspirational</option>
+                                <option value="edgy">🖤 Edgy</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="autoWeather">
+                                <input type="checkbox" id="autoWeather" checked> Include Weather Data by Default
+                            </label>
+                            <p class="text-sm text-muted">Automatically include weather information in captions when location data is available</p>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="form-group">
+                            <label class="form-label" for="defaultHashtagCount">Default Hashtag Count</label>
+                            <select id="defaultHashtagCount" class="form-select">
+                                <option value="5">5 hashtags</option>
+                                <option value="10" selected>10 hashtags</option>
+                                <option value="15">15 hashtags</option>
+                                <option value="20">20 hashtags</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="customPrompt">Custom Prompt Addition</label>
+                            <textarea id="customPrompt" class="form-textarea" placeholder="Add any custom instructions that will be included in all your caption requests..."></textarea>
+                        </div>
+                    </div>
                 </div>
-                <button class="btn" onclick="saveSettings()">Save Preferences</button>
+                <button class="btn btn-primary" onclick="savePreferences()">💾 Save Preferences</button>
+            </div>
+
+            <!-- Social Media Integrations -->
+            <div class="settings-section">
+                <div class="section-title">🔗 Social Media Integrations</div>
+                
+                <!-- Mastodon Integration -->
+                <div id="mastodonCard" class="integration-card">
+                    <div class="integration-header">
+                        <div class="integration-title">
+                            <span>🐘</span>
+                            <span>Mastodon</span>
+                        </div>
+                        <span id="mastodonStatus" class="status-badge status-disconnected">Disconnected</span>
+                    </div>
+                    <div id="mastodonSettings">
+                        <div class="form-group">
+                            <label class="form-label" for="mastodonInstance">Instance URL</label>
+                            <input type="url" id="mastodonInstance" class="form-input" placeholder="https://mastodon.social">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="mastodonToken">Access Token</label>
+                            <input type="password" id="mastodonToken" class="form-input" placeholder="Your Mastodon access token">
+                            <p class="text-sm text-muted mt-3">Generate an access token in your Mastodon instance settings under Development → New Application</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-primary" onclick="testMastodonConnection()">🔌 Test Connection</button>
+                            <button class="btn btn-success" onclick="saveMastodonSettings()">💾 Save</button>
+                            <button class="btn btn-secondary" onclick="disconnectMastodon()">🔌 Disconnect</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LinkedIn Integration -->
+                <div id="linkedinCard" class="integration-card">
+                    <div class="integration-header">
+                        <div class="integration-title">
+                            <span>💼</span>
+                            <span>LinkedIn</span>
+                        </div>
+                        <span id="linkedinStatus" class="status-badge status-disconnected">Disconnected</span>
+                    </div>
+                    <div id="linkedinSettings">
+                        <div class="form-group">
+                            <label class="form-label" for="linkedinToken">Access Token</label>
+                            <input type="password" id="linkedinToken" class="form-input" placeholder="Your LinkedIn access token">
+                            <p class="text-sm text-muted mt-3">
+                                Generate an access token via LinkedIn Developer Platform. 
+                                <a href="https://developer.linkedin.com/" target="_blank" style="color: #405de6;">Learn more</a>
+                            </p>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                <input type="checkbox" id="linkedinAutoPost"> Enable Auto-posting
+                            </label>
+                            <p class="text-sm text-muted">Automatically post generated content to your LinkedIn profile</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-primary" onclick="testLinkedInConnection()">🔌 Test Connection</button>
+                            <button class="btn btn-success" onclick="saveLinkedInSettings()">💾 Save</button>
+                            <button class="btn btn-secondary" onclick="disconnectLinkedIn()">🔌 Disconnect</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <p class="text-sm text-muted">
+                        <strong>Privacy Note:</strong> Your social media tokens are encrypted and stored securely. 
+                        We never store your passwords and you can disconnect at any time.
+                    </p>
+                </div>
             </div>
         </div>
     </div>
@@ -2750,7 +3083,8 @@ app.get('/settings', (c) => {
         async function checkAuth() {
             try {
                 const response = await fetch('/api/auth/me', {
-                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
+                    credentials: 'include'
                 });
                 
                 if (response.ok) {
@@ -2759,20 +3093,290 @@ app.get('/settings', (c) => {
                     document.getElementById('settingsContent').classList.remove('hidden');
                     document.getElementById('userEmail').textContent = user.email;
                     document.getElementById('userType').textContent = user.isAdmin ? 'Admin' : 'User';
+                    document.getElementById('memberSince').textContent = new Date().toLocaleDateString();
                     
                     // Load saved preferences
-                    const savedStyle = localStorage.getItem('defaultStyle') || 'creative';
-                    document.getElementById('defaultStyle').value = savedStyle;
+                    loadPreferences();
+                    loadSocialMediaSettings();
                 }
             } catch (error) {
                 console.error('Auth check failed:', error);
             }
         }
 
-        function saveSettings() {
-            const defaultStyle = document.getElementById('defaultStyle').value;
-            localStorage.setItem('defaultStyle', defaultStyle);
-            alert('Settings saved!');
+        function loadPreferences() {
+            // Load saved preferences from localStorage
+            const savedStyle = localStorage.getItem('defaultStyle') || 'creative';
+            const autoWeather = localStorage.getItem('autoWeather') !== 'false';
+            const hashtagCount = localStorage.getItem('defaultHashtagCount') || '10';
+            const customPrompt = localStorage.getItem('customPrompt') || '';
+            
+            document.getElementById('defaultStyle').value = savedStyle;
+            document.getElementById('autoWeather').checked = autoWeather;
+            document.getElementById('defaultHashtagCount').value = hashtagCount;
+            document.getElementById('customPrompt').value = customPrompt;
+        }
+
+        async function savePreferences() {
+            const style = document.getElementById('defaultStyle').value;
+            const autoWeather = document.getElementById('autoWeather').checked;
+            const hashtagCount = document.getElementById('defaultHashtagCount').value;
+            const customPrompt = document.getElementById('customPrompt').value;
+            
+            // Save to localStorage
+            localStorage.setItem('defaultStyle', style);
+            localStorage.setItem('autoWeather', autoWeather);
+            localStorage.setItem('defaultHashtagCount', hashtagCount);
+            localStorage.setItem('customPrompt', customPrompt);
+            
+            alert('✅ Preferences saved successfully!');
+        }
+
+        async function loadSocialMediaSettings() {
+            try {
+                const response = await fetch('/api/user/settings/social', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const settings = await response.json();
+                    
+                    // Load Mastodon settings
+                    if (settings.mastodon) {
+                        document.getElementById('mastodonInstance').value = settings.mastodon.instance || '';
+                        if (settings.mastodon.token) {
+                            document.getElementById('mastodonToken').placeholder = '••••••••••••••••';
+                            updateMastodonStatus('connected');
+                        }
+                    }
+                    
+                    // Load LinkedIn settings
+                    if (settings.linkedin) {
+                        if (settings.linkedin.token) {
+                            document.getElementById('linkedinToken').placeholder = '••••••••••••••••';
+                            updateLinkedInStatus('connected');
+                        }
+                        document.getElementById('linkedinAutoPost').checked = settings.linkedin.autoPost || false;
+                    }
+                }
+            } catch (error) {
+                console.log('Could not load social media settings:', error);
+            }
+        }
+
+        function updateMastodonStatus(status) {
+            const statusEl = document.getElementById('mastodonStatus');
+            const cardEl = document.getElementById('mastodonCard');
+            
+            cardEl.className = 'integration-card';
+            statusEl.className = 'status-badge';
+            
+            if (status === 'connected') {
+                cardEl.classList.add('connected');
+                statusEl.classList.add('status-connected');
+                statusEl.textContent = 'Connected';
+            } else if (status === 'error') {
+                cardEl.classList.add('error');
+                statusEl.classList.add('status-error');
+                statusEl.textContent = 'Error';
+            } else {
+                statusEl.classList.add('status-disconnected');
+                statusEl.textContent = 'Disconnected';
+            }
+        }
+
+        function updateLinkedInStatus(status) {
+            const statusEl = document.getElementById('linkedinStatus');
+            const cardEl = document.getElementById('linkedinCard');
+            
+            cardEl.className = 'integration-card';
+            statusEl.className = 'status-badge';
+            
+            if (status === 'connected') {
+                cardEl.classList.add('connected');
+                statusEl.classList.add('status-connected');
+                statusEl.textContent = 'Connected';
+            } else if (status === 'error') {
+                cardEl.classList.add('error');
+                statusEl.classList.add('status-error');
+                statusEl.textContent = 'Error';
+            } else {
+                statusEl.classList.add('status-disconnected');
+                statusEl.textContent = 'Disconnected';
+            }
+        }
+
+        async function testMastodonConnection() {
+            const instance = document.getElementById('mastodonInstance').value;
+            const token = document.getElementById('mastodonToken').value;
+            
+            if (!instance || !token) {
+                alert('Please fill in both instance URL and access token');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/user/settings/test-mastodon', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ instance, token })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    updateMastodonStatus('connected');
+                    alert('✅ Mastodon connection successful!');
+                } else {
+                    updateMastodonStatus('error');
+                    alert('❌ Connection failed: ' + result.error);
+                }
+            } catch (error) {
+                updateMastodonStatus('error');
+                alert('❌ Connection test failed: ' + error.message);
+            }
+        }
+
+        async function saveMastodonSettings() {
+            const instance = document.getElementById('mastodonInstance').value;
+            const token = document.getElementById('mastodonToken').value;
+            
+            if (!instance || !token) {
+                alert('Please fill in both instance URL and access token');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/user/settings/mastodon', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ instance, token })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    updateMastodonStatus('connected');
+                    document.getElementById('mastodonToken').placeholder = '••••••••••••••••';
+                    document.getElementById('mastodonToken').value = '';
+                    alert('✅ Mastodon settings saved successfully!');
+                } else {
+                    alert('❌ Failed to save settings: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to save settings: ' + error.message);
+            }
+        }
+
+        async function testLinkedInConnection() {
+            const token = document.getElementById('linkedinToken').value;
+            
+            if (!token) {
+                alert('Please enter your LinkedIn access token');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/user/settings/test-linkedin', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ token })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    updateLinkedInStatus('connected');
+                    alert('✅ LinkedIn connection successful!');
+                } else {
+                    updateLinkedInStatus('error');
+                    alert('❌ Connection failed: ' + result.error);
+                }
+            } catch (error) {
+                updateLinkedInStatus('error');
+                alert('❌ Connection test failed: ' + error.message);
+            }
+        }
+
+        async function saveLinkedInSettings() {
+            const token = document.getElementById('linkedinToken').value;
+            const autoPost = document.getElementById('linkedinAutoPost').checked;
+            
+            if (!token) {
+                alert('Please enter your LinkedIn access token');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/user/settings/linkedin', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ token, autoPost })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    updateLinkedInStatus('connected');
+                    document.getElementById('linkedinToken').placeholder = '••••••••••••••••';
+                    document.getElementById('linkedinToken').value = '';
+                    alert('✅ LinkedIn settings saved successfully!');
+                } else {
+                    alert('❌ Failed to save settings: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to save settings: ' + error.message);
+            }
+        }
+
+        async function disconnectMastodon() {
+            if (!confirm('Are you sure you want to disconnect Mastodon?')) return;
+            
+            try {
+                const response = await fetch('/api/user/settings/mastodon', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    updateMastodonStatus('disconnected');
+                    document.getElementById('mastodonInstance').value = '';
+                    document.getElementById('mastodonToken').value = '';
+                    document.getElementById('mastodonToken').placeholder = 'Your Mastodon access token';
+                    alert('✅ Mastodon disconnected successfully!');
+                }
+            } catch (error) {
+                alert('❌ Failed to disconnect: ' + error.message);
+            }
+        }
+
+        async function disconnectLinkedIn() {
+            if (!confirm('Are you sure you want to disconnect LinkedIn?')) return;
+            
+            try {
+                const response = await fetch('/api/user/settings/linkedin', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    updateLinkedInStatus('disconnected');
+                    document.getElementById('linkedinToken').value = '';
+                    document.getElementById('linkedinToken').placeholder = 'Your LinkedIn access token';
+                    document.getElementById('linkedinAutoPost').checked = false;
+                    alert('✅ LinkedIn disconnected successfully!');
+                }
+            } catch (error) {
+                alert('❌ Failed to disconnect: ' + error.message);
+            }
         }
 
         document.addEventListener('DOMContentLoaded', checkAuth);
