@@ -1304,11 +1304,8 @@ app.post('/api/auth/accept-invite', async (c) => {
         await database.createSession(sessionId, user.id, expiresAt, ipAddress, userAgent);
         console.log('Session created successfully');
         
-        const token = await createSessionJWT({
-            userId: user.id,
-            sessionId: sessionId,
-            email: user.email
-        }, c.env.JWT_SECRET);
+        // Create JWT token
+        const token = jwt.sign({ sessionId }, c.env.JWT_SECRET || JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
         
         // Set auth cookie
         setCookie(c, 'auth_token', token, {
