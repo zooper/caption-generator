@@ -343,6 +343,19 @@ app.post('/api/auth/request-login', async (c) => {
 
         const database = new D1Database(c.env.DB);
         
+        // Check if user already exists
+        const existingUser = await database.getUserByEmail(email);
+        
+        // If user doesn't exist, check registration settings
+        if (!existingUser) {
+            const registrationOpen = await database.getSystemSetting('registration_open', 'true');
+            if (registrationOpen === 'false') {
+                return c.json({ 
+                    error: 'Registration is currently invite-only. Please contact an administrator for an invitation.' 
+                }, 403);
+            }
+        }
+        
         // Generate secure token
         const token = crypto.randomUUID();
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
