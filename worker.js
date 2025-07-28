@@ -89,8 +89,51 @@ class D1Database {
     }
 
     async logQuery(logData) {
-        // Simplified logging for now
-        console.log('Query logged:', logData.id);
+        try {
+            // Create the query_logs table if it doesn't exist
+            await this.ensureQueryLogsTable();
+            
+            const {
+                id, source, userId, email, processingTimeMs, responseLength
+            } = logData;
+
+            const stmt = this.db.prepare(`
+                INSERT INTO query_logs (
+                    id, source, user_id, email, processing_time_ms, response_length, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            `);
+
+            await stmt.bind(
+                id, source || 'web', userId, email, 
+                processingTimeMs || 0, responseLength || 0
+            ).run();
+
+            console.log('Query logged successfully:', id);
+            return id;
+        } catch (error) {
+            console.error('Failed to log query:', error);
+            // Don't throw error to avoid breaking the main flow
+        }
+    }
+
+    async ensureQueryLogsTable() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS query_logs (
+                    id TEXT PRIMARY KEY,
+                    source TEXT DEFAULT 'web',
+                    user_id INTEGER,
+                    email TEXT,
+                    processing_time_ms INTEGER DEFAULT 0,
+                    response_length INTEGER DEFAULT 0,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.log('Could not ensure query_logs table exists:', error);
+        }
     }
 
     async checkUsageLimit(userId) {
@@ -3751,35 +3794,86 @@ app.get('/admin/users', (c) => {
             }
         }
 
+        let availableTiers = [];
+
         async function loadUsers() {
             try {
-                const response = await fetch('/api/admin/users', {
-                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
-                });
+                // Load both users and tiers in parallel
+                const [usersResponse, tiersResponse] = await Promise.all([
+                    fetch('/api/admin/users', {
+                        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                    }),
+                    fetch('/api/admin/tiers', {
+                        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                    })
+                ]);
                 
-                if (response.ok) {
-                    const users = await response.json();
+                if (usersResponse.ok && tiersResponse.ok) {
+                    const users = await usersResponse.json();
+                    availableTiers = await tiersResponse.json();
+                    
                     const tbody = document.getElementById('usersTable');
                     tbody.innerHTML = users.map(user => 
                         '<tr>' +
                         '<td>' + user.email + '</td>' +
                         '<td><span class="badge ' + (user.is_admin ? 'badge-admin">🛠️ Admin' : 'badge-user">👤 User') + '</span></td>' +
-                        '<td>' + (user.tier_name || 'No tier') + '</td>' +
+                        '<td>' + createTierDropdown(user) + '</td>' +
                         '<td>' + (user.usage_today || 0) + '/' + (user.daily_limit === -1 ? '∞' : user.daily_limit || 0) + '</td>' +
                         '<td><span class="badge ' + (user.is_active ? 'badge-active">✅ Active' : 'badge-inactive">❌ Inactive') + '</span></td>' +
                         '<td>' + new Date(user.created_at).toLocaleDateString() + '</td>' +
                         '<td>' +
                         '<div class="flex gap-2">' +
                         (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
-                        '<button class="btn btn-secondary" onclick="changeTier(' + user.id + ')">🏆 Change Tier</button>' +
                         '<button class="btn ' + (user.is_active ? 'btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate' : 'btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate') + '</button>' +
                         '</div>' +
                         '</td>' +
                         '</tr>'
                     ).join('');
+                } else {
+                    throw new Error('Failed to load users or tiers');
                 }
             } catch (error) {
+                console.error('Error loading users:', error);
                 document.getElementById('usersTable').innerHTML = '<tr><td colspan="7">Failed to load users</td></tr>';
+            }
+        }
+
+        function createTierDropdown(user) {
+            let options = '<option value="">No tier</option>';
+            
+            availableTiers.forEach(tier => {
+                const selected = user.tier_id === tier.id ? 'selected' : '';
+                const limitText = tier.daily_limit === -1 ? 'Unlimited' : tier.daily_limit + ' per day';
+                options += '<option value="' + tier.id + '" ' + selected + '>' + tier.name + ' (' + limitText + ')</option>';
+            });
+            
+            return '<select class="form-input" style="width: 200px; padding: 5px;" onchange="updateUserTier(' + user.id + ', this.value)">' + 
+                   options + 
+                   '</select>';
+        }
+
+        async function updateUserTier(userId, tierId) {
+            try {
+                const response = await fetch('/api/admin/users/' + userId + '/tier', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ tierId: tierId || null })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    console.log('✅ User tier updated successfully');
+                    // Optionally show a brief success indicator
+                } else {
+                    alert('❌ Error: ' + result.error);
+                    loadUsers(); // Reload to reset the dropdown
+                }
+            } catch (error) {
+                alert('❌ Failed to update tier: ' + error.message);
+                loadUsers(); // Reload to reset the dropdown
             }
         }
 
@@ -3856,63 +3950,6 @@ app.get('/admin/users', (c) => {
             }
         }
 
-        async function changeTier(userId) {
-            try {
-                // First load available tiers
-                const tiersResponse = await fetch('/api/admin/tiers', {
-                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
-                });
-                
-                if (!tiersResponse.ok) {
-                    alert('❌ Failed to load tiers');
-                    return;
-                }
-                
-                const tiers = await tiersResponse.json();
-                if (tiers.length === 0) {
-                    alert('❌ No tiers available. Please create tiers first.');
-                    return;
-                }
-                
-                // Create tier selection prompt
-                let tierOptions = 'Available tiers:\\n';
-                tiers.forEach((tier, index) => {
-                    tierOptions += (index + 1) + '. ' + tier.name + ' (' + (tier.daily_limit === -1 ? 'Unlimited' : tier.daily_limit + ' per day') + ')\\n';
-                });
-                tierOptions += '\\nEnter the number of the tier to assign:';
-                
-                const selection = prompt(tierOptions);
-                if (!selection) return;
-                
-                const tierIndex = parseInt(selection) - 1;
-                if (tierIndex < 0 || tierIndex >= tiers.length) {
-                    alert('❌ Invalid selection');
-                    return;
-                }
-                
-                const selectedTier = tiers[tierIndex];
-                
-                // Update user tier
-                const response = await fetch('/api/admin/users/' + userId + '/tier', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
-                    },
-                    body: JSON.stringify({ tierId: selectedTier.id })
-                });
-                
-                const result = await response.json();
-                if (result.success) {
-                    alert('✅ User tier updated successfully!');
-                    loadUsers(); // Refresh the user list
-                } else {
-                    alert('❌ Error: ' + result.error);
-                }
-            } catch (error) {
-                alert('❌ Failed to change tier: ' + error.message);
-            }
-        }
 
         async function logout() {
             try {
