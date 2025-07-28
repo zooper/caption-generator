@@ -800,13 +800,13 @@ D1Database.prototype.createInviteToken = async function(email, invitedBy, token,
         
         console.log('About to prepare INSERT statement');
         const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, personal_message) 
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO invite_tokens (email, invited_by, token, expires_at, tier_id, personal_message) 
+            VALUES (?, ?, ?, ?, ?, ?)
         `);
         console.log('INSERT statement prepared successfully');
         
         console.log('About to bind parameters and execute');
-        const result = await stmt.bind(email, invitedBy, token, expiresAt, personalMessage).run();
+        const result = await stmt.bind(email, invitedBy, token, expiresAt, tierId, personalMessage).run();
         console.log('INSERT completed successfully:', result);
         
         return { email, token, expiresAt, tierId, personalMessage };
@@ -839,6 +839,19 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
     try {
         // Ensure user_tiers table exists first
         await this.ensureUserTiersTable();
+        
+        // Check if the table has the wrong foreign key constraint
+        const schemaResult = await this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invite_tokens'").all();
+        const currentSchema = schemaResult.results?.[0]?.sql || '';
+        
+        if (currentSchema.includes('REFERENCES tiers(id)')) {
+            console.log('Found incorrect foreign key constraint, recreating table...');
+            
+            // Drop and recreate the table with correct schema
+            await this.db.prepare('DROP TABLE IF EXISTS invite_tokens').run();
+            console.log('Dropped invite_tokens table with incorrect schema');
+        }
+        
         const stmt = this.db.prepare(`
             CREATE TABLE IF NOT EXISTS invite_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -847,6 +860,7 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
                 token TEXT UNIQUE NOT NULL,
                 expires_at DATETIME NOT NULL,
                 tier_id INTEGER,
+                personal_message TEXT,
                 used_at DATETIME,
                 used_by INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
