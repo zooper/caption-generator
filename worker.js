@@ -100,16 +100,66 @@ class D1Database {
                 id, source, userId, email, processingTimeMs, responseLength
             } = logData;
 
-            const stmt = this.db.prepare(`
-                INSERT INTO query_logs (
-                    id, source, user_id, email, processing_time_ms, response_length, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-            `);
-
-            const result = await stmt.bind(
-                id, source || 'web', userId, email, 
-                processingTimeMs || 0, responseLength || 0
-            ).run();
+            // Check what columns exist in the table to build the correct INSERT
+            const tableInfo = await this.db.prepare(`PRAGMA table_info(query_logs)`).all();
+            const columns = (tableInfo.results || []).map(col => col.name);
+            console.log('Available columns for query log INSERT:', columns);
+            
+            // Build INSERT statement based on available columns
+            let insertColumns = ['id'];
+            let insertValues = [id];
+            let placeholders = ['?'];
+            
+            if (columns.includes('source')) {
+                insertColumns.push('source');
+                insertValues.push(source || 'web');
+                placeholders.push('?');
+            }
+            
+            if (columns.includes('user_id')) {
+                insertColumns.push('user_id');
+                insertValues.push(userId);
+                placeholders.push('?');
+            }
+            
+            if (columns.includes('email')) {
+                insertColumns.push('email');
+                insertValues.push(email);
+                placeholders.push('?');
+            }
+            
+            if (columns.includes('processing_time_ms')) {
+                insertColumns.push('processing_time_ms');
+                insertValues.push(processingTimeMs || 0);
+                placeholders.push('?');
+            }
+            
+            if (columns.includes('response_length')) {
+                insertColumns.push('response_length');
+                insertValues.push(responseLength || 0);
+                placeholders.push('?');
+            }
+            
+            if (columns.includes('timestamp')) {
+                insertColumns.push('timestamp');
+                placeholders.push("datetime('now')");
+            }
+            
+            if (columns.includes('created_at')) {
+                insertColumns.push('created_at');
+                placeholders.push("datetime('now')");
+            }
+            
+            const insertSQL = `
+                INSERT INTO query_logs (${insertColumns.join(', ')}) 
+                VALUES (${placeholders.join(', ')})
+            `;
+            
+            console.log('Query log INSERT SQL:', insertSQL);
+            console.log('Query log INSERT values:', insertValues);
+            
+            const stmt = this.db.prepare(insertSQL);
+            const result = await stmt.bind(...insertValues).run();
 
             console.log('Query logged successfully:', id);
             console.log('Insert result:', result);
@@ -133,21 +183,69 @@ class D1Database {
 
     async ensureQueryLogsTable() {
         try {
-            const stmt = this.db.prepare(`
-                CREATE TABLE IF NOT EXISTS query_logs (
-                    id TEXT PRIMARY KEY,
-                    source TEXT DEFAULT 'web',
-                    user_id INTEGER,
-                    email TEXT,
-                    processing_time_ms INTEGER DEFAULT 0,
-                    response_length INTEGER DEFAULT 0,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            `);
-            await stmt.run();
+            console.log('=== ensureQueryLogsTable started ===');
+            
+            // First check if the table exists and what columns it has
+            const tableInfo = await this.db.prepare(`
+                PRAGMA table_info(query_logs)
+            `).all();
+            
+            console.log('Existing query_logs table info:', tableInfo.results || []);
+            
+            if (!tableInfo.results || tableInfo.results.length === 0) {
+                // Table doesn't exist, create it with our schema
+                console.log('Creating new query_logs table');
+                const stmt = this.db.prepare(`
+                    CREATE TABLE query_logs (
+                        id TEXT PRIMARY KEY,
+                        source TEXT DEFAULT 'web',
+                        user_id INTEGER,
+                        email TEXT,
+                        processing_time_ms INTEGER DEFAULT 0,
+                        response_length INTEGER DEFAULT 0,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                `);
+                await stmt.run();
+                console.log('Created new query_logs table');
+            } else {
+                // Table exists, check what columns we need to add
+                const columns = tableInfo.results.map(col => col.name);
+                console.log('Existing query_logs columns:', columns);
+                
+                // Add missing columns one by one
+                const requiredColumns = [
+                    { name: 'user_id', definition: 'INTEGER' },
+                    { name: 'email', definition: 'TEXT' },
+                    { name: 'processing_time_ms', definition: 'INTEGER DEFAULT 0' },
+                    { name: 'response_length', definition: 'INTEGER DEFAULT 0' },
+                    { name: 'timestamp', definition: 'DATETIME DEFAULT CURRENT_TIMESTAMP' },
+                    { name: 'created_at', definition: 'DATETIME DEFAULT CURRENT_TIMESTAMP' }
+                ];
+                
+                for (const col of requiredColumns) {
+                    if (!columns.includes(col.name)) {
+                        console.log(`Adding ${col.name} column to existing query_logs table`);
+                        try {
+                            const alterResult = await this.db.prepare(`ALTER TABLE query_logs ADD COLUMN ${col.name} ${col.definition}`).run();
+                            console.log(`Successfully added ${col.name} column:`, alterResult);
+                        } catch (alterError) {
+                            console.error(`Failed to add ${col.name} column:`, alterError);
+                        }
+                    } else {
+                        console.log(`Column ${col.name} already exists`);
+                    }
+                }
+            }
+            
+            // Verify final table structure
+            const finalTableInfo = await this.db.prepare(`PRAGMA table_info(query_logs)`).all();
+            console.log('Final query_logs table structure:', finalTableInfo.results || []);
+            console.log('=== ensureQueryLogsTable completed ===');
+            
         } catch (error) {
-            console.log('Could not ensure query_logs table exists:', error);
+            console.error('Error in ensureQueryLogsTable:', error);
         }
     }
 
@@ -1542,6 +1640,117 @@ app.delete('/api/user/settings/mastodon', authenticateToken, async (c) => {
     }
 });
 
+app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { status, alt_text, image_data } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        if (!status) {
+            return c.json({ error: 'Status text is required' }, 400);
+        }
+        
+        // Get user's Mastodon settings
+        const settings = await database.getUserSettings(user.id, 'social');
+        let mastodonInstance = null;
+        let mastodonToken = null;
+        
+        settings.forEach(setting => {
+            if (setting.setting_key === 'mastodon_instance') {
+                mastodonInstance = setting.setting_value;
+            } else if (setting.setting_key === 'mastodon_token') {
+                mastodonToken = setting.setting_value;
+            }
+        });
+        
+        if (!mastodonInstance || !mastodonToken) {
+            return c.json({ error: 'Mastodon account not properly configured' }, 400);
+        }
+        
+        console.log('Posting to Mastodon:', {
+            instance: mastodonInstance,
+            statusLength: status.length,
+            hasImage: !!image_data,
+            hasAltText: !!alt_text
+        });
+        
+        // First upload the image if provided
+        let mediaId = null;
+        if (image_data) {
+            try {
+                // Convert base64 to binary for upload
+                const imageBuffer = Buffer.from(image_data, 'base64');
+                
+                const mediaFormData = new FormData();
+                mediaFormData.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }));
+                if (alt_text) {
+                    mediaFormData.append('description', alt_text);
+                }
+                
+                const mediaResponse = await fetch(`${mastodonInstance}/api/v1/media`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${mastodonToken}`
+                    },
+                    body: mediaFormData
+                });
+                
+                if (mediaResponse.ok) {
+                    const mediaResult = await mediaResponse.json();
+                    mediaId = mediaResult.id;
+                    console.log('Media uploaded successfully:', mediaId);
+                } else {
+                    console.error('Media upload failed:', mediaResponse.status, await mediaResponse.text());
+                }
+            } catch (mediaError) {
+                console.error('Media upload error:', mediaError);
+                // Continue without media if upload fails
+            }
+        }
+        
+        // Create the status post
+        const postData = {
+            status: status,
+            visibility: 'public'
+        };
+        
+        if (mediaId) {
+            postData.media_ids = [mediaId];
+        }
+        
+        const postResponse = await fetch(`${mastodonInstance}/api/v1/statuses`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${mastodonToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(postData)
+        });
+        
+        if (postResponse.ok) {
+            const postResult = await postResponse.json();
+            console.log('Post created successfully:', postResult.id);
+            
+            return c.json({ 
+                success: true, 
+                message: 'Posted to Mastodon successfully!',
+                url: postResult.url,
+                id: postResult.id
+            });
+        } else {
+            const errorText = await postResponse.text();
+            console.error('Post creation failed:', postResponse.status, errorText);
+            return c.json({ 
+                error: 'Failed to create post on Mastodon: ' + postResponse.status 
+            }, 500);
+        }
+        
+    } catch (error) {
+        console.error('Mastodon post error:', error);
+        return c.json({ error: 'Failed to post to Mastodon: ' + error.message }, 500);
+    }
+});
+
 app.post('/api/user/settings/test-linkedin', authenticateToken, async (c) => {
     try {
         const { token } = await c.req.json();
@@ -2454,6 +2663,10 @@ app.get('/', (c) => {
         .preview-text { margin: 10px 0; line-height: 1.5; }
         .preview-hashtags { color: #0077b5; font-size: 0.9em; margin-top: 10px; }
         .preview-alt { color: #666; font-size: 0.85em; font-style: italic; margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; }
+        .preview-actions { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
+        .post-btn { padding: 8px 16px; background: #6364ff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
+        .post-btn:hover { background: #5a5bd6; }
+        .post-btn:disabled { background: #ccc; cursor: not-allowed; }
         .hidden { display: none; }
         @media (max-width: 768px) { .main-content { grid-template-columns: 1fr; } .main-content.show { display: grid; } }
     </style>
@@ -3065,6 +3278,9 @@ app.get('/', (c) => {
                             '<div class="preview-text">' + captionText + '</div>' +
                             (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
                             (altTextContent ? '<div class="preview-alt">Alt text: ' + altTextContent + '</div>' : '') +
+                            '<div class="preview-actions">' +
+                            '<button class="post-btn" onclick="postToMastodon()">📝 Post to Mastodon</button>' +
+                            '</div>' +
                             '</div>' +
                             '</div>';
                     }
@@ -3111,6 +3327,62 @@ app.get('/', (c) => {
                 btn.textContent = '✅ Copied!';
                 setTimeout(() => btn.textContent = originalText, 2000);
             });
+        }
+
+        async function postToMastodon() {
+            try {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '⏳ Posting...';
+
+                // Get the generated content
+                const captionText = document.getElementById('captionText').textContent;
+                const hashtagsText = document.getElementById('hashtagsText').textContent;
+                const altText = document.getElementById('altText').textContent;
+                
+                // Combine caption and hashtags for the post
+                const postContent = captionText + (hashtagsText ? '\n\n' + hashtagsText : '');
+
+                const response = await fetch('/api/user/post/mastodon', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        status: postContent,
+                        alt_text: altText,
+                        image_data: uploadedImage // Send the base64 image data
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = '✅ Posted!';
+                    if (result.url) {
+                        setTimeout(() => {
+                            if (confirm('Post successful! Would you like to view it on Mastodon?')) {
+                                window.open(result.url, '_blank');
+                            }
+                        }, 500);
+                    }
+                } else {
+                    btn.textContent = '❌ Failed';
+                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Post error:', error);
+                event.target.textContent = '❌ Error';
+                alert('Error posting to Mastodon: ' + error.message);
+            } finally {
+                setTimeout(() => {
+                    event.target.disabled = false;
+                    event.target.textContent = '📝 Post to Mastodon';
+                }, 3000);
+            }
         }
     </script>
 </body>
