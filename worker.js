@@ -497,8 +497,8 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         const hasEXIFMarker = imageBuffer.includes(Buffer.from([0xFF, 0xE1])); // EXIF APP1 marker
         console.log('Image format check:', { isJPEG, hasEXIFMarker, bufferSize: imageBuffer.length });
         
-        // Extract EXIF data with more detailed options
-        const exifData = await exifr.parse(imageBuffer, {
+        // Try to extract specific EXIF fields first
+        let exifData = await exifr.parse(imageBuffer, {
             tiff: true,
             ifd0: true,
             exif: true,
@@ -509,6 +509,23 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                 'DateTimeOriginal', 'DateTime', 'DateTimeDigitized'
             ]
         });
+        
+        // If no date fields found, try extracting all EXIF data to see what's available
+        if (exifData && !exifData.DateTimeOriginal && !exifData.DateTime && !exifData.DateTimeDigitized) {
+            console.log('No date fields in targeted extraction, trying full EXIF extraction...');
+            const fullExifData = await exifr.parse(imageBuffer, true);
+            if (fullExifData) {
+                console.log('Full EXIF keys:', Object.keys(fullExifData));
+                // Look for any date-related fields
+                const dateKeys = Object.keys(fullExifData).filter(key => 
+                    key.toLowerCase().includes('date') || key.toLowerCase().includes('time')
+                );
+                console.log('Date-related EXIF keys found:', dateKeys);
+                
+                // Merge the full EXIF data with our targeted data
+                exifData = { ...exifData, ...fullExifData };
+            }
+        }
         console.log('Server EXIF extraction:', exifData ? 'Success' : 'No data');
         
         if (exifData) {
@@ -517,6 +534,11 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
             console.log('EXIF Make:', exifData.Make);
             console.log('EXIF Model:', exifData.Model);
             console.log('EXIF GPS:', exifData.GPSLatitude, exifData.GPSLongitude);
+            console.log('EXIF Date fields:', {
+                DateTimeOriginal: exifData.DateTimeOriginal,
+                DateTime: exifData.DateTime,
+                DateTimeDigitized: exifData.DateTimeDigitized
+            });
             
             // Extract photo date/time
             const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
