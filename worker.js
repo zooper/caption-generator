@@ -785,6 +785,15 @@ D1Database.prototype.createInviteToken = async function(email, invitedBy, token,
         try {
             const tablesResult = await this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
             console.log('All tables in database:', tablesResult.results?.map(t => t.name) || 'No results');
+            
+            // Check the actual schema of invite_tokens table
+            const schemaResult = await this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invite_tokens'").all();
+            console.log('invite_tokens table schema:', schemaResult.results?.[0]?.sql || 'No schema found');
+            
+            // Check for any foreign keys or constraints that reference 'tiers'
+            const fkResult = await this.db.prepare("SELECT sql FROM sqlite_master WHERE sql LIKE '%tiers%'").all();
+            console.log('Objects referencing tiers:', fkResult.results || 'None found');
+            
         } catch (listError) {
             console.log('Could not list tables:', listError.message);
         }
