@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Caption Studio - Admin Dashboard</title>
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme-loader.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .section {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        .queries-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .queries-table th,
+        .queries-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .queries-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .thumbnail {
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .thumbnail:hover {
+            transform: scale(1.1);
+        }
+
+        .source-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .source-web {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .source-extension {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .error-badge {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .success-badge {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .btn:hover {
+            background: #5a6fd8;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .controls {
+            margin-bottom: 1rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        select, input {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            position: relative;
+            margin: 5% auto;
+            max-width: 90%;
+            max-height: 90%;
+            text-align: center;
+        }
+
+        .modal-image {
+            max-width: 100%;
+            max-height: 80vh;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            color: white;
+            font-size: 2rem;
+            font-weight: bold;
+            cursor: pointer;
+            background: rgba(0,0,0,0.5);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            background: rgba(0,0,0,0.7);
+        }
+
+        .modal-info {
+            color: white;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            display: inline-block;
+        }
+
+        /* OpenAI Usage styles */
+        .openai-usage-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .usage-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            border-left: 4px solid #667eea;
+        }
+
+        .usage-card h4 {
+            margin: 0 0 1rem 0;
+            color: #333;
+            font-size: 1.1rem;
+        }
+
+        .usage-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .usage-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .usage-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        /* Schema info styles */
+        .schema-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .schema-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .schema-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .schema-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .schema-value.up-to-date {
+            color: #28a745;
+        }
+
+        .schema-value.needs-migration {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Caption Generator Admin Dashboard</h1>
+        <p>Monitor query logs, analytics, and system performance</p>
+    </div>
+
+    <div class="container">
+        <!-- Statistics Cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalQueries">-</div>
+                <div class="stat-label">Total Queries</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="webQueries">-</div>
+                <div class="stat-label">Web App Queries</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="extensionQueries">-</div>
+                <div class="stat-label">Extension Queries</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="successRate">-</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgProcessingTime">-</div>
+                <div class="stat-label">Avg Processing Time</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="thumbnailCount">-</div>
+                <div class="stat-label">Stored Images</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalCost">-</div>
+                <div class="stat-label">Total Cost (USD)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalTokens">-</div>
+                <div class="stat-label">Total Tokens Used</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="remainingCredits">-</div>
+                <div class="stat-label">Remaining Credits</div>
+            </div>
+        </div>
+
+        <!-- Database Schema Section -->
+        <div class="section">
+            <div class="section-title">🗄️ Database Schema</div>
+            <div class="schema-info">
+                <div class="schema-stat">
+                    <span class="schema-label">Current Version:</span>
+                    <span class="schema-value" id="currentSchemaVersion">Loading...</span>
+                </div>
+                <div class="schema-stat">
+                    <span class="schema-label">Latest Version:</span>
+                    <span class="schema-value" id="latestSchemaVersion">-</span>
+                </div>
+                <div class="schema-stat">
+                    <span class="schema-label">Status:</span>
+                    <span class="schema-value" id="schemaStatus">Checking...</span>
+                </div>
+                <div class="schema-stat">
+                    <span class="schema-label">Migrations Applied:</span>
+                    <span class="schema-value" id="migrationCount">-</span>
+                </div>
+            </div>
+            <button class="btn" onclick="refreshSchemaInfo()">🔄 Refresh Schema Info</button>
+        </div>
+
+        <!-- OpenAI Usage Section -->
+        <div class="section">
+            <div class="section-title">💰 OpenAI Usage & Credits</div>
+            <div class="openai-usage-grid">
+                <div class="usage-card">
+                    <h4>Today's Usage</h4>
+                    <div class="usage-stat">
+                        <span class="usage-label">Today's Spend:</span>
+                        <span class="usage-value" id="monthlySpend">$0.00</span>
+                    </div>
+                    <div class="usage-stat">
+                        <span class="usage-label">Today's Tokens:</span>
+                        <span class="usage-value" id="monthlyTokens">0</span>
+                    </div>
+                </div>
+                <div class="usage-card">
+                    <h4>Spending Projections</h4>
+                    <div class="usage-stat">
+                        <span class="usage-label">Monthly Estimate:</span>
+                        <span class="usage-value" id="availableCredits">Loading...</span>
+                    </div>
+                    <div class="usage-stat">
+                        <span class="usage-label">Weekly Total:</span>
+                        <span class="usage-value" id="remainingCredits">Loading...</span>
+                    </div>
+                    <div class="usage-stat">
+                        <span class="usage-label">API Status:</span>
+                        <span class="usage-value" id="accountStatus">Checking...</span>
+                    </div>
+                </div>
+                <div class="usage-card">
+                    <h4>Cost per Query</h4>
+                    <div class="usage-stat">
+                        <span class="usage-label">Average Cost:</span>
+                        <span class="usage-value" id="avgCostPerQuery">$0.000</span>
+                    </div>
+                    <div class="usage-stat">
+                        <span class="usage-label">Last Query:</span>
+                        <span class="usage-value" id="lastQueryCost">$0.000</span>
+                    </div>
+                </div>
+            </div>
+            <button class="btn" onclick="refreshOpenAIUsage()">🔄 Refresh OpenAI Data</button>
+        </div>
+
+        <!-- Recent Queries Section -->
+        <div class="section">
+            <div class="section-title">Recent Queries</div>
+            <div class="controls">
+                <label>
+                    Show:
+                    <select id="limitSelect">
+                        <option value="25">25 queries</option>
+                        <option value="50" selected>50 queries</option>
+                        <option value="100">100 queries</option>
+                    </select>
+                </label>
+                <button class="btn" onclick="refreshData()">🔄 Refresh Data</button>
+                <button class="btn" onclick="cleanupThumbnails()">🧹 Cleanup Old Thumbnails</button>
+                <small style="color: #666; margin-left: 10px;">Auto-refresh disabled to prevent excessive OpenAI API calls</small>
+            </div>
+            
+            <div id="queriesContainer">
+                <div class="loading">Loading recent queries...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Modal -->
+    <div id="imageModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <img id="modalImage" class="modal-image" src="" alt="Full size image">
+            <div id="modalInfo" class="modal-info"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentData = null;
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/admin/stats');
+                const stats = await response.json();
+                
+                document.getElementById('totalQueries').textContent = stats.database.total_queries || 0;
+                document.getElementById('webQueries').textContent = stats.database.web_queries || 0;
+                document.getElementById('extensionQueries').textContent = stats.database.extension_queries || 0;
+                
+                const successRate = stats.database.total_queries > 0 
+                    ? Math.round((stats.database.successful_queries / stats.database.total_queries) * 100)
+                    : 0;
+                document.getElementById('successRate').textContent = successRate + '%';
+                
+                const avgTime = stats.database.avg_processing_time 
+                    ? Math.round(stats.database.avg_processing_time) + 'ms'
+                    : '-';
+                document.getElementById('avgProcessingTime').textContent = avgTime;
+                
+                const thumbnailText = stats.storage.previewCount 
+                    ? `${stats.storage.thumbnailCount || 0} thumbnails, ${stats.storage.previewCount || 0} previews`
+                    : (stats.storage.thumbnailCount || 0);
+                document.getElementById('thumbnailCount').textContent = thumbnailText;
+                
+                // Display cost and token usage
+                const totalCost = stats.database.total_cost_usd || 0;
+                document.getElementById('totalCost').textContent = '$' + totalCost.toFixed(6);
+                
+                const totalTokens = stats.database.total_tokens_used || 0;
+                document.getElementById('totalTokens').textContent = totalTokens.toLocaleString();
+                
+                // Calculate average cost per query
+                const avgCost = stats.database.total_queries > 0 ? totalCost / stats.database.total_queries : 0;
+                document.getElementById('avgCostPerQuery').textContent = '$' + avgCost.toFixed(6);
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadOpenAIUsage() {
+            try {
+                const response = await fetch('/api/admin/openai-usage');
+                const data = await response.json();
+                
+                // Always get our local stats (more accurate than OpenAI API)
+                const statsResponse = await fetch('/api/admin/stats');
+                const stats = await statsResponse.json();
+                
+                // Show our local cost tracking
+                document.getElementById('monthlySpend').textContent = '$' + (stats.database.total_cost_usd || 0).toFixed(2);
+                document.getElementById('monthlyTokens').textContent = (stats.database.total_tokens_used || 0).toLocaleString();
+                
+                // Handle account balance and usage data
+                if (data.usageApiAvailable && data.openaiUsage && data.openaiUsage.totals) {
+                    // Show today's OpenAI usage data with cost
+                    const todayUsage = data.openaiUsage.totals;
+                    document.getElementById('monthlyTokens').textContent = `Today: ${todayUsage.totalTokens.toLocaleString()} tokens (${todayUsage.totalRequests} requests)`;
+                    
+                    // Show today's spending from OpenAI API
+                    const todayCost = todayUsage.estimatedCostToday || 0;
+                    document.getElementById('monthlySpend').textContent = `Today: $${todayCost.toFixed(4)}`;
+                    
+                    // Show weekly and monthly projections if available
+                    if (data.weeklyUsage && data.weeklyUsage.totals) {
+                        const weeklyData = data.weeklyUsage.totals;
+                        document.getElementById('availableCredits').textContent = `Est. Monthly: $${weeklyData.estimatedMonthlyCost.toFixed(2)}`;
+                        document.getElementById('remainingCredits').textContent = `7-day total: $${weeklyData.weeklyTotalCost.toFixed(4)}`;
+                    } else {
+                        document.getElementById('availableCredits').textContent = 'Check OpenAI Dashboard';
+                        document.getElementById('remainingCredits').textContent = 'Check OpenAI Dashboard';
+                    }
+                    
+                    document.getElementById('accountStatus').textContent = data.message || 'Usage API available with cost estimates';
+                } else {
+                    // Usage API not available - use local data only
+                    document.getElementById('availableCredits').textContent = 'API Limited';
+                    document.getElementById('remainingCredits').textContent = 'Check OpenAI Dashboard';
+                    document.getElementById('accountStatus').textContent = data.message || 'Using local tracking only';
+                }
+                
+                // Get cost of last query from our local data
+                if (currentData && currentData.length > 0) {
+                    const lastQuery = currentData[0];
+                    const lastCost = lastQuery.estimated_cost_usd || 0;
+                    document.getElementById('lastQueryCost').textContent = '$' + lastCost.toFixed(6);
+                } else {
+                    document.getElementById('lastQueryCost').textContent = '$0.000';
+                }
+                
+            } catch (error) {
+                console.error('Error loading OpenAI usage:', error);
+                
+                // Fallback to showing local data only
+                try {
+                    const statsResponse = await fetch('/api/admin/stats');
+                    const stats = await statsResponse.json();
+                    
+                    document.getElementById('monthlySpend').textContent = '$' + (stats.database.total_cost_usd || 0).toFixed(2);
+                    document.getElementById('monthlyTokens').textContent = (stats.database.total_tokens_used || 0).toLocaleString();
+                } catch (statsError) {
+                    document.getElementById('monthlySpend').textContent = 'Error';
+                    document.getElementById('monthlyTokens').textContent = 'Error';
+                }
+                
+                document.getElementById('availableCredits').textContent = 'Error';
+                document.getElementById('accountStatus').textContent = 'Error';
+            }
+        }
+
+        async function loadSchemaInfo() {
+            try {
+                const response = await fetch('/api/admin/schema');
+                const schema = await response.json();
+                
+                document.getElementById('currentSchemaVersion').textContent = schema.currentVersion || 0;
+                document.getElementById('latestSchemaVersion').textContent = schema.latestVersion || 0;
+                document.getElementById('migrationCount').textContent = schema.migrationHistory ? schema.migrationHistory.length : 0;
+                
+                const statusElement = document.getElementById('schemaStatus');
+                if (schema.error) {
+                    statusElement.textContent = 'Error';
+                    statusElement.className = 'schema-value';
+                } else if (schema.isUpToDate) {
+                    statusElement.textContent = 'Up to Date ✅';
+                    statusElement.className = 'schema-value up-to-date';
+                } else {
+                    statusElement.textContent = 'Needs Migration ⚠️';
+                    statusElement.className = 'schema-value needs-migration';
+                }
+                
+            } catch (error) {
+                console.error('Error loading schema info:', error);
+                document.getElementById('currentSchemaVersion').textContent = 'Error';
+                document.getElementById('latestSchemaVersion').textContent = 'Error';
+                document.getElementById('schemaStatus').textContent = 'Error';
+                document.getElementById('migrationCount').textContent = 'Error';
+            }
+        }
+
+        async function refreshSchemaInfo() {
+            await loadSchemaInfo();
+        }
+
+        async function loadQueries() {
+            try {
+                const limit = document.getElementById('limitSelect').value;
+                const response = await fetch(`/api/admin/queries?limit=${limit}`);
+                const queries = await response.json();
+                
+                currentData = queries;
+                displayQueries(queries);
+                
+            } catch (error) {
+                console.error('Error loading queries:', error);
+                document.getElementById('queriesContainer').innerHTML = 
+                    '<div class="loading">Error loading queries</div>';
+            }
+        }
+
+        function displayQueries(queries) {
+            if (queries.length === 0) {
+                document.getElementById('queriesContainer').innerHTML = 
+                    '<div class="loading">No queries found</div>';
+                return;
+            }
+
+            const table = `
+                <table class="queries-table">
+                    <thead>
+                        <tr>
+                            <th>Thumbnail</th>
+                            <th>Timestamp</th>
+                            <th>Source</th>
+                            <th>Camera</th>
+                            <th>Location</th>
+                            <th>Processing Time</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${queries.map(query => `
+                            <tr>
+                                <td>
+                                    ${query.thumbnail_path 
+                                        ? `<img src="/${query.thumbnail_path}" alt="Thumbnail" class="thumbnail" 
+                                             onclick="openModal('/${query.preview_path || query.thumbnail_path}', '${query.id}', '${query.timestamp}', '${query.camera_make || ''} ${query.camera_model || ''}', '${query.location_name || ''}')" 
+                                             onerror="this.style.display='none'">`
+                                        : '<div style="width:50px;height:50px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:12px;">No thumb</div>'
+                                    }
+                                </td>
+                                <td>${new Date(query.timestamp).toLocaleString()}</td>
+                                <td><span class="source-badge source-${query.source}">${query.source}</span></td>
+                                <td>${query.camera_make && query.camera_model 
+                                    ? `${query.camera_make} ${query.camera_model}` 
+                                    : '-'}</td>
+                                <td>${query.location_name || '-'}</td>
+                                <td>${query.processing_time_ms ? query.processing_time_ms + 'ms' : '-'}</td>
+                                <td><span class="source-badge ${query.error_message ? 'error-badge' : 'success-badge'}">
+                                    ${query.error_message ? 'Error' : 'Success'}
+                                </span></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            
+            document.getElementById('queriesContainer').innerHTML = table;
+        }
+
+        async function refreshData() {
+            await Promise.all([loadStats(), loadQueries(), loadOpenAIUsage(), loadSchemaInfo()]);
+        }
+
+        async function refreshOpenAIUsage() {
+            await loadOpenAIUsage();
+        }
+
+        async function cleanupThumbnails() {
+            const daysOld = prompt('Delete thumbnails older than how many days?', '30');
+            if (!daysOld) return;
+            
+            try {
+                const response = await fetch('/api/admin/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ daysOld: parseInt(daysOld) })
+                });
+                
+                const result = await response.json();
+                alert(`${result.message}`);
+                refreshData();
+                
+            } catch (error) {
+                console.error('Error during cleanup:', error);
+                alert('Error during cleanup');
+            }
+        }
+
+        // Event listeners
+        document.getElementById('limitSelect').addEventListener('change', loadQueries);
+
+        // Initial load
+        refreshData();
+        loadOpenAIUsage();
+
+        // Manual refresh only to avoid excessive OpenAI API calls
+        // setInterval(refreshData, 30000);
+
+        // Modal functions
+        function openModal(imageSrc, queryId, timestamp, camera, location) {
+            const modal = document.getElementById('imageModal');
+            const modalImage = document.getElementById('modalImage');
+            const modalInfo = document.getElementById('modalInfo');
+            
+            modalImage.src = imageSrc;
+            
+            // Build info text
+            const info = [];
+            info.push(`Query ID: ${queryId}`);
+            info.push(`Timestamp: ${new Date(timestamp).toLocaleString()}`);
+            if (camera.trim()) info.push(`Camera: ${camera.trim()}`);
+            if (location.trim()) info.push(`Location: ${location.trim()}`);
+            
+            modalInfo.innerHTML = info.join('<br>');
+            modal.style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('imageModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside the image
+        document.getElementById('imageModal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeModal();
+            }
+        });
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>

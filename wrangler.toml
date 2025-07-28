@@ -3,6 +3,10 @@ main = "worker.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat_v2"]
 
+# Static assets configuration
+[site]
+bucket = "./public"
+
 # D1 Database configuration
 [[d1_databases]]
 binding = "DB"

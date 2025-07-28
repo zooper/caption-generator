@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tier Management - AI Caption Studio Admin</title>
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme-loader.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+            padding: 20px;
+        }
+
+        .admin-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .admin-header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .admin-header h1 {
+            background: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .admin-nav {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .nav-btn, .action-btn {
+            background: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-btn:hover, .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(64, 93, 230, 0.3);
+        }
+
+        .nav-btn.secondary {
+            background: #f5f5f5;
+            color: #333;
+            border: 2px solid #ddd;
+        }
+
+        .nav-btn.secondary:hover {
+            background: #e9e9e9;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .admin-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .section-header h2 {
+            color: #333;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .tier-form {
+            background: #f8f9ff;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 25px;
+            border: 2px solid #e8f0ff;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 2fr auto;
+            gap: 15px;
+            align-items: end;
+            margin-bottom: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+        }
+
+        .form-group input, .form-group textarea {
+            padding: 10px 12px;
+            border: 2px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #8B5CF6;
+        }
+
+        .form-group .help-text {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .tiers-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .tiers-table th,
+        .tiers-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .tiers-table th {
+            background: #f8f9ff;
+            color: #333;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        .tiers-table tr:hover {
+            background: #f8f9ff;
+        }
+
+        .tier-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .tier-badge.free {
+            background: #e2e3e5;
+            color: #6c757d;
+        }
+
+        .tier-badge.pro {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .tier-badge.unlimited {
+            background: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            color: white;
+        }
+
+        .tier-limit {
+            font-weight: 600;
+        }
+
+        .tier-limit.unlimited {
+            color: #8B5CF6;
+        }
+
+        .tier-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn.small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .action-btn.success {
+            background: #28a745;
+        }
+
+        .action-btn.success:hover {
+            background: #218838;
+            box-shadow: 0 3px 10px rgba(40, 167, 69, 0.3);
+        }
+
+        .action-btn.danger {
+            background: #dc3545;
+        }
+
+        .action-btn.danger:hover {
+            background: #c82333;
+            box-shadow: 0 3px 10px rgba(220, 53, 69, 0.3);
+        }
+
+        .action-btn.warning {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .action-btn.warning:hover {
+            background: #e0a800;
+            box-shadow: 0 3px 10px rgba(255, 193, 7, 0.3);
+        }
+
+        .notification {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            display: none;
+        }
+
+        .notification.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .notification.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        @media (max-width: 768px) {
+            .admin-header {
+                text-align: center;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+
+            .tiers-table {
+                font-size: 14px;
+            }
+
+            .tiers-table th,
+            .tiers-table td {
+                padding: 10px 8px;
+            }
+
+            .tier-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <div>
+                <h1>🏷️ Tier Management</h1>
+                <p style="color: #666; margin-top: 8px;">Configure user tiers and daily limits</p>
+            </div>
+            <div class="admin-nav">
+                <a href="/" class="nav-btn secondary">🏠 Main App</a>
+                <a href="/admin" class="nav-btn secondary">📊 Analytics</a>
+                <a href="/admin/users" class="nav-btn secondary">👥 Users</a>
+                <button id="logoutBtn" class="nav-btn secondary">🚪 Logout</button>
+            </div>
+        </div>
+
+        <div class="notification" id="notification"></div>
+
+        <!-- Create/Edit Tier Section -->
+        <div class="admin-section">
+            <div class="section-header">
+                <h2 id="formTitle">📝 Create New Tier</h2>
+            </div>
+            
+            <div class="tier-form">
+                <form id="tierForm">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="tierName">Tier Name</label>
+                            <input type="text" id="tierName" required>
+                            <div class="help-text">e.g., Free, Pro, Premium</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="dailyLimit">Daily Limit</label>
+                            <input type="number" id="dailyLimit" min="-1" required>
+                            <div class="help-text">Use -1 for unlimited</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="tierDescription">Description</label>
+                            <input type="text" id="tierDescription" placeholder="Optional description">
+                            <div class="help-text">Brief description of this tier</div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <button type="submit" class="action-btn" id="saveTierBtn">
+                                💾 Create Tier
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div style="display: none;" id="editControls">
+                        <button type="button" class="action-btn secondary" id="cancelEditBtn">
+                            ❌ Cancel Edit
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Existing Tiers Section -->
+        <div class="admin-section">
+            <div class="section-header">
+                <h2>🏷️ Existing Tiers</h2>
+                <button class="action-btn" id="refreshTiersBtn">🔄 Refresh</button>
+            </div>
+            <div id="tiersContainer">
+                <div class="empty-state">
+                    <h3>Loading tiers...</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class AdminTierManager {
+            constructor() {
+                this.authToken = localStorage.getItem('auth_token');
+                this.currentUser = null;
+                this.editingTierId = null;
+                
+                if (!this.authToken) {
+                    window.location.href = '/auth';
+                    return;
+                }
+
+                this.initializeElements();
+                this.bindEvents();
+                this.checkAdminAccess();
+            }
+
+            initializeElements() {
+                this.notification = document.getElementById('notification');
+                this.logoutBtn = document.getElementById('logoutBtn');
+                this.tierForm = document.getElementById('tierForm');
+                this.formTitle = document.getElementById('formTitle');
+                this.tierName = document.getElementById('tierName');
+                this.dailyLimit = document.getElementById('dailyLimit');
+                this.tierDescription = document.getElementById('tierDescription');
+                this.saveTierBtn = document.getElementById('saveTierBtn');
+                this.editControls = document.getElementById('editControls');
+                this.cancelEditBtn = document.getElementById('cancelEditBtn');
+                this.refreshTiersBtn = document.getElementById('refreshTiersBtn');
+                this.tiersContainer = document.getElementById('tiersContainer');
+            }
+
+            bindEvents() {
+                this.logoutBtn.addEventListener('click', this.logout.bind(this));
+                this.tierForm.addEventListener('submit', this.saveTier.bind(this));
+                this.cancelEditBtn.addEventListener('click', this.cancelEdit.bind(this));
+                this.refreshTiersBtn.addEventListener('click', this.loadTiers.bind(this));
+            }
+
+            async checkAdminAccess() {
+                try {
+                    const response = await fetch('/api/auth/me', {
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+
+                    if (response.ok) {
+                        this.currentUser = await response.json();
+                        if (!this.currentUser.isAdmin) {
+                            this.showNotification('Admin access required', 'error');
+                            setTimeout(() => window.location.href = '/', 2000);
+                            return;
+                        }
+                        this.loadTiers();
+                    } else {
+                        window.location.href = '/auth';
+                    }
+                } catch (error) {
+                    console.error('Admin access check failed:', error);
+                    window.location.href = '/auth';
+                }
+            }
+
+            async loadTiers() {
+                try {
+                    this.setLoading('tiersContainer', true);
+                    const response = await fetch('/api/admin/tiers', {
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+
+                    if (response.ok) {
+                        const tiers = await response.json();
+                        this.renderTiers(tiers);
+                    } else {
+                        throw new Error('Failed to load tiers');
+                    }
+                } catch (error) {
+                    console.error('Error loading tiers:', error);
+                    this.tiersContainer.innerHTML = '<div class="empty-state"><h3>❌ Failed to load tiers</h3></div>';
+                } finally {
+                    this.setLoading('tiersContainer', false);
+                }
+            }
+
+            renderTiers(tiers) {
+                if (tiers.length === 0) {
+                    this.tiersContainer.innerHTML = '<div class="empty-state"><h3>🏷️ No tiers found</h3><p>Create your first tier using the form above</p></div>';
+                    return;
+                }
+
+                const table = document.createElement('table');
+                table.className = 'tiers-table';
+                table.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Tier Name</th>
+                            <th>Daily Limit</th>
+                            <th>Description</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tiers.map(tier => `
+                            <tr>
+                                <td>
+                                    <span class="tier-badge ${this.getTierClass(tier.name)}">${tier.name}</span>
+                                </td>
+                                <td>
+                                    <span class="tier-limit ${tier.daily_limit === -1 ? 'unlimited' : ''}"">
+                                        ${tier.daily_limit === -1 ? '∞ Unlimited' : `${tier.daily_limit} per day`}
+                                    </span>
+                                </td>
+                                <td>${tier.description || '-'}</td>
+                                <td>${new Date(tier.created_at).toLocaleDateString()}</td>
+                                <td>
+                                    <div class="tier-actions">
+                                        <button class="action-btn small warning" onclick="adminTierManager.editTier(${tier.id})">
+                                            ✏️ Edit
+                                        </button>
+                                        <button class="action-btn small danger" onclick="adminTierManager.deleteTier(${tier.id}, '${tier.name}')">
+                                            🗑️ Delete
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                `;
+                this.tiersContainer.innerHTML = '';
+                this.tiersContainer.appendChild(table);
+            }
+
+            getTierClass(tierName) {
+                const name = tierName.toLowerCase();
+                if (name.includes('free')) return 'free';
+                if (name.includes('unlimited') || name.includes('premium')) return 'unlimited';
+                return 'pro';
+            }
+
+            async saveTier(e) {
+                e.preventDefault();
+                
+                const name = this.tierName.value.trim();
+                const dailyLimit = parseInt(this.dailyLimit.value);
+                const description = this.tierDescription.value.trim() || null;
+
+                if (!name) {
+                    this.showNotification('Tier name is required', 'error');
+                    return;
+                }
+
+                if (isNaN(dailyLimit) || dailyLimit < -1) {
+                    this.showNotification('Daily limit must be -1 or greater', 'error');
+                    return;
+                }
+
+                try {
+                    this.saveTierBtn.disabled = true;
+                    this.saveTierBtn.textContent = this.editingTierId ? 'Updating...' : 'Creating...';
+
+                    const url = this.editingTierId ? `/api/admin/tiers/${this.editingTierId}` : '/api/admin/tiers';
+                    const method = this.editingTierId ? 'PUT' : 'POST';
+
+                    const response = await fetch(url, {
+                        method,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.authToken}`
+                        },
+                        body: JSON.stringify({ name, dailyLimit, description })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        this.showNotification(data.message, 'success');
+                        this.resetForm();
+                        this.loadTiers();
+                    } else {
+                        this.showNotification(data.error, 'error');
+                    }
+                } catch (error) {
+                    console.error('Error saving tier:', error);
+                    this.showNotification('Failed to save tier', 'error');
+                } finally {
+                    this.saveTierBtn.disabled = false;
+                    this.saveTierBtn.textContent = this.editingTierId ? '💾 Update Tier' : '💾 Create Tier';
+                }
+            }
+
+            async editTier(tierId) {
+                try {
+                    const response = await fetch(`/api/admin/tiers/${tierId}`, {
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+
+                    if (response.ok) {
+                        const tier = await response.json();
+                        this.tierName.value = tier.name;
+                        this.dailyLimit.value = tier.daily_limit;
+                        this.tierDescription.value = tier.description || '';
+                        
+                        this.editingTierId = tierId;
+                        this.formTitle.textContent = `✏️ Edit Tier: ${tier.name}`;
+                        this.saveTierBtn.textContent = '💾 Update Tier';
+                        this.editControls.style.display = 'block';
+                        
+                        // Scroll to form
+                        this.tierForm.scrollIntoView({ behavior: 'smooth' });
+                    } else {
+                        throw new Error('Failed to load tier details');
+                    }
+                } catch (error) {
+                    console.error('Error loading tier for edit:', error);
+                    this.showNotification('Failed to load tier details', 'error');
+                }
+            }
+
+            cancelEdit() {
+                this.resetForm();
+            }
+
+            resetForm() {
+                this.tierForm.reset();
+                this.editingTierId = null;
+                this.formTitle.textContent = '📝 Create New Tier';
+                this.saveTierBtn.textContent = '💾 Create Tier';
+                this.editControls.style.display = 'none';
+            }
+
+            async deleteTier(tierId, tierName) {
+                if (!confirm(`Are you sure you want to delete the tier "${tierName}"? This action cannot be undone.`)) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/admin/tiers/${tierId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        this.showNotification(data.message, 'success');
+                        this.loadTiers();
+                        
+                        // If we were editing this tier, reset the form
+                        if (this.editingTierId === tierId) {
+                            this.resetForm();
+                        }
+                    } else {
+                        this.showNotification(data.error, 'error');
+                    }
+                } catch (error) {
+                    console.error('Error deleting tier:', error);
+                    this.showNotification('Failed to delete tier', 'error');
+                }
+            }
+
+            async logout() {
+                try {
+                    await fetch('/api/auth/logout', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+                } catch (error) {
+                    console.error('Logout request failed:', error);
+                } finally {
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('user_email');
+                    window.location.href = '/auth';
+                }
+            }
+
+            setLoading(containerId, loading) {
+                const container = document.getElementById(containerId);
+                if (loading) {
+                    container.classList.add('loading');
+                } else {
+                    container.classList.remove('loading');
+                }
+            }
+
+            showNotification(message, type) {
+                this.notification.textContent = message;
+                this.notification.className = `notification ${type}`;
+                this.notification.style.display = 'block';
+
+                setTimeout(() => {
+                    this.notification.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // Initialize admin tier manager when page loads
+        let adminTierManager;
+        document.addEventListener('DOMContentLoaded', () => {
+            adminTierManager = new AdminTierManager();
+        });
+    </script>
+</body>
+</html>

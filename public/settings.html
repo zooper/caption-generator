@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - AI Caption Studio</title>
+    <link rel="stylesheet" href="themes.css">
+    <script src="theme-loader.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--background-gradient);
+            min-height: 100vh;
+            color: var(--text-primary);
+            padding: 20px;
+        }
+
+        .settings-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .settings-header {
+            background: var(--card-background);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px var(--shadow-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .settings-header h1 {
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .settings-nav {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .nav-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(64, 93, 230, 0.3);
+        }
+
+        .nav-btn.secondary {
+            background: #f5f5f5;
+            color: var(--text-primary);
+            border: 2px solid #ddd;
+        }
+
+        .nav-btn.secondary:hover {
+            background: #e9e9e9;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .settings-section {
+            background: var(--card-background);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px var(--shadow-color);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .section-header h2 {
+            color: var(--text-primary);
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .integration-card {
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .integration-card:hover {
+            border-color: var(--accent-color);
+            box-shadow: 0 5px 15px rgba(64, 93, 230, 0.1);
+        }
+
+        .integration-card.connected {
+            border-color: #28a745;
+            background: #f8fff9;
+        }
+
+        .integration-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .integration-info h3 {
+            font-size: 1.2rem;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .integration-info p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .integration-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .integration-status.connected {
+            color: #28a745;
+        }
+
+        .integration-status.disconnected {
+            color: #dc3545;
+        }
+
+        .form-grid {
+            display: grid;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+        }
+
+        .form-group input, .form-group textarea {
+            padding: 12px 15px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        .form-group .help-text {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(64, 93, 230, 0.3);
+        }
+
+        .action-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .action-btn.secondary {
+            background: #6c757d;
+        }
+
+        .action-btn.secondary:hover {
+            background: #545b62;
+            box-shadow: 0 5px 15px rgba(108, 117, 125, 0.3);
+        }
+
+        .action-btn.danger {
+            background: #dc3545;
+        }
+
+        .action-btn.danger:hover {
+            background: #c82333;
+            box-shadow: 0 5px 15px rgba(220, 53, 69, 0.3);
+        }
+
+        .notification {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            display: none;
+        }
+
+        .notification.success {
+            background: var(--notification-success-bg, #d4edda);
+            color: var(--notification-success-text, #155724);
+            border: 1px solid var(--notification-success-border, #c3e6cb);
+        }
+
+        .notification.error {
+            background: var(--notification-error-bg, #f8d7da);
+            color: var(--notification-error-text, #721c24);
+            border: 1px solid var(--notification-error-border, #f5c6cb);
+        }
+
+        .notification.info {
+            background: var(--notification-info-bg, #d1ecf1);
+            color: var(--notification-info-text, #0c5460);
+            border: 1px solid var(--notification-info-border, #bee5eb);
+        }
+
+        .loading-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ffffff;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
+
+        /* Theme Selector Styles */
+        .theme-selector {
+            margin-bottom: 30px;
+        }
+
+        .theme-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .theme-option {
+            background: var(--card-background);
+            border-radius: 12px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid var(--border-color);
+            text-align: center;
+        }
+
+        .theme-option:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .theme-option.active {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+        }
+
+        .theme-preview {
+            width: 100%;
+            height: 60px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .theme-gradient {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Theme preview gradients */
+        .theme-preview.purple-creative .theme-gradient {
+            background: var(--primary-gradient);
+        }
+
+        .theme-preview.ocean-breeze .theme-gradient {
+            background: linear-gradient(135deg, #06B6D4 0%, #3B82F6 100%);
+        }
+
+        .theme-preview.sunset-warm .theme-gradient {
+            background: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
+        }
+
+        .theme-preview.dark-purple .theme-gradient {
+            background: linear-gradient(135deg, #7C3AED 0%, #DB2777 100%);
+        }
+
+        .theme-preview.dark-ocean .theme-gradient {
+            background: linear-gradient(135deg, #0891B2 0%, #1D4ED8 100%);
+        }
+
+        .theme-preview.dark-forest .theme-gradient {
+            background: linear-gradient(135deg, #059669 0%, #7C2D12 100%);
+        }
+
+        .theme-info h4 {
+            margin: 0 0 4px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .theme-info p {
+            margin: 0;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        @media (max-width: 768px) {
+            .settings-header {
+                text-align: center;
+            }
+
+            .settings-header h1 {
+                font-size: 1.5rem;
+            }
+
+            .integration-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .action-buttons {
+                flex-direction: column;
+            }
+
+            .action-btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="settings-container">
+        <div class="settings-header">
+            <div>
+                <h1>⚙️ Settings</h1>
+                <p style="color: #666; margin-top: 8px;">Manage your integrations and preferences</p>
+            </div>
+            <div class="settings-nav">
+                <a href="/" class="nav-btn secondary">🏠 Main App</a>
+                <button id="logoutBtn" class="nav-btn secondary">🚪 Logout</button>
+            </div>
+        </div>
+
+        <div class="notification" id="notification"></div>
+
+        <!-- Theme Section -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h2>🎨 Theme</h2>
+            </div>
+            
+            <div class="theme-selector">
+                <div class="theme-grid">
+                    <div class="theme-option" data-theme="purple-creative">
+                        <div class="theme-preview purple-creative">
+                            <div class="theme-gradient"></div>
+                        </div>
+                        <div class="theme-info">
+                            <h4>Purple Creative</h4>
+                            <p>Bright • Creative</p>
+                        </div>
+                    </div>
+                    
+                    <div class="theme-option" data-theme="ocean-breeze">
+                        <div class="theme-preview ocean-breeze">
+                            <div class="theme-gradient"></div>
+                        </div>
+                        <div class="theme-info">
+                            <h4>Ocean Breeze</h4>
+                            <p>Bright • Fresh</p>
+                        </div>
+                    </div>
+                    
+                    <div class="theme-option" data-theme="sunset-warm">
+                        <div class="theme-preview sunset-warm">
+                            <div class="theme-gradient"></div>
+                        </div>
+                        <div class="theme-info">
+                            <h4>Sunset Warm</h4>
+                            <p>Bright • Energetic</p>
+                        </div>
+                    </div>
+                    
+                    <div class="theme-option" data-theme="dark-purple">
+                        <div class="theme-preview dark-purple">
+                            <div class="theme-gradient"></div>
+                        </div>
+                        <div class="theme-info">
+                            <h4>Dark Purple</h4>
+                            <p>Dark • Elegant</p>
+                        </div>
+                    </div>
+                    
+                    <div class="theme-option" data-theme="dark-ocean">
+                        <div class="theme-preview dark-ocean">
+                            <div class="theme-gradient"></div>
+                        </div>
+                        <div class="theme-info">
+                            <h4>Dark Ocean</h4>
+                            <p>Dark • Professional</p>
+                        </div>
+                    </div>
+                    
+                    <div class="theme-option" data-theme="dark-forest">
+                        <div class="theme-preview dark-forest">
+                            <div class="theme-gradient"></div>
+                        </div>
+                        <div class="theme-info">
+                            <h4>Dark Forest</h4>
+                            <p>Dark • Natural</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Integrations Section -->
+        <div class="settings-section">
+            <div class="section-header">
+                <h2>🔗 Integrations</h2>
+            </div>
+
+            <!-- Mastodon Integration -->
+            <div class="integration-card" id="mastodonCard">
+                <div class="integration-header">
+                    <div class="integration-info">
+                        <h3>🐘 Mastodon</h3>
+                        <p>Connect your Mastodon account to post directly from AI Caption Studio</p>
+                    </div>
+                    <div class="integration-status disconnected" id="mastodonStatus">
+                        ❌ Not Connected
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="mastodonInstance">Instance URL</label>
+                        <input type="url" id="mastodonInstance" placeholder="https://mastodon.social" 
+                               autocomplete="off">
+                        <div class="help-text">The URL of your Mastodon instance (e.g., mastodon.social, fosstodon.org)</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="mastodonToken">Access Token</label>
+                        <input type="password" id="mastodonToken" placeholder="Enter your access token" 
+                               autocomplete="off">
+                        <div class="help-text">
+                            Get your token from: Settings → Development → New Application
+                            <br>Required scopes: <code>read:accounts write:media write:statuses</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="action-btn" id="testMastodonBtn">
+                        <span>🔍 Test Connection</span>
+                        <span class="loading-spinner" id="testSpinner" style="display: none;"></span>
+                    </button>
+                    <button class="action-btn" id="saveMastodonBtn">
+                        <span>💾 Save Settings</span>
+                        <span class="loading-spinner" id="saveSpinner" style="display: none;"></span>
+                    </button>
+                    <button class="action-btn danger" id="clearMastodonBtn" style="display: none;">
+                        🗑️ Clear Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- Future Integrations Placeholder -->
+            <div class="empty-state">
+                <h3>🚀 More Integrations Coming Soon</h3>
+                <p>We're working on adding support for additional social media platforms!</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class SettingsManager {
+            constructor() {
+                this.authToken = localStorage.getItem('auth_token');
+                this.currentUser = null;
+                
+                if (!this.authToken) {
+                    window.location.href = '/auth';
+                    return;
+                }
+
+                this.initializeElements();
+                this.bindEvents();
+                this.checkAuthentication();
+            }
+
+            initializeElements() {
+                this.notification = document.getElementById('notification');
+                this.logoutBtn = document.getElementById('logoutBtn');
+                
+                // Theme elements
+                this.themeOptions = document.querySelectorAll('.theme-option');
+                
+                // Mastodon elements
+                this.mastodonCard = document.getElementById('mastodonCard');
+                this.mastodonStatus = document.getElementById('mastodonStatus');
+                this.mastodonInstance = document.getElementById('mastodonInstance');
+                this.mastodonToken = document.getElementById('mastodonToken');
+                this.testMastodonBtn = document.getElementById('testMastodonBtn');
+                this.saveMastodonBtn = document.getElementById('saveMastodonBtn');
+                this.clearMastodonBtn = document.getElementById('clearMastodonBtn');
+                this.testSpinner = document.getElementById('testSpinner');
+                this.saveSpinner = document.getElementById('saveSpinner');
+            }
+
+            bindEvents() {
+                this.logoutBtn.addEventListener('click', this.logout.bind(this));
+                
+                // Theme events
+                this.themeOptions.forEach(option => {
+                    option.addEventListener('click', (e) => {
+                        const theme = e.currentTarget.dataset.theme;
+                        this.setTheme(theme);
+                    });
+                });
+                this.testMastodonBtn.addEventListener('click', this.testMastodonConnection.bind(this));
+                this.saveMastodonBtn.addEventListener('click', this.saveMastodonSettings.bind(this));
+                this.clearMastodonBtn.addEventListener('click', this.clearMastodonSettings.bind(this));
+                
+                // Auto-save on input change
+                this.mastodonInstance.addEventListener('input', this.onMastodonInputChange.bind(this));
+                this.mastodonToken.addEventListener('input', this.onMastodonInputChange.bind(this));
+            }
+
+            async checkAuthentication() {
+                try {
+                    const response = await fetch('/api/auth/me', {
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+
+                    if (response.ok) {
+                        this.currentUser = await response.json();
+                        this.loadUserSettings();
+                        this.loadTheme();
+                    } else {
+                        localStorage.removeItem('auth_token');
+                        localStorage.removeItem('user_email');
+                        window.location.href = '/auth';
+                    }
+                } catch (error) {
+                    console.error('Authentication check failed:', error);
+                    window.location.href = '/auth';
+                }
+            }
+
+            async loadUserSettings() {
+                try {
+                    // Load Mastodon settings
+                    const response = await fetch('/api/settings/mastodon', {
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+
+                    if (response.ok) {
+                        const settings = await response.json();
+                        if (settings.instance) {
+                            this.mastodonInstance.value = settings.instance;
+                        }
+                        if (settings.token) {
+                            this.mastodonToken.value = '••••••••'; // Show masked token
+                            this.mastodonToken.dataset.hasToken = 'true';
+                        }
+                        this.updateMastodonStatus(settings.instance && settings.token);
+                    }
+                } catch (error) {
+                    console.error('Failed to load settings:', error);
+                }
+            }
+
+            onMastodonInputChange() {
+                // Show save button when settings change
+                const hasChanges = this.mastodonInstance.value.trim() || 
+                                 (this.mastodonToken.value.trim() && this.mastodonToken.value !== '••••••••');
+                
+                if (hasChanges) {
+                    this.saveMastodonBtn.style.display = 'inline-block';
+                }
+            }
+
+            updateMastodonStatus(isConnected) {
+                if (isConnected) {
+                    this.mastodonStatus.textContent = '✅ Connected';
+                    this.mastodonStatus.className = 'integration-status connected';
+                    this.mastodonCard.classList.add('connected');
+                    this.clearMastodonBtn.style.display = 'inline-block';
+                } else {
+                    this.mastodonStatus.textContent = '❌ Not Connected';
+                    this.mastodonStatus.className = 'integration-status disconnected';
+                    this.mastodonCard.classList.remove('connected');
+                    this.clearMastodonBtn.style.display = 'none';
+                }
+            }
+
+            async testMastodonConnection() {
+                const instance = this.mastodonInstance.value.trim();
+                let token = this.mastodonToken.value.trim();
+
+                if (!instance || !token) {
+                    this.showNotification('Please enter both instance URL and access token', 'error');
+                    return;
+                }
+
+                // If token is masked, get the real token from server
+                if (token === '••••••••' && this.mastodonToken.dataset.hasToken) {
+                    try {
+                        const response = await fetch('/api/settings/mastodon', {
+                            headers: { 'Authorization': `Bearer ${this.authToken}` }
+                        });
+                        if (response.ok) {
+                            const settings = await response.json();
+                            token = settings.token;
+                        }
+                    } catch (error) {
+                        this.showNotification('Failed to retrieve stored token', 'error');
+                        return;
+                    }
+                }
+
+                this.setTestingState(true);
+
+                try {
+                    const response = await fetch(`${instance}/api/v1/accounts/verify_credentials`, {
+                        method: 'GET',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (response.ok) {
+                        const account = await response.json();
+                        this.showNotification(`🐘 Successfully connected to @${account.username}`, 'success');
+                        this.updateMastodonStatus(true);
+                    } else {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                } catch (error) {
+                    console.error('Mastodon connection test failed:', error);
+                    this.showNotification('❌ Failed to connect to Mastodon. Check your instance URL and token.', 'error');
+                    this.updateMastodonStatus(false);
+                } finally {
+                    this.setTestingState(false);
+                }
+            }
+
+            async saveMastodonSettings() {
+                const instance = this.mastodonInstance.value.trim();
+                const token = this.mastodonToken.value.trim();
+
+                if (!instance || !token) {
+                    this.showNotification('Please enter both instance URL and access token', 'error');
+                    return;
+                }
+
+                // Don't save if token is just the masked placeholder
+                if (token === '••••••••') {
+                    this.showNotification('Settings already saved', 'info');
+                    return;
+                }
+
+                this.setSavingState(true);
+
+                try {
+                    const response = await fetch('/api/settings/mastodon', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.authToken}`
+                        },
+                        body: JSON.stringify({ instance, token })
+                    });
+
+                    if (response.ok) {
+                        this.showNotification('✅ Mastodon settings saved successfully', 'success');
+                        this.mastodonToken.value = '••••••••';
+                        this.mastodonToken.dataset.hasToken = 'true';
+                        this.saveMastodonBtn.style.display = 'none';
+                        this.updateMastodonStatus(true);
+                    } else {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Failed to save settings');
+                    }
+                } catch (error) {
+                    console.error('Failed to save Mastodon settings:', error);
+                    this.showNotification('❌ Failed to save Mastodon settings', 'error');
+                } finally {
+                    this.setSavingState(false);
+                }
+            }
+
+            async clearMastodonSettings() {
+                if (!confirm('Are you sure you want to clear your Mastodon settings? This will disconnect your account.')) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/settings/mastodon', {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+
+                    if (response.ok) {
+                        this.mastodonInstance.value = '';
+                        this.mastodonToken.value = '';
+                        this.mastodonToken.dataset.hasToken = 'false';
+                        this.updateMastodonStatus(false);
+                        this.showNotification('🗑️ Mastodon settings cleared', 'info');
+                    } else {
+                        throw new Error('Failed to clear settings');
+                    }
+                } catch (error) {
+                    console.error('Failed to clear Mastodon settings:', error);
+                    this.showNotification('❌ Failed to clear Mastodon settings', 'error');
+                }
+            }
+
+            setTestingState(testing) {
+                this.testMastodonBtn.disabled = testing;
+                this.testSpinner.style.display = testing ? 'inline-block' : 'none';
+                if (testing) {
+                    this.testMastodonBtn.querySelector('span').textContent = 'Testing...';
+                } else {
+                    this.testMastodonBtn.querySelector('span').textContent = '🔍 Test Connection';
+                }
+            }
+
+            setSavingState(saving) {
+                this.saveMastodonBtn.disabled = saving;
+                this.saveSpinner.style.display = saving ? 'inline-block' : 'none';
+                if (saving) {
+                    this.saveMastodonBtn.querySelector('span').textContent = 'Saving...';
+                } else {
+                    this.saveMastodonBtn.querySelector('span').textContent = '💾 Save Settings';
+                }
+            }
+
+            async logout() {
+                try {
+                    await fetch('/api/auth/logout', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${this.authToken}` }
+                    });
+                } catch (error) {
+                    console.error('Logout request failed:', error);
+                } finally {
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('user_email');
+                    window.location.href = '/auth';
+                }
+            }
+
+            // Theme Management Methods
+            loadTheme() {
+                const savedTheme = localStorage.getItem('app_theme') || 'purple-creative';
+                this.setTheme(savedTheme);
+            }
+
+            setTheme(themeName) {
+                // Update the data-theme attribute on document element
+                document.documentElement.setAttribute('data-theme', themeName);
+                
+                // Save to localStorage
+                localStorage.setItem('app_theme', themeName);
+                
+                // Update active state of theme options
+                this.themeOptions.forEach(option => {
+                    option.classList.remove('active');
+                    if (option.dataset.theme === themeName) {
+                        option.classList.add('active');
+                    }
+                });
+                
+                // Show notification
+                const themeNames = {
+                    'purple-creative': 'Purple Creative',
+                    'ocean-breeze': 'Ocean Breeze',
+                    'sunset-warm': 'Sunset Warm',
+                    'dark-purple': 'Dark Purple',
+                    'dark-ocean': 'Dark Ocean',
+                    'dark-forest': 'Dark Forest'
+                };
+                
+                this.showNotification(`🎨 Theme changed to ${themeNames[themeName]}`, 'success');
+            }
+
+            showNotification(message, type) {
+                this.notification.textContent = message;
+                this.notification.className = `notification ${type}`;
+                this.notification.style.display = 'block';
+
+                setTimeout(() => {
+                    this.notification.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        // Initialize settings manager when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new SettingsManager();
+        });
+    </script>
+</body>
+</html>
