@@ -142,8 +142,43 @@ class D1Database {
     }
 
     async incrementDailyUsage(userId) {
-        // Placeholder for usage increment
-        console.log('Usage incremented for user:', userId);
+        try {
+            // Create daily_usage table if it doesn't exist
+            await this.ensureDailyUsageTable();
+            
+            const stmt = this.db.prepare(`
+                INSERT INTO daily_usage (user_id, date, usage_count) 
+                VALUES (?, date('now'), 1)
+                ON CONFLICT(user_id, date) 
+                DO UPDATE SET usage_count = usage_count + 1
+            `);
+            
+            const result = await stmt.bind(userId).run();
+            console.log('Daily usage incremented for user:', userId, 'result:', result);
+            return true;
+        } catch (error) {
+            console.error('Failed to increment daily usage:', error);
+            return false;
+        }
+    }
+
+    async ensureDailyUsageTable() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS daily_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    date DATE NOT NULL,
+                    usage_count INTEGER DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, date),
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.log('Could not ensure daily_usage table exists:', error);
+        }
     }
 
     // System settings methods
@@ -879,9 +914,17 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
     try {
         const database = new D1Database(c.env.DB);
         
+        // Ensure query_logs table exists before counting
+        await database.ensureQueryLogsTable();
+        
         // Get basic stats
         const userCount = await database.db.prepare('SELECT COUNT(*) as count FROM users').first();
         const queryCount = await database.db.prepare('SELECT COUNT(*) as count FROM query_logs').first();
+        
+        console.log('Admin stats query results:', {
+            userCount: userCount?.count || 0,
+            queryCount: queryCount?.count || 0
+        });
         
         return c.json({
             totalUsers: userCount?.count || 0,
@@ -889,7 +932,8 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        return c.json({ error: 'Failed to fetch stats' }, 500);
+        console.error('Admin stats error:', error);
+        return c.json({ error: 'Failed to fetch stats: ' + error.message }, 500);
     }
 });
 
@@ -2039,8 +2083,11 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     const responseContent = data.choices[0].message.content;
     
     // Log the query and increment usage
-    await database.logQuery({
-        id: crypto.randomUUID(),
+    const queryId = crypto.randomUUID();
+    console.log('Logging query for user:', user.id, 'queryId:', queryId);
+    
+    const logResult = await database.logQuery({
+        id: queryId,
         source: 'web',
         userId: user.id,
         email: user.email,
@@ -2048,7 +2095,13 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         responseLength: responseContent.length
     });
     
-    await database.incrementDailyUsage(user.id);
+    const usageResult = await database.incrementDailyUsage(user.id);
+    
+    console.log('Caption generation tracking results:', {
+        queryLogged: logResult,
+        usageIncremented: usageResult,
+        userId: user.id
+    });
     
     // Include extracted data in response if available
     const responseData = { content: responseContent };
