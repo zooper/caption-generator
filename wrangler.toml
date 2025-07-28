@@ -19,3 +19,8 @@ database_id = "853b1e69-4fbd-40a9-b35b-2b0a7cb5f367"
 # Environment variables
 [vars]
 NODE_ENV = "production"
+SMTP_HOST = "smtp.resend.com"
+SMTP_PORT = "587"
+SMTP_USER = "resend"
+SMTP_FROM_EMAIL = "onboarding@resend.dev"
+SMTP_FROM_NAME = "AI Caption Studio"
