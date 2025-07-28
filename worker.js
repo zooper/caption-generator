@@ -178,7 +178,32 @@ app.get('/api/debug/schema', async (c) => {
   }
 });
 
-// Database is already initialized with proper schema
+// Admin middleware
+const requireAdmin = async (c, next) => {
+    const user = c.get('user');
+    if (!user || !user.isAdmin) {
+        return c.json({ error: 'Admin access required' }, 403);
+    }
+    await next();
+};
+
+// Database helper methods for admin functionality
+D1Database.prototype.getAllUsers = async function() {
+    const stmt = this.db.prepare(`
+        SELECT u.*, t.name as tier_name, t.daily_limit 
+        FROM users u 
+        LEFT JOIN user_tiers t ON u.tier_id = t.id
+        ORDER BY u.created_at DESC
+    `);
+    return (await stmt.all()).results || [];
+};
+
+D1Database.prototype.makeUserAdmin = async function(email) {
+    const stmt = this.db.prepare(`
+        UPDATE users SET is_admin = 1 WHERE email = ?
+    `);
+    await stmt.bind(email).run();
+};
 
 // Authentication endpoints
 app.post('/api/auth/request-login', async (c) => {
@@ -202,13 +227,13 @@ app.post('/api/auth/request-login', async (c) => {
         // Store token in database
         await database.createLoginToken(email, token, expiresAt, ipAddress, userAgent);
 
-        // For demo purposes, return the login URL (normally this would be sent via email)
-        const loginUrl = `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+        // TODO: Send email with magic link using SMTP
+        // const loginUrl = `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+        // await sendMagicLinkEmail(email, loginUrl);
         
         return c.json({ 
             success: true, 
-            message: 'Magic link generated (in production this would be sent via email)',
-            loginUrl, // Remove this in production
+            message: 'Magic link sent to your email address (email sending not yet configured)',
             expiresIn: '15 minutes'
         });
 
@@ -296,6 +321,53 @@ app.get('/api/auth/me', authenticateToken, async (c) => {
         email: user.email,
         isAdmin: user.isAdmin
     });
+});
+
+// Admin endpoints
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        const users = await database.getAllUsers();
+        return c.json(users);
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch users' }, 500);
+    }
+});
+
+app.post('/api/admin/users/:userId/make-admin', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { userId } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        
+        // Get user email first
+        const user = await database.db.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first();
+        if (!user) {
+            return c.json({ error: 'User not found' }, 404);
+        }
+        
+        await database.makeUserAdmin(user.email);
+        return c.json({ success: true, message: 'User promoted to admin' });
+    } catch (error) {
+        return c.json({ error: 'Failed to promote user' }, 500);
+    }
+});
+
+app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        
+        // Get basic stats
+        const userCount = await database.db.prepare('SELECT COUNT(*) as count FROM users').first();
+        const queryCount = await database.db.prepare('SELECT COUNT(*) as count FROM query_logs').first();
+        
+        return c.json({
+            totalUsers: userCount?.count || 0,
+            totalQueries: queryCount?.count || 0,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch stats' }, 500);
+    }
 });
 
 // Caption generation endpoint - now requires authentication
@@ -596,8 +668,7 @@ app.get('/', (c) => {
                 
                 if (data.success) {
                     messageDiv.innerHTML = 
-                        '<p style="color: green;">✅ Magic link generated!</p>' +
-                        '<p><a href="' + data.loginUrl + '" target="_blank">Click here to login</a></p>' +
+                        '<p style="color: green;">✅ ' + data.message + '</p>' +
                         '<p style="font-size: 12px; color: #666;">Link expires in ' + data.expiresIn + '</p>';
                 } else {
                     messageDiv.innerHTML = '<p style="color: red;">❌ ' + data.error + '</p>';
@@ -732,9 +803,241 @@ app.get('/', (c) => {
 });
 
 // Other routes return simple HTML
-app.get('/auth', (c) => c.html('<h1>Auth page</h1><p>Full authentication is available in the local development server.</p><a href="/">← Back to Main</a>'));
-app.get('/admin', (c) => c.html('<h1>Admin page</h1><p>Admin dashboard is available in the local development server.</p><a href="/">← Back to Main</a>'));
-app.get('/settings', (c) => c.html('<h1>Settings page</h1><p>Settings are available in the local development server.</p><a href="/">← Back to Main</a>'));
+app.get('/auth', (c) => c.html('<h1>Auth page</h1><p>Authentication is integrated into the main page.</p><a href="/">← Back to Main</a>'));
+
+app.get('/admin', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - AI Caption Studio</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .admin-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .users-table { width: 100%; border-collapse: collapse; }
+        .users-table th, .users-table td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        .btn { padding: 8px 16px; background: #405de6; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .btn:hover { background: #3a52d1; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛠️ Admin Dashboard</h1>
+            <nav><a href="/">← Back to Main</a></nav>
+        </div>
+
+        <div id="loginRequired" class="admin-section">
+            <h2>🔐 Admin Login Required</h2>
+            <p>Please login with an admin account to access the dashboard.</p>
+        </div>
+
+        <div id="adminContent" class="hidden">
+            <div class="admin-section">
+                <h2>📊 Statistics</h2>
+                <div id="stats">Loading...</div>
+            </div>
+
+            <div class="admin-section">
+                <h2>👥 Users</h2>
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Created</th>
+                            <th>Admin</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTable">
+                        <tr><td colspan="4">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function checkAdminAuth() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    if (user.isAdmin) {
+                        document.getElementById('loginRequired').classList.add('hidden');
+                        document.getElementById('adminContent').classList.remove('hidden');
+                        loadAdminData();
+                    }
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+            }
+        }
+
+        async function loadAdminData() {
+            // Load stats
+            try {
+                const statsResponse = await fetch('/api/admin/stats', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                if (statsResponse.ok) {
+                    const stats = await statsResponse.json();
+                    document.getElementById('stats').innerHTML = 
+                        '<p>Total Users: ' + stats.totalUsers + '</p>' +
+                        '<p>Total Queries: ' + stats.totalQueries + '</p>';
+                }
+            } catch (error) {
+                document.getElementById('stats').innerHTML = '<p>Failed to load stats</p>';
+            }
+
+            // Load users
+            try {
+                const usersResponse = await fetch('/api/admin/users', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                if (usersResponse.ok) {
+                    const users = await usersResponse.json();
+                    const tbody = document.getElementById('usersTable');
+                    tbody.innerHTML = users.map(user => 
+                        '<tr>' +
+                        '<td>' + user.email + '</td>' +
+                        '<td>' + new Date(user.created_at).toLocaleDateString() + '</td>' +
+                        '<td>' + (user.is_admin ? '✅ Admin' : '👤 User') + '</td>' +
+                        '<td>' + (user.is_admin ? '' : '<button class="btn" onclick="makeAdmin(' + user.id + ')">Make Admin</button>') + '</td>' +
+                        '</tr>'
+                    ).join('');
+                }
+            } catch (error) {
+                document.getElementById('usersTable').innerHTML = '<tr><td colspan="4">Failed to load users</td></tr>';
+            }
+        }
+
+        async function makeAdmin(userId) {
+            try {
+                const response = await fetch('/api/admin/users/' + userId + '/make-admin', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                if (response.ok) {
+                    alert('User promoted to admin');
+                    loadAdminData();
+                } else {
+                    alert('Failed to promote user');
+                }
+            } catch (error) {
+                alert('Error promoting user');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', checkAdminAuth);
+    </script>
+</body>
+</html>
+  `);
+});
+
+app.get('/settings', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - AI Caption Studio</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .settings-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { padding: 12px 24px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚙️ Settings</h1>
+            <nav><a href="/">← Back to Main</a></nav>
+        </div>
+
+        <div id="loginRequired" class="settings-section">
+            <h2>🔐 Login Required</h2>
+            <p>Please login to access your settings.</p>
+        </div>
+
+        <div id="settingsContent" class="hidden">
+            <div class="settings-section">
+                <h2>👤 Account Information</h2>
+                <p>Email: <span id="userEmail">Loading...</span></p>
+                <p>Account Type: <span id="userType">Loading...</span></p>
+            </div>
+
+            <div class="settings-section">
+                <h2>🔧 Preferences</h2>
+                <div class="form-group">
+                    <label for="defaultStyle">Default Caption Style:</label>
+                    <select id="defaultStyle">
+                        <option value="creative">✨ Creative</option>
+                        <option value="professional">💼 Professional</option>
+                        <option value="casual">😄 Casual</option>
+                        <option value="trendy">🔥 Trendy</option>
+                        <option value="inspirational">💭 Inspirational</option>
+                        <option value="edgy">🖤 Edgy</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="saveSettings()">Save Preferences</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    document.getElementById('loginRequired').classList.add('hidden');
+                    document.getElementById('settingsContent').classList.remove('hidden');
+                    document.getElementById('userEmail').textContent = user.email;
+                    document.getElementById('userType').textContent = user.isAdmin ? 'Admin' : 'User';
+                    
+                    // Load saved preferences
+                    const savedStyle = localStorage.getItem('defaultStyle') || 'creative';
+                    document.getElementById('defaultStyle').value = savedStyle;
+                }
+            } catch (error) {
+                console.error('Auth check failed:', error);
+            }
+        }
+
+        function saveSettings() {
+            const defaultStyle = document.getElementById('defaultStyle').value;
+            localStorage.setItem('defaultStyle', defaultStyle);
+            alert('Settings saved!');
+        }
+
+        document.addEventListener('DOMContentLoaded', checkAuth);
+    </script>
+</body>
+</html>
+  `);
+});
 
 export default app;
 
