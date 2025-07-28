@@ -363,12 +363,43 @@ class D1Database {
             if (existing) {
                 // Update existing record
                 console.log(`Updating existing record with id=${existing.id}`);
-                const updateStmt = this.db.prepare(`
+                
+                // Check what columns exist in the table to build the correct UPDATE
+                const tableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
+                const columns = (tableInfo.results || []).map(col => col.name);
+                
+                // Build UPDATE statement based on available columns
+                let updateParts = ['setting_value = ?'];
+                let updateValues = [settingValue];
+                
+                if (columns.includes('encrypted')) {
+                    updateParts.push('encrypted = ?');
+                    updateValues.push(encrypted ? 1 : 0);
+                }
+                
+                if (columns.includes('updated_at')) {
+                    updateParts.push("updated_at = datetime('now')");
+                }
+                
+                // Handle integration_type if it exists and needs to be set
+                if (columns.includes('integration_type')) {
+                    updateParts.push('integration_type = ?');
+                    updateValues.push(settingKey.split('_')[0]);
+                }
+                
+                updateValues.push(existing.id); // Add the WHERE clause parameter
+                
+                const updateSQL = `
                     UPDATE user_settings 
-                    SET setting_value = ?, encrypted = ?, updated_at = datetime('now')
+                    SET ${updateParts.join(', ')}
                     WHERE id = ?
-                `);
-                const result = await updateStmt.bind(settingValue, encrypted ? 1 : 0, existing.id).run();
+                `;
+                
+                console.log('Update SQL:', updateSQL);
+                console.log('Update values:', updateValues);
+                
+                const updateStmt = this.db.prepare(updateSQL);
+                const result = await updateStmt.bind(...updateValues).run();
                 console.log(`Update result:`, result);
                 const changes = result.meta?.changes || result.changes || 0;
                 console.log(`User setting ${category}.${settingKey} updated for user ${userId}, changes: ${changes}`);
@@ -376,11 +407,56 @@ class D1Database {
             } else {
                 // Insert new record
                 console.log(`Inserting new record`);
-                const insertStmt = this.db.prepare(`
-                    INSERT INTO user_settings (user_id, category, setting_key, setting_value, encrypted, updated_at) 
-                    VALUES (?, ?, ?, ?, ?, datetime('now'))
-                `);
-                const result = await insertStmt.bind(userId, category, settingKey, settingValue, encrypted ? 1 : 0).run();
+                
+                // Check what columns exist in the table to build the correct INSERT
+                const tableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
+                const columns = (tableInfo.results || []).map(col => col.name);
+                console.log('Available columns for INSERT:', columns);
+                
+                // Build INSERT statement based on available columns
+                let insertColumns = ['user_id', 'setting_key', 'setting_value'];
+                let insertValues = [userId, settingKey, settingValue];
+                let placeholders = ['?', '?', '?'];
+                
+                if (columns.includes('category')) {
+                    insertColumns.push('category');
+                    insertValues.push(category);
+                    placeholders.push('?');
+                }
+                
+                if (columns.includes('encrypted')) {
+                    insertColumns.push('encrypted');
+                    insertValues.push(encrypted ? 1 : 0);
+                    placeholders.push('?');
+                }
+                
+                if (columns.includes('updated_at')) {
+                    insertColumns.push('updated_at');
+                    placeholders.push("datetime('now')");
+                }
+                
+                if (columns.includes('created_at')) {
+                    insertColumns.push('created_at');
+                    placeholders.push("datetime('now')");
+                }
+                
+                // Handle the integration_type column that seems to be NOT NULL
+                if (columns.includes('integration_type')) {
+                    insertColumns.push('integration_type');
+                    insertValues.push(settingKey.split('_')[0]); // e.g., 'mastodon' from 'mastodon_token'
+                    placeholders.push('?');
+                }
+                
+                const insertSQL = `
+                    INSERT INTO user_settings (${insertColumns.join(', ')}) 
+                    VALUES (${placeholders.join(', ')})
+                `;
+                
+                console.log('Insert SQL:', insertSQL);
+                console.log('Insert values:', insertValues);
+                
+                const insertStmt = this.db.prepare(insertSQL);
+                const result = await insertStmt.bind(...insertValues).run();
                 console.log(`Insert result:`, result);
                 const changes = result.meta?.changes || result.changes || 0;
                 console.log(`User setting ${category}.${settingKey} created for user ${userId}, changes: ${changes}`);
