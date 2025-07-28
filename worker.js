@@ -694,6 +694,7 @@ D1Database.prototype.toggleUserStatus = async function(userId) {
 };
 
 D1Database.prototype.getAllTiers = async function() {
+    await this.ensureUserTiersTable();
     const stmt = this.db.prepare(`
         SELECT *, 
         (SELECT COUNT(*) FROM users WHERE tier_id = user_tiers.id) as user_count
@@ -704,6 +705,7 @@ D1Database.prototype.getAllTiers = async function() {
 };
 
 D1Database.prototype.getTierById = async function(tierId) {
+    await this.ensureUserTiersTable();
     const stmt = this.db.prepare(`
         SELECT * FROM user_tiers WHERE id = ?
     `);
@@ -712,6 +714,7 @@ D1Database.prototype.getTierById = async function(tierId) {
 };
 
 D1Database.prototype.createTier = async function(name, dailyLimit, description = null) {
+    await this.ensureUserTiersTable();
     const stmt = this.db.prepare(`
         INSERT INTO user_tiers (name, daily_limit, description) 
         VALUES (?, ?, ?)
@@ -787,8 +790,28 @@ D1Database.prototype.createInviteToken = async function(email, invitedBy, token,
     }
 };
 
+D1Database.prototype.ensureUserTiersTable = async function() {
+    try {
+        const stmt = this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS user_tiers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                daily_limit INTEGER NOT NULL DEFAULT 10,
+                description TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await stmt.run();
+        console.log('user_tiers table ensured');
+    } catch (error) {
+        console.log('Could not ensure user_tiers table exists:', error);
+    }
+};
+
 D1Database.prototype.ensureInviteTokensTable = async function() {
     try {
+        // Ensure user_tiers table exists first
+        await this.ensureUserTiersTable();
         const stmt = this.db.prepare(`
             CREATE TABLE IF NOT EXISTS invite_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -802,7 +825,7 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (invited_by) REFERENCES users(id),
                 FOREIGN KEY (used_by) REFERENCES users(id),
-                FOREIGN KEY (tier_id) REFERENCES tiers(id)
+                FOREIGN KEY (tier_id) REFERENCES user_tiers(id)
             )
         `);
         await stmt.run();
@@ -810,7 +833,7 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
         // Add tier_id column if it doesn't exist (for existing tables)
         try {
             const alterStmt = this.db.prepare(`
-                ALTER TABLE invite_tokens ADD COLUMN tier_id INTEGER REFERENCES tiers(id)
+                ALTER TABLE invite_tokens ADD COLUMN tier_id INTEGER REFERENCES user_tiers(id)
             `);
             await alterStmt.run();
             console.log('Added tier_id column to invite_tokens table');
