@@ -3056,35 +3056,31 @@ app.get('/', (c) => {
                     // Mastodon preview
                     if (data.connectedAccounts.mastodon && data.connectedAccounts.mastodon.instance) {
                         const instanceName = data.connectedAccounts.mastodon.instance.replace('https://', '').replace('http://', '');
-                        socialPreviewHtml += `
-                            <div class="social-preview mastodon-preview">
-                                <div class="social-preview-header">
-                                    <span>🐘</span>
-                                    <span>Mastodon Preview (${instanceName})</span>
-                                </div>
-                                <div class="social-preview-content">
-                                    <div class="preview-text">${captionText}</div>
-                                    ${hashtagsText ? `<div class="preview-hashtags">${hashtagsText}</div>` : ''}
-                                    ${altTextContent ? `<div class="preview-alt">Alt text: ${altTextContent}</div>` : ''}
-                                </div>
-                            </div>
-                        `;
+                        socialPreviewHtml += '<div class="social-preview mastodon-preview">' +
+                            '<div class="social-preview-header">' +
+                            '<span>🐘</span>' +
+                            '<span>Mastodon Preview (' + instanceName + ')</span>' +
+                            '</div>' +
+                            '<div class="social-preview-content">' +
+                            '<div class="preview-text">' + captionText + '</div>' +
+                            (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
+                            (altTextContent ? '<div class="preview-alt">Alt text: ' + altTextContent + '</div>' : '') +
+                            '</div>' +
+                            '</div>';
                     }
                     
                     // LinkedIn preview
                     if (data.connectedAccounts.linkedin && data.connectedAccounts.linkedin.connected) {
-                        socialPreviewHtml += `
-                            <div class="social-preview linkedin-preview">
-                                <div class="social-preview-header">
-                                    <span>💼</span>
-                                    <span>LinkedIn Preview</span>
-                                </div>
-                                <div class="social-preview-content">
-                                    <div class="preview-text">${captionText}</div>
-                                    ${hashtagsText ? `<div class="preview-hashtags">${hashtagsText}</div>` : ''}
-                                </div>
-                            </div>
-                        `;
+                        socialPreviewHtml += '<div class="social-preview linkedin-preview">' +
+                            '<div class="social-preview-header">' +
+                            '<span>💼</span>' +
+                            '<span>LinkedIn Preview</span>' +
+                            '</div>' +
+                            '<div class="social-preview-content">' +
+                            '<div class="preview-text">' + captionText + '</div>' +
+                            (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
+                            '</div>' +
+                            '</div>';
                     }
                     
                     if (socialPreviewHtml) {
