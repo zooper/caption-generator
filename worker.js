@@ -622,7 +622,7 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         '   - Range from broad to specific\n' +
         (context.length > 0 ? '   - Include relevant hashtags based on the context provided\n' : '') +
         '\n3. Alt text for accessibility (1-2 sentences):\n' +
-        '   - Describe what\'s actually visible in the image\n' +
+        '   - Describe what is actually visible in the image\n' +
         '   - Include important visual details for screen readers\n' +
         '   - Focus on objective description, not interpretation\n' +
         '   - Keep it concise but descriptive\n' +
