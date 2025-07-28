@@ -1987,7 +1987,7 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         console.log('EXIF extraction failed:', error.message);
     }
     
-    const contextString = context.length > 0 ? '\n\nAdditional Context:\n' + context.join('\n') : '';
+    const contextString = context.length > 0 ? '\\n\\nAdditional Context:\\n' + context.join('\\n') : '';
     
     // Define style-specific caption instructions
     const styleInstructions = {
@@ -2019,31 +2019,31 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
     
     const selectedStyle = styleInstructions[style] || styleInstructions.creative;
     
-    const prompt = 'Analyze this image for Instagram posting. Generate:\n\n' +
-        '1. A ' + selectedStyle.description + ' caption that:\n' +
-        '   - Captures the main subject/scene\n' +
-        '   - ' + selectedStyle.tone + '\n' +
-        '   - Is 1-3 sentences\n' +
-        '   - Includes relevant emojis\n' +
-        '   - Feels authentic and natural (NO forced questions or call-to-actions)\n' +
-        '   - Sounds like something a real person would write\n' +
-        (context.length > 0 ? '   - Incorporates the provided context naturally\n' : '') +
-        '\n2. 10-15 hashtags that:\n' +
-        '   - Mix popular (#photography, #instagood) and niche tags\n' +
-        '   - Are relevant to image content\n' +
-        '   - Include location-based tags if applicable\n' +
-        '   - Avoid banned or shadowbanned hashtags\n' +
-        '   - Range from broad to specific\n' +
-        (context.length > 0 ? '   - Include relevant hashtags based on the context provided\n' : '') +
-        '\n3. Alt text for accessibility (1-2 sentences):\n' +
-        '   - Describe what is actually visible in the image\n' +
-        '   - Include important visual details for screen readers\n' +
-        '   - Focus on objective description, not interpretation\n' +
-        '   - Keep it concise but descriptive\n' +
-        contextString + '\n\n' +
-        'Format your response as:\n' +
-        'CAPTION: [your caption here]\n' +
-        'HASHTAGS: [hashtags separated by spaces]\n' +
+    const prompt = 'Analyze this image for Instagram posting. Generate:\\n\\n' +
+        '1. A ' + selectedStyle.description + ' caption that:\\n' +
+        '   - Captures the main subject/scene\\n' +
+        '   - ' + selectedStyle.tone + '\\n' +
+        '   - Is 1-3 sentences\\n' +
+        '   - Includes relevant emojis\\n' +
+        '   - Feels authentic and natural (NO forced questions or call-to-actions)\\n' +
+        '   - Sounds like something a real person would write\\n' +
+        (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
+        '\\n2. 10-15 hashtags that:\\n' +
+        '   - Mix popular (#photography, #instagood) and niche tags\\n' +
+        '   - Are relevant to image content\\n' +
+        '   - Include location-based tags if applicable\\n' +
+        '   - Avoid banned or shadowbanned hashtags\\n' +
+        '   - Range from broad to specific\\n' +
+        (context.length > 0 ? '   - Include relevant hashtags based on the context provided\\n' : '') +
+        '\\n3. Alt text for accessibility (1-2 sentences):\\n' +
+        '   - Describe what is actually visible in the image\\n' +
+        '   - Include important visual details for screen readers\\n' +
+        '   - Focus on objective description, not interpretation\\n' +
+        '   - Keep it concise but descriptive\\n' +
+        contextString + '\\n\\n' +
+        'Format your response as:\\n' +
+        'CAPTION: [your caption here]\\n' +
+        'HASHTAGS: [hashtags separated by spaces]\\n' +
         'ALT_TEXT: [descriptive alt text for accessibility]';
     
     return { prompt, extractedData };
@@ -3136,8 +3136,8 @@ app.get('/', (c) => {
 
                 // Parse the response content
                 const content = data.content;
-                const captionMatch = content.match(/CAPTION:\\s*(.+?)(?=\\n|HASHTAGS:|ALT_TEXT:|$)/s);
-                const hashtagsMatch = content.match(/HASHTAGS:\\s*(.+?)(?=\\n|ALT_TEXT:|$)/s);
+                const captionMatch = content.match(/CAPTION:\\s*(.+?)(?=\\\\n|HASHTAGS:|ALT_TEXT:|$)/s);
+                const hashtagsMatch = content.match(/HASHTAGS:\\s*(.+?)(?=\\\\n|ALT_TEXT:|$)/s);
                 const altTextMatch = content.match(/ALT_TEXT:\\s*(.+?)$/s);
 
                 document.getElementById('captionText').textContent = captionMatch ? captionMatch[1].trim() : 'No caption generated';
@@ -3273,7 +3273,7 @@ app.get('/', (c) => {
                 const altText = document.getElementById('altText').textContent;
                 
                 // Combine caption and hashtags for the post
-                const postContent = captionText + (hashtagsText ? '\n\n' + hashtagsText : '');
+                const postContent = captionText + (hashtagsText ? ' ' + hashtagsText : '');
 
                 const response = await fetch('/api/user/post/mastodon', {
                     method: 'POST',
