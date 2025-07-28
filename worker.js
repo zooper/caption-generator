@@ -98,11 +98,8 @@ class D1Database {
 
 const app = new Hono();
 
-// Enable CORS with credentials
-app.use('/*', cors({
-    origin: true,
-    credentials: true
-}));
+// Enable CORS 
+app.use('/*', cors());
 
 // JWT Configuration
 const JWT_SECRET = 'default-secret-change-this'; // In production, use environment variable
