@@ -1,7 +1,4 @@
 // Cloudflare Worker for AI Caption Studio
-import { createRequestHandler } from '@cloudflare/workers-types';
-
-// For now, let's create a simple Worker that handles basic routes
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);

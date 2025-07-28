@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "deploy": "wrangler pages deploy",
-    "cf-dev": "wrangler pages dev"
+    "deploy": "wrangler deploy",
+    "cf-dev": "wrangler dev"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",
@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
-    "wrangler": "^3.0.0"
+    "wrangler": "^4.26.0"
   },
   "keywords": [
     "social-media",
