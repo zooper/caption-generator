@@ -859,7 +859,7 @@ app.get('/', (c) => {
         .user-info { text-align: right; }
         .login-section { text-align: center; margin: 40px 0; }
         .login-form { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+        .main-content { display: none; grid-template-columns: 1fr 1fr; gap: 40px; }
         .upload-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
         .upload-area { border: 3px dashed #e0e0e0; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
         .upload-area:hover { border-color: #405de6; background: #f8f9ff; }
@@ -877,7 +877,7 @@ app.get('/', (c) => {
         .result-card { margin-top: 20px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; }
         .copy-btn { margin-top: 10px; padding: 8px 16px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
         .hidden { display: none; }
-        @media (max-width: 768px) { .main-content { grid-template-columns: 1fr; } }
+        @media (max-width: 768px) { .main-content { grid-template-columns: 1fr; } .main-content.show { display: grid; } }
     </style>
 </head>
 <body>
