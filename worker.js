@@ -2417,6 +2417,7 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         if (context.mood) userContext.push('Mood/Vibe: ' + context.mood);
         if (context.subject) userContext.push('Subject/Focus: ' + context.subject);
         if (context.custom) userContext.push('Additional notes: ' + context.custom);
+        if (context.customPrompt) userContext.push('Custom instructions: ' + context.customPrompt);
         
         // If user provided context, rebuild the prompt to include it
         if (userContext.length > 0 || context.camera || context.location) {
@@ -3179,7 +3180,8 @@ app.get('/', (c) => {
                     mood: document.getElementById('moodInput').value.trim(),
                     subject: document.getElementById('subjectInput').value.trim(),
                     custom: document.getElementById('customInput').value.trim(),
-                    includeWeather: document.getElementById('weatherToggle').checked
+                    includeWeather: document.getElementById('weatherToggle').checked,
+                    customPrompt: localStorage.getItem('customPrompt') || ''
                 };
                 
                 console.log('Context data:', contextData);
@@ -3480,7 +3482,7 @@ app.get('/admin', (c) => {
 </head>
 <body>
     <div class="container">
-        <div class="admin-header">
+        <div class="admin-header" id="adminHeader" style="display: none;">
             <h1>🛠️ Admin Dashboard</h1>
             <div class="nav-links">
                 <select id="themeSelector" onchange="changeTheme()" style="padding: 10px 20px; border: none; border-radius: 8px; margin-right: 10px; cursor: pointer; font-weight: 500;">
@@ -3497,8 +3499,8 @@ app.get('/admin', (c) => {
         </div>
 
         <div id="loginRequired" class="admin-section">
-            <h2>🔐 Admin Login Required</h2>
-            <p>Please login with an admin account to access the dashboard.</p>
+            <h2>🔐 Admin Access Required</h2>
+            <p>Please <a href="/" style="color: var(--accent-color);">login with an admin account</a> to access this page.</p>
         </div>
 
         <div id="adminContent" class="hidden">
@@ -3638,6 +3640,7 @@ app.get('/admin', (c) => {
                     const user = await response.json();
                     if (user.isAdmin) {
                         document.getElementById('loginRequired').classList.add('hidden');
+                        document.getElementById('adminHeader').style.display = 'flex';
                         document.getElementById('adminContent').classList.remove('hidden');
                         loadAdminData();
                     }
@@ -4509,7 +4512,7 @@ app.get('/admin/users', (c) => {
 </head>
 <body>
     <div class="container">
-        <div class="admin-header">
+        <div class="admin-header" id="adminHeader" style="display: none;">
             <h1>👥 Manage Users</h1>
             <div class="nav-links">
                 <a href="/admin" class="nav-link">🏠 Dashboard</a>
@@ -4520,8 +4523,8 @@ app.get('/admin/users', (c) => {
         </div>
 
         <div id="loginRequired" class="admin-section">
-            <h2>🔐 Admin Login Required</h2>
-            <p>Please login with an admin account to access user management.</p>
+            <h2>🔐 Admin Access Required</h2>
+            <p>Please <a href="/" style="color: var(--accent-color);">login with an admin account</a> to access this page.</p>
         </div>
 
         <div id="adminContent" class="hidden">
@@ -4818,7 +4821,7 @@ app.get('/admin/tiers', (c) => {
 </head>
 <body>
     <div class="container">
-        <div class="admin-header">
+        <div class="admin-header" id="adminHeader" style="display: none;">
             <h1>🏆 Manage Tiers</h1>
             <div class="nav-links">
                 <a href="/admin" class="nav-link">🏠 Dashboard</a>
@@ -4830,7 +4833,7 @@ app.get('/admin/tiers', (c) => {
 
         <div id="loginRequired" class="admin-section">
             <h2>🔐 Admin Login Required</h2>
-            <p>Please login with an admin account to access tier management.</p>
+            <p>Please login with an admin account to access this page.</p>
         </div>
 
         <div id="adminContent" class="hidden">
@@ -4900,6 +4903,7 @@ app.get('/admin/tiers', (c) => {
                 if (response.ok) {
                     const user = await response.json();
                     if (user.isAdmin) {
+                        document.getElementById('adminHeader').style.display = 'flex';
                         document.getElementById('loginRequired').classList.add('hidden');
                         document.getElementById('adminContent').classList.remove('hidden');
                         loadTiers();
