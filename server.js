@@ -50,10 +50,11 @@ function getCacheKey(imageHash, style) {
 }
 
 // SMTP configuration for magic links
+const smtpPort = parseInt(process.env.SMTP_PORT) || 587;
 const smtpTransporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.resend.com',
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: false, // true for 465, false for other ports
+    port: smtpPort,
+    secure: smtpPort === 465, // true for 465, false for other ports
     auth: {
         user: process.env.SMTP_USER || 'resend',
         pass: process.env.SMTP_PASSWORD // Resend API key
