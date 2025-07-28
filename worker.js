@@ -254,21 +254,47 @@ class D1Database {
     // User settings methods
     async ensureUserSettingsTable() {
         try {
-            const stmt = this.db.prepare(`
-                CREATE TABLE IF NOT EXISTS user_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    category TEXT NOT NULL,
-                    setting_key TEXT NOT NULL,
-                    setting_value TEXT NOT NULL,
-                    encrypted BOOLEAN DEFAULT 0,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(user_id, category, setting_key),
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )
-            `);
-            await stmt.run();
+            // First check if the table exists and what columns it has
+            const tableInfo = await this.db.prepare(`
+                PRAGMA table_info(user_settings)
+            `).all();
+            
+            console.log('Existing user_settings table info:', tableInfo.results || []);
+            
+            if (!tableInfo.results || tableInfo.results.length === 0) {
+                // Table doesn't exist, create it with our schema
+                const stmt = this.db.prepare(`
+                    CREATE TABLE user_settings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        category TEXT NOT NULL,
+                        setting_key TEXT NOT NULL,
+                        setting_value TEXT NOT NULL,
+                        encrypted BOOLEAN DEFAULT 0,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(user_id, category, setting_key),
+                        FOREIGN KEY (user_id) REFERENCES users(id)
+                    )
+                `);
+                await stmt.run();
+                console.log('Created new user_settings table with category column');
+            } else {
+                // Table exists, check if it has the category column
+                const hasCategory = tableInfo.results.some(col => col.name === 'category');
+                
+                if (!hasCategory) {
+                    console.log('Adding category column to existing user_settings table');
+                    // Add the category column if it doesn't exist
+                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN category TEXT DEFAULT 'general'`).run();
+                    
+                    // Also add encrypted column if it doesn't exist
+                    const hasEncrypted = tableInfo.results.some(col => col.name === 'encrypted');
+                    if (!hasEncrypted) {
+                        await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN encrypted BOOLEAN DEFAULT 0`).run();
+                    }
+                }
+            }
         } catch (error) {
             console.log('Could not ensure user_settings table exists:', error);
         }
