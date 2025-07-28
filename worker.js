@@ -837,6 +837,29 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
   }
 });
 
+// Test page route to debug JavaScript
+app.get('/test', (c) => {
+  return c.html(`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test JavaScript</title>
+</head>
+<body>
+    <h1>JavaScript Test</h1>
+    <button onclick="testFunction()">Test Button</button>
+    <div id="result"></div>
+    <script>
+        function testFunction() {
+            console.log('Test function called');
+            document.getElementById('result').innerHTML = 'Button works!';
+        }
+    </script>
+</body>
+</html>
+  `);
+});
+
 // Main page route
 app.get('/', (c) => {
   return c.html(`
@@ -1131,9 +1154,9 @@ app.get('/', (c) => {
 
                 // Parse the response content
                 const content = data.content;
-                const captionMatch = content.match(/CAPTION:\s*(.+?)(?=\n|HASHTAGS:|ALT_TEXT:|$)/s);
-                const hashtagsMatch = content.match(/HASHTAGS:\s*(.+?)(?=\n|ALT_TEXT:|$)/s);
-                const altTextMatch = content.match(/ALT_TEXT:\s*(.+?)$/s);
+                const captionMatch = content.match(/CAPTION:\\s*(.+?)(?=\\n|HASHTAGS:|ALT_TEXT:|$)/s);
+                const hashtagsMatch = content.match(/HASHTAGS:\\s*(.+?)(?=\\n|ALT_TEXT:|$)/s);
+                const altTextMatch = content.match(/ALT_TEXT:\\s*(.+?)$/s);
 
                 document.getElementById('captionText').textContent = captionMatch ? captionMatch[1].trim() : 'No caption generated';
                 document.getElementById('hashtagsText').textContent = hashtagsMatch ? hashtagsMatch[1].trim() : 'No hashtags generated';
