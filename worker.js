@@ -254,15 +254,19 @@ class D1Database {
     // User settings methods
     async ensureUserSettingsTable() {
         try {
+            console.log('=== ensureUserSettingsTable started ===');
+            
             // First check if the table exists and what columns it has
             const tableInfo = await this.db.prepare(`
                 PRAGMA table_info(user_settings)
             `).all();
             
-            console.log('Existing user_settings table info:', tableInfo.results || []);
+            console.log('Raw table info result:', tableInfo);
+            console.log('Table info results:', tableInfo.results || []);
             
             if (!tableInfo.results || tableInfo.results.length === 0) {
                 // Table doesn't exist, create it with our schema
+                console.log('Table does not exist, creating new user_settings table');
                 const stmt = this.db.prepare(`
                     CREATE TABLE user_settings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,36 +281,49 @@ class D1Database {
                         FOREIGN KEY (user_id) REFERENCES users(id)
                     )
                 `);
-                await stmt.run();
-                console.log('Created new user_settings table with category column');
+                const createResult = await stmt.run();
+                console.log('Create table result:', createResult);
+                console.log('Created new user_settings table with all required columns');
             } else {
                 // Table exists, check what columns we need to add
                 const columns = tableInfo.results.map(col => col.name);
                 console.log('Existing user_settings columns:', columns);
                 
                 // Add missing columns one by one
-                if (!columns.includes('category')) {
-                    console.log('Adding category column to existing user_settings table');
-                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN category TEXT DEFAULT 'general'`).run();
-                }
+                const requiredColumns = [
+                    { name: 'category', definition: 'TEXT DEFAULT \'general\'' },
+                    { name: 'encrypted', definition: 'BOOLEAN DEFAULT 0' },
+                    { name: 'updated_at', definition: 'DATETIME DEFAULT CURRENT_TIMESTAMP' },
+                    { name: 'created_at', definition: 'DATETIME DEFAULT CURRENT_TIMESTAMP' }
+                ];
                 
-                if (!columns.includes('encrypted')) {
-                    console.log('Adding encrypted column to existing user_settings table');
-                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN encrypted BOOLEAN DEFAULT 0`).run();
-                }
-                
-                if (!columns.includes('updated_at')) {
-                    console.log('Adding updated_at column to existing user_settings table');
-                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`).run();
-                }
-                
-                if (!columns.includes('created_at')) {
-                    console.log('Adding created_at column to existing user_settings table');
-                    await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP`).run();
+                for (const col of requiredColumns) {
+                    if (!columns.includes(col.name)) {
+                        console.log(`Adding ${col.name} column to existing user_settings table`);
+                        try {
+                            const alterResult = await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN ${col.name} ${col.definition}`).run();
+                            console.log(`Successfully added ${col.name} column:`, alterResult);
+                        } catch (alterError) {
+                            console.error(`Failed to add ${col.name} column:`, alterError);
+                        }
+                    } else {
+                        console.log(`Column ${col.name} already exists`);
+                    }
                 }
             }
+            
+            // Verify final table structure
+            const finalTableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
+            console.log('Final user_settings table structure:', finalTableInfo.results || []);
+            console.log('=== ensureUserSettingsTable completed ===');
+            
         } catch (error) {
-            console.log('Could not ensure user_settings table exists:', error);
+            console.error('Error in ensureUserSettingsTable:', error);
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
+            });
         }
     }
 
@@ -329,6 +346,8 @@ class D1Database {
 
     async setUserSetting(userId, category, settingKey, settingValue, encrypted = false) {
         try {
+            console.log(`setUserSetting called:`, { userId, category, settingKey, valueLength: settingValue?.length, encrypted });
+            
             await this.ensureUserSettingsTable();
             
             // Use a more compatible approach - check if exists then update or insert
@@ -336,30 +355,44 @@ class D1Database {
                 SELECT id FROM user_settings 
                 WHERE user_id = ? AND category = ? AND setting_key = ?
             `);
+            
+            console.log(`Checking for existing setting: userId=${userId}, category=${category}, key=${settingKey}`);
             const existing = await existingStmt.bind(userId, category, settingKey).first();
+            console.log(`Existing record found:`, existing);
             
             if (existing) {
                 // Update existing record
+                console.log(`Updating existing record with id=${existing.id}`);
                 const updateStmt = this.db.prepare(`
                     UPDATE user_settings 
                     SET setting_value = ?, encrypted = ?, updated_at = datetime('now')
                     WHERE id = ?
                 `);
                 const result = await updateStmt.bind(settingValue, encrypted ? 1 : 0, existing.id).run();
-                console.log(`User setting ${category}.${settingKey} updated for user ${userId}`);
-                return (result.meta?.changes || result.changes || 0) > 0;
+                console.log(`Update result:`, result);
+                const changes = result.meta?.changes || result.changes || 0;
+                console.log(`User setting ${category}.${settingKey} updated for user ${userId}, changes: ${changes}`);
+                return changes > 0;
             } else {
                 // Insert new record
+                console.log(`Inserting new record`);
                 const insertStmt = this.db.prepare(`
                     INSERT INTO user_settings (user_id, category, setting_key, setting_value, encrypted, updated_at) 
                     VALUES (?, ?, ?, ?, ?, datetime('now'))
                 `);
                 const result = await insertStmt.bind(userId, category, settingKey, settingValue, encrypted ? 1 : 0).run();
-                console.log(`User setting ${category}.${settingKey} created for user ${userId}`);
-                return (result.meta?.changes || result.changes || 0) > 0;
+                console.log(`Insert result:`, result);
+                const changes = result.meta?.changes || result.changes || 0;
+                console.log(`User setting ${category}.${settingKey} created for user ${userId}, changes: ${changes}`);
+                return changes > 0;
             }
         } catch (error) {
-            console.error('Failed to set user setting:', error);
+            console.error(`Failed to set user setting ${category}.${settingKey} for user ${userId}:`, error);
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
+            });
             return false;
         }
     }
