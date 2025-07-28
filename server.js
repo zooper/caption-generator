@@ -7,7 +7,8 @@ const { v4: uuidv4 } = require('uuid');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const Database = require('./database');
+// Use D1 for Cloudflare, Neon for other environments
+const Database = process.env.CLOUDFLARE ? require('./database-d1') : require('./database');
 const ThumbnailGenerator = require('./thumbnails');
 require('dotenv').config();
 
@@ -201,9 +202,17 @@ const thumbnailGenerator = new ThumbnailGenerator();
 
 // Initialize database with async handling
 let database;
-const initializeDatabase = async () => {
+const initializeDatabase = async (d1Binding = null) => {
     try {
-        database = new Database();
+        if (process.env.CLOUDFLARE && d1Binding) {
+            // Use D1 database binding from Cloudflare
+            database = new Database(d1Binding);
+        } else {
+            // Use Neon or other database
+            database = new Database();
+        }
+        
+        await database.initDatabase();
         console.log('✅ Database initialized successfully');
     } catch (error) {
         console.error('❌ Database initialization failed:', error);
@@ -216,9 +225,9 @@ const initializeDatabase = async () => {
 };
 
 // Ensure database is initialized before use
-const ensureDatabase = async () => {
+const ensureDatabase = async (d1Binding = null) => {
     if (!database) {
-        await initializeDatabase();
+        await initializeDatabase(d1Binding);
     }
     return database;
 };
@@ -1347,7 +1356,7 @@ app.post('/api/auth/request-login', async (req, res) => {
         }
 
         // Ensure database is initialized
-        const db = await ensureDatabase();
+        const db = await ensureDatabase(req.d1);
         
         // Check if user exists
         const existingUser = await db.getUserByEmail(email);

@@ -2,11 +2,20 @@ name = "ai-caption-studio"
 compatibility_date = "2024-07-28"
 pages_build_output_dir = "."
 
+# D1 Database configuration
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-caption-studio-db"
+database_id = "placeholder-will-be-generated"
+
 [env.production]
 compatibility_date = "2024-07-28"
 
-# Environment variables (you'll set these in Cloudflare dashboard)
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "ai-caption-studio-db"
+database_id = "placeholder-will-be-generated"
+
+# Environment variables
 [vars]
 NODE_ENV = "production"
-
-# Database and SMTP will be set as secrets in Cloudflare

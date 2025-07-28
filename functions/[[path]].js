@@ -7,8 +7,8 @@ const app = require('../server.js');
 export async function onRequest(context) {
   const { request, env } = context;
   
-  // Set environment variables
-  Object.assign(process.env, env);
+  // Set environment variables and Cloudflare flag
+  Object.assign(process.env, env, { CLOUDFLARE: 'true' });
   
   // Create a simple Express-compatible handler
   return new Promise((resolve) => {
@@ -18,7 +18,9 @@ export async function onRequest(context) {
       headers: Object.fromEntries(request.headers.entries()),
       body: request.body,
       ip: request.headers.get('CF-Connecting-IP'),
-      get: (header) => request.headers.get(header)
+      get: (header) => request.headers.get(header),
+      // Pass D1 database binding
+      d1: env.DB
     };
     
     const res = {
