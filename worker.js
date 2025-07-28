@@ -90,6 +90,9 @@ class D1Database {
 
     async logQuery(logData) {
         try {
+            console.log('=== logQuery called ===');
+            console.log('logData:', logData);
+            
             // Create the query_logs table if it doesn't exist
             await this.ensureQueryLogsTable();
             
@@ -103,15 +106,27 @@ class D1Database {
                 ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
             `);
 
-            await stmt.bind(
+            const result = await stmt.bind(
                 id, source || 'web', userId, email, 
                 processingTimeMs || 0, responseLength || 0
             ).run();
 
             console.log('Query logged successfully:', id);
+            console.log('Insert result:', result);
+            
+            // Verify the query was actually inserted
+            const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM query_logs');
+            const countResult = await countStmt.first();
+            console.log('Total queries in database:', countResult?.count);
+            
             return id;
         } catch (error) {
             console.error('Failed to log query:', error);
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                name: error.name
+            });
             // Don't throw error to avoid breaking the main flow
         }
     }
@@ -2120,6 +2135,31 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
     return null;
 }
 
+// Helper function to get user's connected social media accounts
+async function getConnectedSocialAccounts(database, userId) {
+    try {
+        const settings = await database.getUserSettings(userId, 'social');
+        const connected = {
+            mastodon: null,
+            linkedin: null
+        };
+        
+        settings.forEach(setting => {
+            const [platform, key] = setting.setting_key.split('_');
+            if (platform === 'mastodon' && key === 'instance') {
+                connected.mastodon = { instance: setting.setting_value };
+            } else if (platform === 'linkedin' && key === 'token' && setting.setting_value) {
+                connected.linkedin = { connected: true };
+            }
+        });
+        
+        return connected;
+    } catch (error) {
+        console.error('Failed to get connected social accounts:', error);
+        return { mastodon: null, linkedin: null };
+    }
+}
+
 // Caption generation endpoint - now requires authentication
 app.post('/api/generate-caption', authenticateToken, async (c) => {
   try {
@@ -2277,6 +2317,10 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         }
     }
     
+    // Include connected social media accounts for preview
+    const connectedAccounts = await getConnectedSocialAccounts(database, user.id);
+    responseData.connectedAccounts = connectedAccounts;
+    
     return c.json(responseData);
     
   } catch (error) {
@@ -2402,6 +2446,14 @@ app.get('/', (c) => {
         .loading { display: none; text-align: center; padding: 20px; }
         .result-card { margin-top: 20px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; }
         .copy-btn { margin-top: 10px; padding: 8px 16px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+        .social-preview { margin-bottom: 20px; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; }
+        .social-preview-header { padding: 15px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .social-preview-content { padding: 15px; }
+        .mastodon-preview { border-left: 4px solid #6364ff; }
+        .linkedin-preview { border-left: 4px solid #0077b5; }
+        .preview-text { margin: 10px 0; line-height: 1.5; }
+        .preview-hashtags { color: #0077b5; font-size: 0.9em; margin-top: 10px; }
+        .preview-alt { color: #666; font-size: 0.85em; font-style: italic; margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; }
         .hidden { display: none; }
         @media (max-width: 768px) { .main-content { grid-template-columns: 1fr; } .main-content.show { display: grid; } }
     </style>
@@ -2532,6 +2584,10 @@ app.get('/', (c) => {
                     <div class="result-card" id="metadataCard" style="display: none;">
                         <h4>📊 Photo Metadata</h4>
                         <div id="metadataContent" style="font-size: 14px; color: #666;"></div>
+                    </div>
+                    <div class="result-card" id="socialPreviewCard" style="display: none;">
+                        <h4>📱 Social Media Previews</h4>
+                        <div id="socialPreviewContent"></div>
                     </div>
                 </div>
             </div>
@@ -2982,6 +3038,63 @@ app.get('/', (c) => {
                 } else {
                     metadataCard.style.display = 'none';
                     console.log('No metadata to display');
+                }
+
+                // Display social media previews if connected accounts exist
+                const socialPreviewCard = document.getElementById('socialPreviewCard');
+                const socialPreviewContent = document.getElementById('socialPreviewContent');
+                
+                if (data.connectedAccounts && (data.connectedAccounts.mastodon || data.connectedAccounts.linkedin)) {
+                    console.log('Connected accounts found:', data.connectedAccounts);
+                    
+                    const captionText = captionMatch ? captionMatch[1].trim() : '';
+                    const hashtagsText = hashtagsMatch ? hashtagsMatch[1].trim() : '';
+                    const altTextContent = altTextMatch ? altTextMatch[1].trim() : '';
+                    
+                    let socialPreviewHtml = '';
+                    
+                    // Mastodon preview
+                    if (data.connectedAccounts.mastodon && data.connectedAccounts.mastodon.instance) {
+                        const instanceName = data.connectedAccounts.mastodon.instance.replace('https://', '').replace('http://', '');
+                        socialPreviewHtml += `
+                            <div class="social-preview mastodon-preview">
+                                <div class="social-preview-header">
+                                    <span>🐘</span>
+                                    <span>Mastodon Preview (${instanceName})</span>
+                                </div>
+                                <div class="social-preview-content">
+                                    <div class="preview-text">${captionText}</div>
+                                    ${hashtagsText ? `<div class="preview-hashtags">${hashtagsText}</div>` : ''}
+                                    ${altTextContent ? `<div class="preview-alt">Alt text: ${altTextContent}</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    // LinkedIn preview
+                    if (data.connectedAccounts.linkedin && data.connectedAccounts.linkedin.connected) {
+                        socialPreviewHtml += `
+                            <div class="social-preview linkedin-preview">
+                                <div class="social-preview-header">
+                                    <span>💼</span>
+                                    <span>LinkedIn Preview</span>
+                                </div>
+                                <div class="social-preview-content">
+                                    <div class="preview-text">${captionText}</div>
+                                    ${hashtagsText ? `<div class="preview-hashtags">${hashtagsText}</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    if (socialPreviewHtml) {
+                        socialPreviewContent.innerHTML = socialPreviewHtml;
+                        socialPreviewCard.style.display = 'block';
+                        console.log('Social media previews shown');
+                    }
+                } else {
+                    socialPreviewCard.style.display = 'none';
+                    console.log('No connected social accounts for preview');
                 }
 
                 document.getElementById('results').classList.remove('hidden');
