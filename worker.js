@@ -120,6 +120,9 @@ class D1Database {
 
     async setSystemSetting(key, value) {
         try {
+            // Try to create the table first if it doesn't exist
+            await this.ensureSystemSettingsTable();
+            
             const stmt = this.db.prepare(`
                 INSERT INTO system_settings (setting_key, setting_value, updated_at) 
                 VALUES (?, ?, datetime('now'))
@@ -128,7 +131,8 @@ class D1Database {
                     setting_value = excluded.setting_value,
                     updated_at = datetime('now')
             `);
-            await stmt.bind(key, value).run();
+            const result = await stmt.bind(key, value).run();
+            console.log(`System setting ${key} = ${value} saved successfully`);
             return true;
         } catch (error) {
             console.error('Failed to set system setting:', error);
@@ -136,8 +140,28 @@ class D1Database {
         }
     }
 
+    async ensureSystemSettingsTable() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    setting_key TEXT UNIQUE NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.log('Could not ensure system_settings table exists:', error);
+        }
+    }
+
     async getAllSystemSettings() {
         try {
+            // Ensure table exists first
+            await this.ensureSystemSettingsTable();
+            
             const stmt = this.db.prepare(`
                 SELECT * FROM system_settings ORDER BY setting_key
             `);
@@ -2777,8 +2801,11 @@ app.get('/admin', (c) => {
 
         async function saveSystemSettings() {
             try {
+                const registrationValue = document.getElementById('registrationOpen').value;
+                console.log('Saving registration setting:', registrationValue);
+                
                 const settings = {
-                    registration_open: document.getElementById('registrationOpen').value
+                    registration_open: registrationValue
                 };
 
                 const response = await fetch('/api/admin/settings', {
@@ -2791,13 +2818,20 @@ app.get('/admin', (c) => {
                 });
 
                 const result = await response.json();
+                console.log('Save response:', result);
+                
                 if (result.success) {
-                    alert('System settings saved successfully!');
+                    alert('✅ System settings saved successfully!');
+                    // Reload settings to verify they were saved
+                    setTimeout(() => {
+                        loadSystemSettings();
+                    }, 500);
                 } else {
-                    alert('Error: ' + result.error);
+                    alert('❌ Error: ' + result.error);
                 }
             } catch (error) {
-                alert('Failed to save system settings: ' + error.message);
+                console.error('Save error:', error);
+                alert('❌ Failed to save system settings: ' + error.message);
             }
         }
 
