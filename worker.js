@@ -2981,46 +2981,46 @@ app.get('/', (c) => {
             const uploadPlaceholder = document.getElementById('uploadPlaceholder');
             const generateBtn = document.getElementById('generateBtn');
 
-        uploadArea.addEventListener('click', () => fileInput.click());
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) handleFile(files[0]);
-        });
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) handleFile(files[0]);
+            });
 
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) handleFile(e.target.files[0]);
-        });
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) handleFile(e.target.files[0]);
+            });
 
-        function handleFile(file) {
-            if (file.size > 10 * 1024 * 1024) {
-                alert('File too large. Please select an image under 10MB.');
-                return;
+                function handleFile(file) {
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('File too large. Please select an image under 10MB.');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    previewImage.src = e.target.result;
+                    previewImage.classList.remove('hidden');
+                    uploadPlaceholder.classList.add('hidden');
+                    uploadedImage = e.target.result.split(',')[1]; // Remove data:image/jpeg;base64,
+                    generateBtn.disabled = false;
+                    
+                    // Extract EXIF metadata immediately when image is loaded
+                    extractMetadataFromEXIF(file);
+                };
+                reader.readAsDataURL(file);
             }
 
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                previewImage.src = e.target.result;
-                previewImage.classList.remove('hidden');
-                uploadPlaceholder.classList.add('hidden');
-                uploadedImage = e.target.result.split(',')[1]; // Remove data:image/jpeg;base64,
-                generateBtn.disabled = false;
-                
-                // Extract EXIF metadata immediately when image is loaded
-                extractMetadataFromEXIF(file);
-            };
-            reader.readAsDataURL(file);
-        }
-
-        async function extractMetadataFromEXIF(file) {
+            async function extractMetadataFromEXIF(file) {
             try {
                 const locationInput = document.getElementById('locationInput');
                 const cameraInput = document.getElementById('cameraInput');
@@ -3114,7 +3114,7 @@ app.get('/', (c) => {
             }
         }
 
-        async function reverseGeocode(latitude, longitude) {
+            async function reverseGeocode(latitude, longitude) {
             try {
                 const response = await fetch(
                     'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=10&addressdetails=1',
@@ -3147,17 +3147,17 @@ app.get('/', (c) => {
             return null;
         }
 
-        // Style selection
-        document.querySelectorAll('.style-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                selectedStyle = btn.dataset.style;
+            // Style selection
+            document.querySelectorAll('.style-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedStyle = btn.dataset.style;
+                });
             });
-        });
 
-        // Generate caption
-        generateBtn.addEventListener('click', async () => {
+            // Generate caption
+            generateBtn.addEventListener('click', async () => {
             if (!uploadedImage) return;
 
             document.getElementById('loading').style.display = 'block';
@@ -3319,7 +3319,7 @@ app.get('/', (c) => {
             }
         });
 
-        function copyToClipboard(elementId) {
+            function copyToClipboard(elementId) {
             const text = document.getElementById(elementId).textContent;
             navigator.clipboard.writeText(text).then(() => {
                 // Show feedback
@@ -3330,7 +3330,7 @@ app.get('/', (c) => {
             });
         }
 
-        async function postToMastodon() {
+            async function postToMastodon() {
             try {
                 const btn = event.target;
                 const originalText = btn.textContent;
