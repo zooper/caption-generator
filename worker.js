@@ -773,17 +773,17 @@ D1Database.prototype.setUserTier = async function(userId, tierId) {
     }
 };
 
-D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt, tierId = null) {
+D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt, tierId = null, personalMessage = null) {
     try {
         // First ensure the invite_tokens table exists with proper schema
         await this.ensureInviteTokensTable();
         
         const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id) 
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id, personal_message) 
+            VALUES (?, ?, ?, ?, ?, ?)
         `);
-        await stmt.bind(email, invitedBy, token, expiresAt, tierId).run();
-        return { email, token, expiresAt, tierId };
+        await stmt.bind(email, invitedBy, token, expiresAt, tierId, personalMessage).run();
+        return { email, token, expiresAt, tierId, personalMessage };
     } catch (error) {
         console.error('Error creating invite token:', error);
         throw error;
