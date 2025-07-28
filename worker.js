@@ -15,7 +15,7 @@ class D1Database {
     async createUser(email) {
         try {
             const stmt = this.db.prepare(`
-                INSERT INTO users (email) VALUES (?)
+                INSERT INTO users (email, is_active) VALUES (?, 1)
                 RETURNING id, email
             `);
             const result = await stmt.bind(email).first();
@@ -30,10 +30,8 @@ class D1Database {
 
     async getUserByEmail(email) {
         const stmt = this.db.prepare(`
-            SELECT u.*, t.name as tier_name, t.daily_limit 
-            FROM users u 
-            LEFT JOIN tiers t ON u.tier_id = t.id
-            WHERE u.email = ? AND u.is_active = 1
+            SELECT * FROM users 
+            WHERE email = ? AND is_active = 1
         `);
         return await stmt.bind(email).first();
     }
