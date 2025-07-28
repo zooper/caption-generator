@@ -770,17 +770,17 @@ D1Database.prototype.setUserTier = async function(userId, tierId) {
     }
 };
 
-D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt) {
+D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt, tierId = null) {
     try {
         // First ensure the invite_tokens table exists with proper schema
         await this.ensureInviteTokensTable();
         
         const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by, token, expires_at) 
-            VALUES (?, ?, ?, ?)
+            INSERT INTO invite_tokens (email, invited_by, token, expires_at, tier_id) 
+            VALUES (?, ?, ?, ?, ?)
         `);
-        await stmt.bind(email, invitedBy, token, expiresAt).run();
-        return { email, token, expiresAt };
+        await stmt.bind(email, invitedBy, token, expiresAt, tierId).run();
+        return { email, token, expiresAt, tierId };
     } catch (error) {
         console.error('Error creating invite token:', error);
         throw error;
@@ -796,17 +796,48 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
                 invited_by INTEGER,
                 token TEXT UNIQUE NOT NULL,
                 expires_at DATETIME NOT NULL,
+                tier_id INTEGER,
                 used_at DATETIME,
                 used_by INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (invited_by) REFERENCES users(id),
-                FOREIGN KEY (used_by) REFERENCES users(id)
+                FOREIGN KEY (used_by) REFERENCES users(id),
+                FOREIGN KEY (tier_id) REFERENCES tiers(id)
             )
         `);
         await stmt.run();
+        
+        // Add tier_id column if it doesn't exist (for existing tables)
+        try {
+            const alterStmt = this.db.prepare(`
+                ALTER TABLE invite_tokens ADD COLUMN tier_id INTEGER REFERENCES tiers(id)
+            `);
+            await alterStmt.run();
+            console.log('Added tier_id column to invite_tokens table');
+        } catch (alterError) {
+            // Column likely already exists, which is fine
+            console.log('tier_id column already exists or could not be added:', alterError.message);
+        }
+        
         console.log('invite_tokens table ensured');
     } catch (error) {
         console.log('Could not ensure invite_tokens table exists:', error);
+    }
+};
+
+D1Database.prototype.getInviteToken = async function(token) {
+    try {
+        await this.ensureInviteTokensTable();
+        
+        const stmt = this.db.prepare(`
+            SELECT * FROM invite_tokens 
+            WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+        `);
+        const result = await stmt.bind(token).first();
+        return result;
+    } catch (error) {
+        console.error('Error getting invite token:', error);
+        return null;
     }
 };
 
@@ -1107,6 +1138,85 @@ app.post('/api/auth/logout', authenticateToken, async (c) => {
     }
 });
 
+// Accept invite endpoint - create account and assign tier
+app.post('/api/auth/accept-invite', async (c) => {
+    try {
+        const { email, inviteToken } = await c.req.json();
+        
+        if (!email || !inviteToken) {
+            return c.json({ error: 'Email and invite token are required' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        
+        // Validate the invite token
+        const invite = await database.getInviteToken(inviteToken);
+        if (!invite) {
+            return c.json({ error: 'Invalid or expired invite token' }, 400);
+        }
+        
+        if (invite.email !== email) {
+            return c.json({ error: 'Email does not match the invitation' }, 400);
+        }
+        
+        // Check if user already exists
+        const existingUser = await database.getUserByEmail(email);
+        if (existingUser) {
+            return c.json({ error: 'User already exists' }, 400);
+        }
+        
+        // Create the user account
+        const user = await database.createUser(email, false);
+        
+        // Assign tier if specified in the invite
+        if (invite.tier_id) {
+            const tierInfo = await database.getTierById(invite.tier_id);
+            if (tierInfo) {
+                await database.updateUserTier(user.id, invite.tier_id);
+                console.log(`Assigned tier ${tierInfo.name} to user ${email}`);
+            }
+        }
+        
+        // Mark the invite token as used
+        await database.useInviteToken(inviteToken, user.id);
+        
+        // Create a login session for the new user
+        const sessionId = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+        
+        await database.createSession(user.id, sessionId, expiresAt);
+        
+        const token = await createSessionJWT({
+            userId: user.id,
+            sessionId: sessionId,
+            email: user.email
+        }, c.env.JWT_SECRET);
+        
+        // Set auth cookie
+        setCookie(c, 'auth_token', token, {
+            httpOnly: false,
+            secure: false,
+            maxAge: 7 * 24 * 60 * 60, // 7 days
+            sameSite: 'Lax'
+        });
+        
+        return c.json({ 
+            success: true, 
+            message: 'Account created successfully',
+            user: {
+                id: user.id,
+                email: user.email,
+                isAdmin: user.isAdmin
+            },
+            token: token
+        });
+        
+    } catch (error) {
+        console.error('Accept invite error:', error);
+        return c.json({ error: 'Failed to accept invitation' }, 500);
+    }
+});
+
 // Admin endpoints
 app.get('/api/admin/users', authenticateToken, requireAdmin, async (c) => {
     try {
@@ -1338,7 +1448,7 @@ app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async
 // Invite system endpoints
 app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
     try {
-        const { email } = await c.req.json();
+        const { email, tierId, personalMessage } = await c.req.json();
         
         if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
             return c.json({ error: 'Valid email address required' }, 400);
@@ -1351,15 +1461,40 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
             return c.json({ error: 'User already exists' }, 400);
         }
 
+        // Validate tier if provided
+        let tierInfo = null;
+        if (tierId) {
+            tierInfo = await database.getTierById(tierId);
+            if (!tierInfo) {
+                return c.json({ error: 'Invalid tier selected' }, 400);
+            }
+        }
+
         // Generate invite token
         const token = crypto.randomUUID();
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
         
         const user = c.get('user');
-        await database.createInviteToken(email, user.id, token, expiresAt);
+        await database.createInviteToken(email, user.id, token, expiresAt, tierId);
 
         // Create invite link
         const inviteUrl = `${new URL(c.req.url).origin}/auth?invite=${token}&email=${encodeURIComponent(email)}`;
+
+        // Build personal message section for email
+        const personalMessageHtml = personalMessage ? 
+            `<div style="background: #f8f9ff; padding: 20px; margin: 20px 0; border-left: 4px solid #405de6; border-radius: 4px;">
+                <h3 style="margin: 0 0 10px 0; color: #405de6;">Personal Message:</h3>
+                <p style="margin: 0; font-style: italic;">"${personalMessage}"</p>
+            </div>` : '';
+
+        // Build tier information section for email
+        const tierInfoHtml = tierInfo ? 
+            `<div style="background: #f0f9ff; padding: 15px; margin: 20px 0; border-radius: 4px; border: 1px solid #e0f2fe;">
+                <h4 style="margin: 0 0 5px 0; color: #0369a1;">Your Account Tier: ${tierInfo.name}</h4>
+                <p style="margin: 0; font-size: 14px; color: #475569;">
+                    ${tierInfo.daily_limit === -1 ? 'Unlimited' : tierInfo.daily_limit} caption generations per day
+                </p>
+            </div>` : '';
 
         // Send email using Resend
         try {
@@ -1372,6 +1507,8 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
                         <h2>🎉 You're Invited!</h2>
                         <p>Hi there!</p>
                         <p><strong>${user.email}</strong> has invited you to join AI Caption Studio, an AI-powered tool for creating Instagram captions and hashtags.</p>
+                        ${personalMessageHtml}
+                        ${tierInfoHtml}
                         <div style="margin: 30px 0;">
                             <a href="${inviteUrl}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
                                 🚀 Accept Invitation
@@ -1382,7 +1519,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
                         <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
                         <p style="color: #666; font-size: 12px;">
                             Invited by: ${user.email}<br>
-                            Time: ${new Date().toLocaleString()}
+                            Time: ${new Date().toLocaleString()}${tierInfo ? `<br>Assigned Tier: ${tierInfo.name}` : ''}
                         </p>
                     </div>
                 `
@@ -1404,7 +1541,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
 
             return c.json({ 
                 success: true, 
-                message: `Invitation sent to ${email}`,
+                message: `Invitation sent to ${email}${tierInfo ? ` with ${tierInfo.name} tier` : ''}`,
                 expiresIn: '7 days'
             });
         } catch (emailError) {
@@ -3355,7 +3492,140 @@ app.get('/', (c) => {
 });
 
 // Other routes return simple HTML
-app.get('/auth', (c) => c.html('<h1>Auth page</h1><p>Authentication is integrated into the main page.</p><a href="/">← Back to Main</a>'));
+app.get('/auth', async (c) => {
+    const inviteToken = c.req.query('invite');
+    const email = c.req.query('email');
+    
+    if (inviteToken && email) {
+        // Handle invite acceptance
+        try {
+            const database = new D1Database(c.env.DB);
+            const invite = await database.getInviteToken(inviteToken);
+            
+            if (!invite) {
+                return c.html(`
+                    <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                        <h2>❌ Invalid or Expired Invitation</h2>
+                        <p>This invitation link is invalid or has expired.</p>
+                        <a href="/" style="color: #405de6;">← Back to Caption Studio</a>
+                    </div>
+                `);
+            }
+            
+            if (invite.email !== email) {
+                return c.html(`
+                    <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                        <h2>❌ Invalid Invitation</h2>
+                        <p>This invitation is not for the specified email address.</p>
+                        <a href="/" style="color: #405de6;">← Back to Caption Studio</a>
+                    </div>
+                `);
+            }
+            
+            // Get tier info if assigned in invite
+            const invitedBy = await database.getUserById(invite.invited_by);
+            const tierName = invite.assigned_tier_id ? 
+                (await database.getTierById(invite.assigned_tier_id))?.name || 'Default' : 'Default';
+                
+            return c.html(`
+                <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 30px; text-align: center; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                    <h2 style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 20px;">🎉 Welcome to AI Caption Studio!</h2>
+                    
+                    <div style="background: #f0f9ff; padding: 20px; margin: 20px 0; border-radius: 8px; border: 1px solid #e0f2fe;">
+                        <p><strong>Invited by:</strong> ${invitedBy ? invitedBy.email : 'Administrator'}</p>
+                        <p><strong>Your Account Tier:</strong> ${tierName}</p>
+                    </div>
+                    
+                    <p>To complete your account setup, enter your email below and click "Get Started":</p>
+                    
+                    <div style="margin: 20px 0;">
+                        <input type="email" id="inviteEmail" value="${email}" readonly 
+                               style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; background: #f9f9f9;" />
+                        <button onclick="acceptInvite()" 
+                                style="width: 100%; padding: 15px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold;">
+                            🚀 Get Started
+                        </button>
+                    </div>
+                    
+                    <div id="message" style="margin-top: 20px;"></div>
+                    
+                    <script>
+                        async function acceptInvite() {
+                            const button = document.querySelector('button');
+                            const messageDiv = document.getElementById('message');
+                            
+                            button.disabled = true;
+                            button.textContent = '⏳ Setting up your account...';
+                            
+                            try {
+                                const response = await fetch('/api/auth/accept-invite', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ 
+                                        inviteToken: '${inviteToken}',
+                                        email: '${email}'
+                                    })
+                                });
+                                
+                                const result = await response.json();
+                                
+                                if (result.success) {
+                                    messageDiv.innerHTML = '<p style="color: green;">✅ Account created successfully! Sending you a magic link to log in...</p>';
+                                    
+                                    // Now request login for the new user
+                                    const loginResponse = await fetch('/api/auth/request-login', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ email: '${email}' })
+                                    });
+                                    
+                                    const loginResult = await loginResponse.json();
+                                    
+                                    if (loginResult.success) {
+                                        messageDiv.innerHTML = '<p style="color: green;">✅ Magic link sent to your email! Check your inbox to complete login.</p>';
+                                        setTimeout(() => {
+                                            window.location.href = '/';
+                                        }, 3000);
+                                    } else {
+                                        messageDiv.innerHTML = '<p style="color: orange;">⚠️ Account created but failed to send login link. Please go to the main page and request a login link.</p>';
+                                    }
+                                } else {
+                                    messageDiv.innerHTML = '<p style="color: red;">❌ ' + result.error + '</p>';
+                                    button.disabled = false;
+                                    button.textContent = '🚀 Get Started';
+                                }
+                            } catch (error) {
+                                console.error('Accept invite error:', error);
+                                messageDiv.innerHTML = '<p style="color: red;">❌ Failed to accept invitation. Please try again.</p>';
+                                button.disabled = false;
+                                button.textContent = '🚀 Get Started';
+                            }
+                        }
+                    </script>
+                </div>
+            `);
+            
+        } catch (error) {
+            console.error('Error processing invite:', error);
+            return c.html(`
+                <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                    <h2>❌ Error Processing Invitation</h2>
+                    <p>There was an error processing your invitation. Please try again or contact support.</p>
+                    <a href="/" style="color: #405de6;">← Back to Caption Studio</a>
+                </div>
+            `);
+        }
+    }
+    
+    // Default auth page if no invite token
+    return c.html(`
+        <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+            <h1>🔐 Authentication</h1>
+            <p>Authentication is integrated into the main page.</p>
+            <a href="/" style="color: #405de6;">← Back to Main</a>
+        </div>
+    `);
+});
 
 app.get('/admin', (c) => {
   return c.html(`
@@ -3432,6 +3702,7 @@ app.get('/admin', (c) => {
         .form-label { display: block; margin-bottom: 5px; font-weight: 500; color: var(--text-primary); }
         .form-input { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--card-background); color: var(--text-primary); }
         .form-input:focus { outline: none; border-color: #8B5CF6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1); }
+        .form-help { display: block; margin-top: 5px; font-size: 12px; color: var(--text-secondary); }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); }
         .modal-content { background-color: var(--card-background); margin: 10% auto; padding: 30px; border-radius: 15px; width: 90%; max-width: 500px; }
         .hidden { display: none; }
@@ -3579,13 +3850,32 @@ app.get('/admin', (c) => {
     <div id="inviteModal" class="modal">
         <div class="modal-content">
             <h2 class="mb-4">📧 Send Invitation</h2>
+            
             <div class="form-group">
                 <label class="form-label">Email Address</label>
-                <input type="email" id="inviteEmail" class="form-input" placeholder="user@example.com">
+                <input type="email" id="inviteEmail" class="form-input" placeholder="user@example.com" required>
+                <small class="form-help">The user will receive a magic link to create their account</small>
             </div>
-            <div class="flex justify-between gap-3">
+            
+            <div class="form-group">
+                <label class="form-label">Assign Tier (Optional)</label>
+                <select id="inviteTier" class="form-input">
+                    <option value="">No tier assigned (default)</option>
+                </select>
+                <small class="form-help">Assign a usage tier to the invited user</small>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Personal Message (Optional)</label>
+                <textarea id="inviteMessage" class="form-input" rows="3" placeholder="Add a personal welcome message..."></textarea>
+                <small class="form-help">This message will be included in the invitation email</small>
+            </div>
+            
+            <div class="flex justify-between gap-3 mt-6">
                 <button class="btn btn-secondary" onclick="closeInviteModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="sendInvite()">Send Invite</button>
+                <button class="btn btn-primary" onclick="sendInvite()">
+                    <span id="inviteButtonText">📧 Send Invite</span>
+                </button>
             </div>
         </div>
     </div>
@@ -3734,42 +4024,101 @@ app.get('/admin', (c) => {
             }
         }
 
-        function showInviteModal() {
+        async function showInviteModal() {
+            // Load available tiers
+            try {
+                const response = await fetch('/api/admin/tiers', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const tiers = await response.json();
+                    const tierSelect = document.getElementById('inviteTier');
+                    
+                    // Clear existing options except default
+                    tierSelect.innerHTML = '<option value="">No tier assigned (default)</option>';
+                    
+                    // Add tier options
+                    tiers.forEach(tier => {
+                        const limitText = tier.daily_limit === -1 ? 'Unlimited' : tier.daily_limit + ' per day';
+                        const option = document.createElement('option');
+                        option.value = tier.id;
+                        option.textContent = `${tier.name} (${limitText})`;
+                        tierSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load tiers:', error);
+            }
+            
             document.getElementById('inviteModal').style.display = 'block';
         }
 
         function closeInviteModal() {
             document.getElementById('inviteModal').style.display = 'none';
             document.getElementById('inviteEmail').value = '';
+            document.getElementById('inviteTier').value = '';
+            document.getElementById('inviteMessage').value = '';
+            document.getElementById('inviteButtonText').textContent = '📧 Send Invite';
         }
 
         async function sendInvite() {
             const email = document.getElementById('inviteEmail').value;
+            const tierId = document.getElementById('inviteTier').value;
+            const personalMessage = document.getElementById('inviteMessage').value;
+            const buttonText = document.getElementById('inviteButtonText');
+            
             if (!email) {
                 alert('Please enter an email address');
                 return;
             }
 
+            // Show loading state
+            buttonText.textContent = '⏳ Sending...';
+            
             try {
+                const inviteData = { email };
+                
+                // Add tier if selected
+                if (tierId) {
+                    inviteData.tierId = parseInt(tierId);
+                }
+                
+                // Add personal message if provided
+                if (personalMessage.trim()) {
+                    inviteData.personalMessage = personalMessage.trim();
+                }
+
                 const response = await fetch('/api/admin/invite', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
                     },
-                    body: JSON.stringify({ email })
+                    body: JSON.stringify(inviteData)
                 });
 
                 const result = await response.json();
                 if (result.success) {
-                    alert('Invitation sent successfully!');
-                    closeInviteModal();
-                    loadAdminData();
+                    buttonText.textContent = '✅ Sent!';
+                    setTimeout(() => {
+                        alert('✅ Invitation sent successfully!');
+                        closeInviteModal();
+                        loadAdminData();
+                    }, 500);
                 } else {
-                    alert('Error: ' + result.error);
+                    buttonText.textContent = '❌ Failed';
+                    setTimeout(() => {
+                        alert('❌ Error: ' + result.error);
+                        buttonText.textContent = '📧 Send Invite';
+                    }, 1500);
                 }
             } catch (error) {
-                alert('Failed to send invitation: ' + error.message);
+                buttonText.textContent = '❌ Error';
+                setTimeout(() => {
+                    alert('❌ Failed to send invitation: ' + error.message);
+                    buttonText.textContent = '📧 Send Invite';
+                }, 1500);
             }
         }
 
@@ -4772,6 +5121,7 @@ app.get('/admin/tiers', (c) => {
         .form-label { display: block; margin-bottom: 5px; font-weight: 500; color: var(--text-primary); }
         .form-input { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; font-size: 14px; background: var(--card-background); color: var(--text-primary); }
         .form-input:focus { outline: none; border-color: #8B5CF6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1); }
+        .form-help { display: block; margin-top: 5px; font-size: 12px; color: var(--text-secondary); }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); }
         .modal-content { background-color: var(--card-background); margin: 10% auto; padding: 30px; border-radius: 15px; width: 90%; max-width: 500px; }
         .hidden { display: none; }
