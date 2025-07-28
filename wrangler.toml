@@ -1,5 +1,6 @@
 name = "ai-caption-studio"
 compatibility_date = "2024-07-28"
+compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "."
 
 # D1 Database configuration
@@ -10,6 +11,7 @@ database_id = "853b1e69-4fbd-40a9-b35b-2b0a7cb5f367"
 
 [env.production]
 compatibility_date = "2024-07-28"
+compatibility_flags = ["nodejs_compat"]
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -22,5 +24,5 @@ NODE_ENV = "production"
 SMTP_HOST = "smtp.resend.com"
 SMTP_PORT = "587"
 SMTP_USER = "resend"
-SMTP_FROM_EMAIL = "onboarding@resend.dev"
+SMTP_FROM_EMAIL = "noreply@jonsson.io"
 SMTP_FROM_NAME = "AI Caption Studio"
