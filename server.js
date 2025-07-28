@@ -1413,7 +1413,8 @@ app.post('/api/auth/request-login', async (req, res) => {
         res.status(500).json({ 
             error: errorMessage,
             code: error.code,
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: error.message,
+            details: error.stack ? error.stack.split('\n')[0] : 'No additional details'
         });
     }
 });
