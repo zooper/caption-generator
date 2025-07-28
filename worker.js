@@ -927,7 +927,7 @@ D1Database.prototype.getInviteToken = async function(token) {
 D1Database.prototype.useInviteToken = async function(token, userId) {
     const stmt = this.db.prepare(`
         UPDATE invite_tokens 
-        SET used_at = datetime('now'), used_by_user_id = ? 
+        SET used_at = datetime('now'), used_by = ? 
         WHERE token = ?
     `);
     const result = await stmt.bind(userId, token).run();
