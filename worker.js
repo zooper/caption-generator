@@ -434,7 +434,7 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
 });
 
 // Advanced prompt building with EXIF extraction and weather data
-async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative') {
+async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null) {
     console.log('Building prompt from image, base64 length:', base64Image ? base64Image.length : 'null');
     console.log('Include weather:', includeWeather);
     console.log('Caption style:', style);
@@ -554,9 +554,9 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                         }
                         
                         // Fetch weather data if requested and we have GPS coordinates
-                        if (includeWeather) {
+                        if (includeWeather && env) {
                             console.log('Fetching weather data for coordinates:', lat, lon);
-                            const weatherData = await getHistoricalWeather(lat, lon, exifData);
+                            const weatherData = await getHistoricalWeather(lat, lon, exifData, env);
                             if (weatherData) {
                                 context.push('Weather: ' + weatherData);
                                 extractedData.weatherData = weatherData;
@@ -683,23 +683,150 @@ async function reverseGeocode(latitude, longitude) {
 }
 
 // Fetch historical weather data using OpenWeatherMap API
-async function getHistoricalWeather(latitude, longitude, exifData) {
+async function getHistoricalWeather(latitude, longitude, exifData, env) {
     try {
-        // Check if OpenWeatherMap API key is configured in environment variables
-        // Note: In Cloudflare Workers, environment variables are accessed via c.env
-        // This function would need the env context passed to it, or we check for it elsewhere
+        if (!env.OPENWEATHER_API_KEY) {
+            console.log('OpenWeatherMap API key not configured');
+            return null;
+        }
+        
         console.log('Attempting to fetch weather data for coordinates:', latitude, longitude);
         
-        // For now, return a placeholder since we don't have OpenWeatherMap API key configured
-        // TODO: Add OPENWEATHER_API_KEY to environment variables and implement weather fetching
-        // When implemented, this should:
-        // 1. Extract photo date from EXIF data
-        // 2. Use historical weather API for past dates
-        // 3. Use current weather API for recent/current dates
-        // 4. Format weather info as human-readable string
+        // Extract date from EXIF data, default to current time if not available
+        let photoTimestamp = Date.now();
+        let dateSource = 'current_time';
         
-        console.log('Weather API not configured, skipping weather data');
-        return null;
+        // Try multiple date fields in order of preference
+        const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
+        
+        for (const field of dateFields) {
+            if (exifData && exifData[field]) {
+                try {
+                    console.log('Trying to parse ' + field + ':', exifData[field]);
+                    
+                    let dateStr = exifData[field];
+                    let parsedDate;
+                    
+                    if (typeof dateStr === 'string') {
+                        // Standard EXIF format: "2024:01:15 14:30:25"
+                        dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T') + 'Z';
+                        parsedDate = new Date(dateStr);
+                    } else if (dateStr instanceof Date) {
+                        parsedDate = dateStr;
+                    }
+                    
+                    if (parsedDate && !isNaN(parsedDate.getTime())) {
+                        photoTimestamp = parsedDate.getTime();
+                        dateSource = field;
+                        console.log('Successfully parsed ' + field + ':', new Date(photoTimestamp));
+                        break;
+                    }
+                } catch (dateError) {
+                    console.log('Failed to parse ' + field + ':', dateError.message);
+                }
+            }
+        }
+        
+        console.log('Photo timestamp source: ' + dateSource + ', date: ' + new Date(photoTimestamp));
+        
+        // Validate timestamp is reasonable (not in the future, not before 2000)
+        const now = Date.now();
+        const year2000 = new Date('2000-01-01').getTime();
+        
+        if (photoTimestamp > now || photoTimestamp < year2000) {
+            console.log('Photo timestamp seems invalid, using current time:', new Date(photoTimestamp));
+            photoTimestamp = now;
+            dateSource = 'current_time_fallback';
+        }
+        
+        // Convert to Unix timestamp (seconds)
+        const unixTimestamp = Math.floor(photoTimestamp / 1000);
+        
+        // Use current weather for recent photos (within 5 days), historical for older
+        const fiveDaysAgo = Date.now() - (5 * 24 * 60 * 60 * 1000);
+        let weatherUrl;
+        let apiDescription;
+        
+        if (photoTimestamp > fiveDaysAgo) {
+            // Use current weather API for recent photos
+            weatherUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=' + latitude + '&lon=' + longitude + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
+            apiDescription = 'current';
+        } else {
+            // Use historical weather API for older photos
+            weatherUrl = 'https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=' + latitude + '&lon=' + longitude + '&dt=' + unixTimestamp + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
+            apiDescription = 'historical';
+        }
+        
+        console.log('Fetching ' + apiDescription + ' weather data from OpenWeatherMap...');
+        
+        const response = await fetch(weatherUrl, {
+            headers: {
+                'User-Agent': 'AI Caption Studio'
+            }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.log('OpenWeatherMap API error: ' + response.status + ' ' + response.statusText);
+            console.log('Error details:', errorText);
+            
+            // If historical API fails, try current weather as fallback
+            if (apiDescription === 'historical') {
+                console.log('Historical weather API failed, falling back to current weather');
+                const fallbackUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=' + latitude + '&lon=' + longitude + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
+                const fallbackResponse = await fetch(fallbackUrl);
+                
+                if (fallbackResponse.ok) {
+                    const fallbackData = await fallbackResponse.json();
+                    if (fallbackData.main) {
+                        const weatherText = Math.round(fallbackData.main.temp) + '°C, ' + fallbackData.weather[0].description +
+                                           (fallbackData.main.humidity ? ', ' + fallbackData.main.humidity + '% humidity' : '') +
+                                           (fallbackData.wind ? ', ' + Math.round(fallbackData.wind.speed * 3.6) + ' km/h wind' : '') +
+                                           ' (current weather - historical not available)';
+                        console.log('Fallback weather data:', weatherText);
+                        return weatherText;
+                    }
+                }
+            }
+            
+            return null;
+        }
+        
+        const data = await response.json();
+        let weatherInfo;
+        
+        if (apiDescription === 'current') {
+            // Current weather API format
+            if (data.main) {
+                weatherInfo = {
+                    temperature: Math.round(data.main.temp),
+                    description: data.weather[0].description,
+                    humidity: data.main.humidity,
+                    windSpeed: data.wind ? Math.round(data.wind.speed * 3.6) : null // Convert m/s to km/h
+                };
+            }
+        } else {
+            // Historical weather API format
+            if (data.data && data.data.length > 0) {
+                const weather = data.data[0];
+                weatherInfo = {
+                    temperature: Math.round(weather.temp),
+                    description: weather.weather[0].description,
+                    humidity: weather.humidity,
+                    windSpeed: Math.round(weather.wind_speed * 3.6) // Convert m/s to km/h
+                };
+            }
+        }
+        
+        if (weatherInfo) {
+            const weatherText = weatherInfo.temperature + '°C, ' + weatherInfo.description +
+                               (weatherInfo.humidity ? ', ' + weatherInfo.humidity + '% humidity' : '') +
+                               (weatherInfo.windSpeed ? ', ' + weatherInfo.windSpeed + ' km/h wind' : '');
+            
+            console.log('Weather data formatted:', weatherText);
+            return weatherText;
+        }
+        
     } catch (error) {
         console.log('Weather API request failed:', error.message);
     }
@@ -731,21 +858,19 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         }, 429);
     }
     
-    // Build advanced prompt with EXIF extraction and context
+    // Always use advanced prompt building with EXIF extraction and context
     let finalPrompt;
     let extractedData = null;
     
     try {
-        if (!prompt || includeWeather) {
-            // Use advanced prompt building with EXIF extraction
-            const result = await buildPromptFromImageWithExtraction(base64Image, includeWeather, style);
-            finalPrompt = result.prompt;
-            extractedData = result.extractedData;
-        } else {
-            // Still extract data for logging, but use provided prompt
-            const result = await buildPromptFromImageWithExtraction(base64Image, false, style);
-            finalPrompt = prompt;
-            extractedData = result.extractedData;
+        // Always extract EXIF data and build enhanced prompt with weather enabled
+        const result = await buildPromptFromImageWithExtraction(base64Image, true, style, c.env);
+        finalPrompt = result.prompt;
+        extractedData = result.extractedData;
+        
+        // If user provided a custom prompt, we could use it instead, but for now always use enhanced
+        if (prompt && prompt.trim() !== '') {
+            console.log('User provided custom prompt, but using enhanced prompt with EXIF data for better results');
         }
     } catch (extractionError) {
         console.log('EXIF extraction failed, using basic prompt:', extractionError.message);
@@ -952,6 +1077,20 @@ app.get('/', (c) => {
                     </div>
                 </div>
 
+                <div class="advanced-options" style="margin-top: 20px;">
+                    <h3>📍 Enhanced Features</h3>
+                    <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Automatically extracts EXIF data, location, and weather information from your photos</p>
+                    <div style="background: #f0f4ff; padding: 15px; border-radius: 8px; border: 1px solid #d0d7ff;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 20px;">🎯</span>
+                            <div>
+                                <strong>Smart Context Detection</strong>
+                                <div style="font-size: 12px; color: #666;">Camera info, GPS location, photo date & weather data</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <button class="generate-btn" id="generateBtn" disabled>🚀 Generate Caption</button>
             </div>
 
@@ -975,6 +1114,10 @@ app.get('/', (c) => {
                         <h4>♿ Alt Text</h4>
                         <p id="altText"></p>
                         <button class="copy-btn" onclick="copyToClipboard('altText')">📋 Copy Alt Text</button>
+                    </div>
+                    <div class="result-card" id="metadataCard" style="display: none;">
+                        <h4>📊 Photo Metadata</h4>
+                        <div id="metadataContent" style="font-size: 14px; color: #666;"></div>
                     </div>
                 </div>
             </div>
@@ -1161,6 +1304,35 @@ app.get('/', (c) => {
                 document.getElementById('captionText').textContent = captionMatch ? captionMatch[1].trim() : 'No caption generated';
                 document.getElementById('hashtagsText').textContent = hashtagsMatch ? hashtagsMatch[1].trim() : 'No hashtags generated';
                 document.getElementById('altText').textContent = altTextMatch ? altTextMatch[1].trim() : 'No alt text generated';
+
+                // Display extracted metadata if available
+                const metadataCard = document.getElementById('metadataCard');
+                const metadataContent = document.getElementById('metadataContent');
+                let metadataHtml = '';
+                
+                if (data.cameraInfo && (data.cameraInfo.make || data.cameraInfo.model)) {
+                    metadataHtml += '<div><strong>📷 Camera:</strong> ' + (data.cameraInfo.make || '') + ' ' + (data.cameraInfo.model || '') + '</div>';
+                }
+                
+                if (data.locationName) {
+                    metadataHtml += '<div><strong>📍 Location:</strong> ' + data.locationName + '</div>';
+                }
+                
+                if (data.weatherData) {
+                    metadataHtml += '<div><strong>🌤️ Weather:</strong> ' + data.weatherData + '</div>';
+                }
+                
+                if (data.photoDateTime) {
+                    const photoDate = new Date(data.photoDateTime);
+                    metadataHtml += '<div><strong>📅 Photo Date:</strong> ' + photoDate.toLocaleDateString() + ' ' + photoDate.toLocaleTimeString() + '</div>';
+                }
+                
+                if (metadataHtml) {
+                    metadataContent.innerHTML = metadataHtml;
+                    metadataCard.style.display = 'block';
+                } else {
+                    metadataCard.style.display = 'none';
+                }
 
                 document.getElementById('results').classList.remove('hidden');
             } catch (error) {
