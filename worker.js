@@ -4039,7 +4039,7 @@ app.get('/admin', (c) => {
                         const limitText = tier.daily_limit === -1 ? 'Unlimited' : tier.daily_limit + ' per day';
                         const option = document.createElement('option');
                         option.value = tier.id;
-                        option.textContent = `${tier.name} (${limitText})`;
+                        option.textContent = tier.name + ' (' + limitText + ')';
                         tierSelect.appendChild(option);
                     });
                 }
