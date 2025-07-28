@@ -1986,10 +1986,6 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         
         if (exifData) {
             extractedData.exifData = exifData;
-                DateTimeOriginal: exifData.DateTimeOriginal,
-                DateTime: exifData.DateTime,
-                DateTimeDigitized: exifData.DateTimeDigitized
-            });
             
             // Extract photo date/time
             const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
