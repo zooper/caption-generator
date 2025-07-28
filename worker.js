@@ -45,6 +45,14 @@ class D1Database {
         return await stmt.bind(email).first();
     }
 
+    async getUserById(userId) {
+        const stmt = this.db.prepare(`
+            SELECT * FROM users 
+            WHERE id = ? AND is_active = 1
+        `);
+        return await stmt.bind(userId).first();
+    }
+
     async createLoginToken(email, token, expiresAt, ipAddress, userAgent) {
         const stmt = this.db.prepare(`
             INSERT INTO login_tokens (email, token, expires_at, ip_address, user_agent)
