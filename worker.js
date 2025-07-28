@@ -1290,12 +1290,19 @@ app.post('/api/auth/accept-invite', async (c) => {
         // Mark the invite token as used
         console.log('Marking invite as used with user ID:', user.id);
         await database.useInviteToken(inviteToken, user.id);
+        console.log('Invite token marked as used successfully');
         
         // Create a login session for the new user
         const sessionId = crypto.randomUUID();
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
         
-        await database.createSession(user.id, sessionId, expiresAt);
+        // Get client info for session
+        const ipAddress = c.req.header('cf-connecting-ip') || 'unknown';
+        const userAgent = c.req.header('user-agent') || '';
+        
+        console.log('Creating session with:', { sessionId, userId: user.id, expiresAt, ipAddress, userAgent });
+        await database.createSession(sessionId, user.id, expiresAt, ipAddress, userAgent);
+        console.log('Session created successfully');
         
         const token = await createSessionJWT({
             userId: user.id,
