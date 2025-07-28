@@ -98,8 +98,11 @@ class D1Database {
 
 const app = new Hono();
 
-// Enable CORS
-app.use('/*', cors());
+// Enable CORS with credentials
+app.use('/*', cors({
+    origin: true,
+    credentials: true
+}));
 
 // JWT Configuration
 const JWT_SECRET = 'default-secret-change-this'; // In production, use environment variable
@@ -350,10 +353,10 @@ app.get('/auth/verify', async (c) => {
         // Create JWT token
         const jwtToken = jwt.sign({ sessionId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
-        // Set secure cookie
+        // Set secure cookie (httpOnly=false so JavaScript can access it for backup)
         setCookie(c, 'auth_token', jwtToken, {
-            httpOnly: true,
-            secure: true,
+            httpOnly: false,
+            secure: false, // Allow on HTTP for development/testing
             maxAge: 7 * 24 * 60 * 60, // 7 days
             sameSite: 'Lax'
         });
@@ -1132,10 +1135,16 @@ app.get('/', (c) => {
         // Authentication functions
         async function checkAuth() {
             try {
+                // Try cookie-based auth first, then localStorage fallback
+                let authHeader = {};
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    authHeader['Authorization'] = 'Bearer ' + token;
+                }
+                
                 const response = await fetch('/api/auth/me', {
-                    headers: {
-                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
-                    }
+                    headers: authHeader,
+                    credentials: 'include' // Include cookies
                 });
                 
                 if (response.ok) {
@@ -1276,12 +1285,16 @@ app.get('/', (c) => {
             generateBtn.disabled = true;
 
             try {
+                let headers = { 'Content-Type': 'application/json' };
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    headers['Authorization'] = 'Bearer ' + token;
+                }
+                
                 const response = await fetch('/api/generate-caption', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
-                    },
+                    headers: headers,
+                    credentials: 'include',
                     body: JSON.stringify({
                         base64Image: uploadedImage,
                         style: selectedStyle
