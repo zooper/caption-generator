@@ -761,7 +761,7 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         
         const selectedStyle = styleInstructions[style] || styleInstructions.creative;
         
-        finalPrompt = prompt || 'Analyze this image for Instagram posting. Generate:\n\n1. A ' + selectedStyle + ' caption that:\n   - Captures the main subject/scene\n   - Is 1-3 sentences\n   - Includes relevant emojis\n   - Feels authentic and natural\n\n2. 10-15 hashtags that:\n   - Mix popular and niche tags\n   - Are relevant to image content\n   - Range from broad to specific\n\n3. Alt text for accessibility (1-2 sentences):\n   - Describe what\'s actually visible in the image\n   - Include important visual details for screen readers\n\nFormat your response as:\nCAPTION: [your caption here]\nHASHTAGS: [hashtags separated by spaces]\nALT_TEXT: [descriptive alt text for accessibility]';
+        finalPrompt = prompt || 'Analyze this image for Instagram posting. Generate:\\n\\n1. A ' + selectedStyle + ' caption that:\\n   - Captures the main subject/scene\\n   - Is 1-3 sentences\\n   - Includes relevant emojis\\n   - Feels authentic and natural\\n\\n2. 10-15 hashtags that:\\n   - Mix popular and niche tags\\n   - Are relevant to image content\\n   - Range from broad to specific\\n\\n3. Alt text for accessibility (1-2 sentences):\\n   - Describe what is actually visible in the image\\n   - Include important visual details for screen readers\\n\\nFormat your response as:\\nCAPTION: [your caption here]\\nHASHTAGS: [hashtags separated by spaces]\\nALT_TEXT: [descriptive alt text for accessibility]';
     }
 
     // Call OpenAI API
