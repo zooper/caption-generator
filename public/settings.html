@@ -97,6 +97,52 @@
         .text-sm { font-size: 12px; }
         .text-muted { color: var(--text-secondary); }
         
+        /* Theme Cards */
+        .theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px; }
+        .theme-card { 
+            border: 3px solid var(--border-color); 
+            border-radius: 12px; 
+            padding: 20px; 
+            cursor: pointer; 
+            transition: all 0.3s ease;
+            background: var(--card-background);
+        }
+        .theme-card:hover { 
+            transform: translateY(-2px); 
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+        .theme-card.active { 
+            border-color: var(--accent-color); 
+            background: rgba(64, 93, 230, 0.05);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(64, 93, 230, 0.2);
+        }
+        .theme-preview { 
+            height: 40px; 
+            border-radius: 8px; 
+            margin-bottom: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+        .theme-preview.default { background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); }
+        .theme-preview.dark { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); }
+        .theme-preview.purple-creative { background: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%); }
+        .theme-preview.ocean-blue { background: linear-gradient(135deg, #0EA5E9 0%, #3B82F6 100%); }
+        .theme-name { 
+            font-weight: 600; 
+            font-size: 16px; 
+            color: var(--text-primary);
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .theme-description { 
+            font-size: 12px; 
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+        
         /* Mobile responsiveness */
         @media (max-width: 768px) {
             .container { padding: 15px; }
@@ -173,14 +219,30 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <label class="form-label" for="themeSelector">Theme</label>
-                            <select id="themeSelector" class="form-select" onchange="changeTheme()">
-                                <option value="default">🎨 Default</option>
-                                <option value="dark">🌙 Dark</option>
-                                <option value="purple-creative">💜 Purple</option>
-                                <option value="ocean-blue">🌊 Ocean</option>
-                            </select>
+                            <label class="form-label">🎨 Theme</label>
                             <p class="text-sm text-muted">Choose your preferred color theme</p>
+                            <div class="theme-grid">
+                                <div class="theme-card" data-theme="default" onclick="selectTheme('default')">
+                                    <div class="theme-preview default"></div>
+                                    <div class="theme-name">🎨 Default</div>
+                                    <div class="theme-description">Classic blue and red gradient with clean whites</div>
+                                </div>
+                                <div class="theme-card" data-theme="dark" onclick="selectTheme('dark')">
+                                    <div class="theme-preview dark"></div>
+                                    <div class="theme-name">🌙 Dark</div>
+                                    <div class="theme-description">Dark mode with deep blues and grays</div>
+                                </div>
+                                <div class="theme-card" data-theme="purple-creative" onclick="selectTheme('purple-creative')">
+                                    <div class="theme-preview purple-creative"></div>
+                                    <div class="theme-name">💜 Purple</div>
+                                    <div class="theme-description">Creative purple and pink gradient theme</div>
+                                </div>
+                                <div class="theme-card" data-theme="ocean-blue" onclick="selectTheme('ocean-blue')">
+                                    <div class="theme-preview ocean-blue"></div>
+                                    <div class="theme-name">🌊 Ocean</div>
+                                    <div class="theme-description">Cool ocean blues and sky tones</div>
+                                </div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="autoWeather">
@@ -630,27 +692,46 @@
         }
 
         // Theme changing functionality
-        function changeTheme() {
-            const themeSelector = document.getElementById('themeSelector');
-            const selectedTheme = themeSelector.value;
+        function selectTheme(themeName) {
+            // Update localStorage
+            localStorage.setItem('selectedTheme', themeName);
             
-            localStorage.setItem('selectedTheme', selectedTheme);
-            
-            if (selectedTheme === 'default') {
+            // Apply theme to body
+            if (themeName === 'default') {
                 document.body.removeAttribute('data-theme');
             } else {
-                document.body.setAttribute('data-theme', selectedTheme);
+                document.body.setAttribute('data-theme', themeName);
+            }
+            
+            // Update visual selection
+            updateThemeSelection(themeName);
+        }
+        
+        function updateThemeSelection(selectedTheme) {
+            // Remove active class from all theme cards
+            document.querySelectorAll('.theme-card').forEach(card => {
+                card.classList.remove('active');
+            });
+            
+            // Add active class to selected theme card
+            const selectedCard = document.querySelector(`[data-theme="${selectedTheme}"]`);
+            if (selectedCard) {
+                selectedCard.classList.add('active');
             }
         }
 
         function loadSavedTheme() {
             const savedTheme = localStorage.getItem('selectedTheme') || 'default';
-            const themeSelector = document.getElementById('themeSelector');
             
-            if (themeSelector) {
-                themeSelector.value = savedTheme;
-                changeTheme();
+            // Apply the theme
+            if (savedTheme === 'default') {
+                document.body.removeAttribute('data-theme');
+            } else {
+                document.body.setAttribute('data-theme', savedTheme);
             }
+            
+            // Update visual selection
+            updateThemeSelection(savedTheme);
         }
 
         document.addEventListener('DOMContentLoaded', function() {
