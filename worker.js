@@ -598,9 +598,14 @@ class D1Database {
             const usageStmt = this.db.prepare('DELETE FROM daily_usage WHERE user_id = ?');
             await usageStmt.bind(userId).run();
             
-            // Mark any invites sent by this user as expired (don't delete to preserve audit trail)
-            const invitesStmt = this.db.prepare('UPDATE invite_tokens SET expires_at = datetime("now", "-1 day") WHERE invited_by_user_id = ?');
-            await invitesStmt.bind(userId).run();
+            // Delete invite tokens related to this user
+            // Delete invites sent by this user
+            const invitesSentStmt = this.db.prepare('DELETE FROM invite_tokens WHERE invited_by_user_id = ?');
+            await invitesSentStmt.bind(userId).run();
+            
+            // Delete invites used by this user  
+            const invitesUsedStmt = this.db.prepare('DELETE FROM invite_tokens WHERE used_by_user_id = ?');
+            await invitesUsedStmt.bind(userId).run();
             
             // Finally delete the user record
             const userStmt = this.db.prepare('DELETE FROM users WHERE id = ?');
