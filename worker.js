@@ -5066,18 +5066,30 @@ app.get('/admin/users', (c) => {
     <script>
         async function checkAdminAuth() {
             try {
+                const token = localStorage.getItem('auth_token');
+                console.log('Admin auth check - Token exists:', !!token);
+                
                 const response = await fetch('/api/auth/me', {
-                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
+                    headers: { 'Authorization': 'Bearer ' + token },
                     credentials: 'include'
                 });
                 
+                console.log('Admin auth check - Response status:', response.status);
+                
                 if (response.ok) {
                     const user = await response.json();
+                    console.log('Admin auth check - User data:', user);
+                    console.log('Admin auth check - Is admin:', user.isAdmin);
+                    
                     if (user.isAdmin) {
                         document.getElementById('loginRequired').classList.add('hidden');
                         document.getElementById('adminContent').classList.remove('hidden');
                         loadUsers();
+                    } else {
+                        console.log('User is not an admin');
                     }
+                } else {
+                    console.log('Auth response not ok:', response.status, response.statusText);
                 }
             } catch (error) {
                 console.error('Auth check failed:', error);
