@@ -5250,12 +5250,20 @@ app.get('/admin/users', (c) => {
                     tbody.innerHTML = users.map(user => 
                         '<tr>' +
                         '<td>' + user.email + '</td>' +
-                        '<td>' + (user.is_admin ? 'Admin' : 'User') + '</td>' +
-                        '<td>-</td>' +
-                        '<td>' + (user.usage_today || 0) + '</td>' +
-                        '<td>' + (user.is_active ? 'Active' : 'Inactive') + '</td>' +
+                        '<td><span class="badge ' + (user.is_admin ? 'badge-admin">🛠️ Admin' : 'badge-user">👤 User') + '</span></td>' +
+                        '<td>' + createTierDropdown(user) + '</td>' +
+                        '<td>' + (user.usage_today || 0) + '/' + (user.daily_limit === -1 ? '∞' : user.daily_limit || 0) + '</td>' +
+                        '<td><span class="badge ' + (user.is_active ? 'badge-active">✅ Active' : 'badge-inactive">❌ Inactive') + '</span></td>' +
                         '<td>' + new Date(user.created_at).toLocaleDateString() + '</td>' +
-                        '<td><button class="btn btn-danger" onclick="deleteUser(' + user.id + ', &quot;' + user.email + '&quot;)">🗑️ Delete</button></td>' +
+                        '<td>' +
+                        '<div class="flex gap-2">' +
+                        (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
+                        (user.is_active ? 
+                            '<button class="btn btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate</button>' : 
+                            '<button class="btn btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate</button>') +
+                        '<button class="btn btn-danger" onclick="deleteUser(' + user.id + ', &quot;' + user.email + '&quot;)">🗑️ Delete</button>' +
+                        '</div>' +
+                        '</td>' +
                         '</tr>'
                     ).join('');
                 } else {
@@ -5294,14 +5302,13 @@ app.get('/admin/users', (c) => {
                 
                 const result = await response.json();
                 if (result.success) {
-                    console.log('✅ User tier updated successfully');
-                    // Optionally show a brief success indicator
+                    showNotification('✅ User tier updated successfully', 'success');
                 } else {
-                    alert('❌ Error: ' + result.error);
+                    showNotification('❌ Error: ' + result.error, 'error');
                     loadUsers(); // Reload to reset the dropdown
                 }
             } catch (error) {
-                alert('❌ Failed to update tier: ' + error.message);
+                showNotification('❌ Failed to update tier: ' + error.message, 'error');
                 loadUsers(); // Reload to reset the dropdown
             }
         }
@@ -5317,13 +5324,13 @@ app.get('/admin/users', (c) => {
                 
                 const result = await response.json();
                 if (result.success) {
-                    alert('✅ User promoted to admin successfully!');
+                    showNotification('✅ User promoted to admin successfully!', 'success');
                     loadUsers();
                 } else {
-                    alert('❌ Error: ' + result.error);
+                    showNotification('❌ Error: ' + result.error, 'error');
                 }
             } catch (error) {
-                alert('❌ Failed to promote user: ' + error.message);
+                showNotification('❌ Failed to promote user: ' + error.message, 'error');
             }
         }
 
@@ -5336,13 +5343,13 @@ app.get('/admin/users', (c) => {
                 
                 const result = await response.json();
                 if (result.success) {
-                    alert('✅ User status updated successfully!');
+                    showNotification('✅ User status updated successfully!', 'success');
                     loadUsers();
                 } else {
-                    alert('❌ Error: ' + result.error);
+                    showNotification('❌ Error: ' + result.error, 'error');
                 }
             } catch (error) {
-                alert('❌ Failed to update user: ' + error.message);
+                showNotification('❌ Failed to update user: ' + error.message, 'error');
             }
         }
 
