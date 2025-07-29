@@ -5210,17 +5210,14 @@ app.get('/admin/users', (c) => {
 
         async function deleteUser(userId, userEmail) {
             // Show confirmation dialog
-            const confirmMessage = `⚠️ WARNING: This will permanently delete the user "${userEmail}" and ALL their data including:
-
-• User account and profile
-• All caption generation history
-• Usage statistics
-• Settings and preferences
-• Social media connections
-
-This action CANNOT be undone.
-
-Are you absolutely sure you want to delete this user?`;
+            const confirmMessage = "WARNING: This will permanently delete the user \"" + userEmail + "\" and ALL their data including:\n\n" +
+                "- User account and profile\n" +
+                "- All caption generation history\n" +
+                "- Usage statistics\n" +
+                "- Settings and preferences\n" +
+                "- Social media connections\n\n" +
+                "This action CANNOT be undone.\n\n" +
+                "Are you absolutely sure you want to delete this user?";
             
             if (!confirm(confirmMessage)) {
                 return;
@@ -5229,7 +5226,7 @@ Are you absolutely sure you want to delete this user?`;
             // Second confirmation for extra safety
             const finalConfirm = prompt('To confirm deletion, please type "DELETE" (all caps):');
             if (finalConfirm !== 'DELETE') {
-                alert('❌ Deletion cancelled - confirmation text did not match');
+                alert('Deletion cancelled - confirmation text did not match');
                 return;
             }
             
