@@ -298,7 +298,7 @@ class CaptionGenerator {
         try {
             // Using a free geocoding service (Nominatim from OpenStreetMap)
             const response = await fetch(
-                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1&_=${Date.now()}`,
                 {
                     headers: {
                         'User-Agent': 'AI Caption Studio'
@@ -310,13 +310,32 @@ class CaptionGenerator {
                 const data = await response.json();
                 
                 if (data && data.address) {
-                    // Build a readable location string
                     const parts = [];
+                    
+                    // Add building/house number and street
+                    if (data.address.house_number && data.address.road) {
+                        parts.push(data.address.house_number + ' ' + data.address.road);
+                    } else if (data.address.road) {
+                        parts.push(data.address.road);
+                    }
+                    
+                    // Add neighbourhood/suburb/district
+                    if (data.address.neighbourhood) parts.push(data.address.neighbourhood);
+                    else if (data.address.suburb) parts.push(data.address.suburb);
+                    else if (data.address.quarter) parts.push(data.address.quarter);
+                    else if (data.address.district) parts.push(data.address.district);
+                    
+                    // Add city/town/village
                     if (data.address.city) parts.push(data.address.city);
                     else if (data.address.town) parts.push(data.address.town);
                     else if (data.address.village) parts.push(data.address.village);
+                    else if (data.address.municipality) parts.push(data.address.municipality);
                     
+                    // Add state/province
                     if (data.address.state) parts.push(data.address.state);
+                    else if (data.address.province) parts.push(data.address.province);
+                    
+                    // Add country
                     if (data.address.country) parts.push(data.address.country);
                     
                     return parts.join(', ') || data.display_name;
