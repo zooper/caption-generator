@@ -3044,6 +3044,7 @@ app.get('/', (c) => {
             --border-color: #e1e5e9;
             --shadow-color: rgba(0, 0, 0, 0.1);
             --hover-shadow: rgba(64, 93, 230, 0.3);
+            --success-color: #10b981;
         }
         
         [data-theme="dark"] {
@@ -3089,32 +3090,248 @@ app.get('/', (c) => {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--card-background); color: var(--text-primary); transition: all 0.3s ease; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .header { text-align: center; margin-bottom: 40px; position: relative; }
-        .header h1 { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; font-size: 3em; margin-bottom: 10px; }
-        .auth-section { position: absolute; top: 0; right: 0; padding: 20px; }
+        .header { 
+            background: var(--card-background); 
+            border-radius: 15px; 
+            padding: 20px; 
+            margin-bottom: 40px; 
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .header-title {
+            flex: 1;
+            text-align: left;
+        }
+        .header h1 { 
+            background: var(--primary-gradient); 
+            -webkit-background-clip: text; 
+            -webkit-text-fill-color: transparent; 
+            background-clip: text; 
+            font-size: 2.5em; 
+            margin-bottom: 8px;
+            line-height: 1.1;
+        }
+        .header-subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1em;
+            margin: 0;
+        }
+        .auth-section { 
+            flex-shrink: 0;
+            min-width: 200px;
+        }
         .auth-form { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); min-width: 300px; }
         .auth-input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
-        .auth-btn { width: 100%; padding: 10px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .auth-btn { 
+            width: 100%; 
+            padding: 10px; 
+            background: var(--primary-gradient); 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            transition: all 0.2s ease;
+        }
+        .auth-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(64, 93, 230, 0.3);
+        }
         .user-info { text-align: right; }
+        .user-welcome {
+            color: var(--text-primary);
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+        .user-controls {
+            display: flex; 
+            flex-wrap: wrap;
+            gap: 8px; 
+            justify-content: flex-end;
+            align-items: center;
+        }
+        .control-btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .control-btn.primary {
+            background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            color: white;
+        }
+        .control-btn.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(64, 93, 230, 0.3);
+        }
+        .control-btn.secondary {
+            background: var(--card-background);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+        .control-btn.secondary:hover {
+            background: var(--text-secondary);
+            color: var(--card-background);
+            transform: translateY(-1px);
+        }
+        .theme-selector {
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--card-background);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 13px;
+        }
+        
+        /* Mobile responsive design */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 15px;
+            }
+            .header-title {
+                text-align: center;
+            }
+            .header h1 {
+                font-size: 2em;
+            }
+            .auth-section {
+                min-width: auto;
+                align-self: stretch;
+            }
+            .user-info {
+                text-align: center;
+            }
+            .user-controls {
+                justify-content: center;
+                gap: 6px;
+            }
+            .control-btn {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .header {
+                padding: 15px;
+            }
+            .header h1 {
+                font-size: 1.8em;
+            }
+            .header-subtitle {
+                font-size: 1em;
+            }
+            .user-controls {
+                flex-direction: column;
+                gap: 8px;
+            }
+            .control-btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
         .login-section { text-align: center; margin: 40px 0; }
-        .login-form { max-width: 400px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .login-form { 
+            max-width: 400px; 
+            margin: 0 auto; 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+        }
         .main-content { display: none; grid-template-columns: 1fr 1fr; gap: 40px; }
-        .upload-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .upload-section { 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+        }
         .upload-area { border: 3px dashed #e0e0e0; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
         .upload-area:hover { border-color: #405de6; background: #f8f9ff; }
         .upload-area.dragover { border-color: #405de6; background: #f0f4ff; }
         .preview-image { max-width: 100%; max-height: 300px; border-radius: 8px; }
         .style-options { margin-top: 30px; }
         .style-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
-        .style-btn { padding: 12px; border: 2px solid #e0e0e0; background: white; border-radius: 8px; cursor: pointer; transition: all 0.3s; }
-        .style-btn:hover { border-color: #405de6; }
-        .style-btn.active { border-color: #405de6; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; }
-        .results-section { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        .generate-btn { width: 100%; padding: 15px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 20px; }
+        .style-btn { 
+            padding: 12px; 
+            border: 2px solid var(--border-color); 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            border-radius: 8px; 
+            cursor: pointer; 
+            transition: all 0.3s; 
+        }
+        .style-btn:hover { 
+            border-color: var(--accent-color); 
+            background: var(--text-secondary);
+            color: var(--card-background);
+        }
+        .style-btn.active { 
+            border-color: var(--accent-color); 
+            background: var(--primary-gradient); 
+            color: white; 
+        }
+        .results-section { 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+        }
+        .generate-btn { 
+            width: 100%; 
+            padding: 15px; 
+            background: var(--primary-gradient); 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            margin-top: 20px; 
+            transition: all 0.2s ease;
+        }
+        .generate-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(64, 93, 230, 0.3);
+        }
         .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .loading { display: none; text-align: center; padding: 20px; }
-        .result-card { margin-top: 20px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; }
-        .copy-btn { margin-top: 10px; padding: 8px 16px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+        .result-card { 
+            margin-top: 20px; 
+            padding: 20px; 
+            border: 1px solid var(--border-color); 
+            border-radius: 8px; 
+            background: var(--card-background);
+            color: var(--text-primary);
+        }
+        .copy-btn { 
+            margin-top: 10px; 
+            padding: 8px 16px; 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            border: 1px solid var(--border-color); 
+            border-radius: 4px; 
+            cursor: pointer; 
+            transition: all 0.2s ease;
+        }
+        .copy-btn:hover {
+            background: var(--text-secondary);
+            color: var(--card-background);
+        }
         .social-preview { margin-bottom: 20px; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; }
         .social-preview-header { padding: 15px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; font-weight: 600; display: flex; align-items: center; gap: 10px; }
         .social-preview-content { padding: 15px; }
@@ -3124,34 +3341,85 @@ app.get('/', (c) => {
         .preview-hashtags { color: #0077b5; font-size: 0.9em; margin-top: 10px; }
         .preview-alt { color: #666; font-size: 0.85em; font-style: italic; margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; }
         .preview-actions { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
-        .post-btn { padding: 8px 16px; background: #6364ff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
-        .post-btn:hover { background: #5a5bd6; }
-        .post-btn:disabled { background: #ccc; cursor: not-allowed; }
+        .post-btn { 
+            padding: 8px 16px; 
+            background: var(--primary-gradient); 
+            color: white; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 14px; 
+            font-weight: 500; 
+            transition: all 0.2s ease;
+        }
+        .post-btn:hover:not(:disabled) { 
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(64, 93, 230, 0.3);
+        }
+        .post-btn:disabled { 
+            background: var(--text-secondary); 
+            cursor: not-allowed; 
+            opacity: 0.6;
+        }
         .hidden { display: none; }
-        @media (max-width: 768px) { .main-content { grid-template-columns: 1fr; } .main-content.show { display: grid; } }
+        /* Enhanced mobile responsiveness */
+        @media (max-width: 768px) { 
+            .container { padding: 15px; }
+            .main-content { 
+                grid-template-columns: 1fr; 
+                gap: 20px;
+            } 
+            .main-content.show { display: grid; }
+            .upload-section, .results-section { 
+                padding: 20px; 
+            }
+            .login-form {
+                padding: 20px;
+                margin: 0 10px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container { padding: 10px; }
+            .upload-section, .results-section { 
+                padding: 15px; 
+            }
+            .style-btn {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+            .generate-btn {
+                font-size: 14px;
+                padding: 12px 20px;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <div class="auth-section">
-                <div id="authStatus" class="user-info hidden">
-                    <p>Welcome, <span id="userEmail"></span>!</p>
-                    <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center;">
-                        <select id="themeSelector" onchange="changeTheme()" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                            <option value="default">🎨 Default</option>
-                            <option value="dark">🌙 Dark</option>
-                            <option value="purple-creative">💜 Purple</option>
-                            <option value="ocean-blue">🌊 Ocean</option>
-                        </select>
-                        <button id="adminButton" onclick="window.location.href='/admin'" style="padding: 5px 10px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; display: none;">🛠️ Admin</button>
-                        <button onclick="window.location.href='/settings'" style="padding: 5px 10px; background: #e2e8f0; color: #475569; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">⚙️ Settings</button>
-                        <button onclick="logout()" style="padding: 5px 10px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;">Logout</button>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>🎨 AI Caption Studio</h1>
+                    <p class="header-subtitle">AI-powered captions, hashtags, and alt text for any social platform</p>
+                </div>
+                <div class="auth-section">
+                    <div id="authStatus" class="user-info hidden">
+                        <div class="user-welcome">Welcome, <span id="userEmail"></span>!</div>
+                        <div class="user-controls">
+                            <select id="themeSelector" onchange="changeTheme()" class="theme-selector">
+                                <option value="default">🎨 Default</option>
+                                <option value="dark">🌙 Dark</option>
+                                <option value="purple-creative">💜 Purple</option>
+                                <option value="ocean-blue">🌊 Ocean</option>
+                            </select>
+                            <button id="adminButton" onclick="window.location.href='/admin'" class="control-btn primary" style="display: none;">🛠️ Admin</button>
+                            <button onclick="window.location.href='/settings'" class="control-btn secondary">⚙️ Settings</button>
+                            <button onclick="logout()" class="control-btn secondary">Logout</button>
+                        </div>
                     </div>
                 </div>
             </div>
-            <h1>🎨 AI Caption Studio</h1>
-            <p>AI-powered captions, hashtags, and alt text for any social platform</p>
         </header>
 
         <!-- Login Section (shown when not authenticated) -->
@@ -3242,17 +3510,17 @@ app.get('/', (c) => {
                     <div class="result-card">
                         <h4>📝 Caption</h4>
                         <p id="captionText"></p>
-                        <button class="copy-btn" onclick="copyToClipboard('captionText')">📋 Copy Caption</button>
+                        <button class="copy-btn" onclick="copyToClipboard('captionText', this)">📋 Copy Caption</button>
                     </div>
                     <div class="result-card">
                         <h4>🏷️ Hashtags</h4>
                         <p id="hashtagsText"></p>
-                        <button class="copy-btn" onclick="copyToClipboard('hashtagsText')">📋 Copy Hashtags</button>
+                        <button class="copy-btn" onclick="copyToClipboard('hashtagsText', this)">📋 Copy Hashtags</button>
                     </div>
                     <div class="result-card">
                         <h4>♿ Alt Text</h4>
                         <p id="altText"></p>
-                        <button class="copy-btn" onclick="copyToClipboard('altText')">📋 Copy Alt Text</button>
+                        <button class="copy-btn" onclick="copyToClipboard('altText', this)">📋 Copy Alt Text</button>
                     </div>
                     <div class="result-card" id="metadataCard" style="display: none;">
                         <h4>📊 Photo Metadata</h4>
@@ -3709,16 +3977,6 @@ app.get('/', (c) => {
             }
         });
 
-            function copyToClipboard(elementId) {
-            const text = document.getElementById(elementId).textContent;
-            navigator.clipboard.writeText(text).then(() => {
-                // Show feedback
-                const btn = event.target;
-                const originalText = btn.textContent;
-                btn.textContent = '✅ Copied!';
-                setTimeout(() => btn.textContent = originalText, 2000);
-            });
-        }
 
             async function postToMastodon() {
             try {
@@ -3854,6 +4112,70 @@ app.get('/', (c) => {
             }
             
         }); // End of DOMContentLoaded callback
+        
+        // Global functions that need to be accessible from onclick handlers
+        function copyToClipboard(elementId, buttonElement) {
+            const text = document.getElementById(elementId).textContent;
+            const btn = buttonElement || event.target;
+            const originalText = btn.textContent;
+            
+            // Try modern clipboard API first
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => {
+                    // Show success feedback
+                    btn.textContent = '✅ Copied!';
+                    btn.style.background = 'var(--success-color)';
+                    btn.style.color = 'white';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '';
+                        btn.style.color = '';
+                    }, 2000);
+                }).catch((err) => {
+                    console.error('Failed to copy: ', err);
+                    fallbackCopyToClipboard(text, btn, originalText);
+                });
+            } else {
+                // Fallback for older browsers or non-HTTPS
+                fallbackCopyToClipboard(text, btn, originalText);
+            }
+        }
+        
+        function fallbackCopyToClipboard(text, btn, originalText) {
+            // Create a temporary textarea element
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            
+            try {
+                textArea.focus();
+                textArea.select();
+                const successful = document.execCommand('copy');
+                
+                if (successful) {
+                    btn.textContent = '✅ Copied!';
+                    btn.style.background = 'var(--success-color)';
+                    btn.style.color = 'white';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '';
+                        btn.style.color = '';
+                    }, 2000);
+                } else {
+                    btn.textContent = '❌ Copy failed';
+                    setTimeout(() => btn.textContent = originalText, 2000);
+                }
+            } catch (err) {
+                console.error('Fallback copy failed: ', err);
+                btn.textContent = '❌ Copy failed';
+                setTimeout(() => btn.textContent = originalText, 2000);
+            } finally {
+                document.body.removeChild(textArea);
+            }
+        }
     </script>
 </body>
 </html>
@@ -4074,8 +4396,15 @@ app.get('/admin', (c) => {
         .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
         .btn-primary { background: var(--primary-gradient); color: white; }
         .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(139, 92, 246, 0.4); }
-        .btn-secondary { background: #f1f5f9; color: #475569; }
-        .btn-secondary:hover { background: #e2e8f0; }
+        .btn-secondary { 
+            background: var(--card-background); 
+            color: var(--text-primary); 
+            border: 1px solid var(--border-color);
+        }
+        .btn-secondary:hover { 
+            background: var(--text-secondary); 
+            color: var(--card-background);
+        }
         .btn-danger { background: #ef4444; color: white; }
         .btn-danger:hover { background: #dc2626; }
         .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
@@ -4094,6 +4423,117 @@ app.get('/admin', (c) => {
         .items-center { align-items: center; }
         .gap-3 { gap: 12px; }
         .mb-4 { margin-bottom: 16px; }
+        
+        /* Mobile responsiveness for admin sections */
+        @media (max-width: 768px) {
+            .container { padding: 15px; }
+            .admin-header { 
+                flex-direction: column; 
+                gap: 15px; 
+                padding: 20px;
+                text-align: center;
+            }
+            .nav-links { 
+                flex-direction: column; 
+                gap: 10px; 
+                width: 100%;
+            }
+            .nav-link { 
+                width: 100%; 
+                text-align: center; 
+                font-size: 14px;
+                padding: 12px 20px;
+            }
+            .admin-section { 
+                padding: 20px; 
+                margin-bottom: 20px; 
+            }
+            .section-title { 
+                font-size: 1.3rem; 
+                margin-bottom: 15px; 
+            }
+            .admin-grid { 
+                grid-template-columns: 1fr; 
+                gap: 15px; 
+            }
+            .stat-card { 
+                padding: 20px; 
+            }
+            
+            /* Mobile-friendly table wrapper */
+            .table-wrapper {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                border-radius: 8px;
+                border: 1px solid var(--border-color);
+            }
+            .table {
+                min-width: 600px; /* Ensure table doesn't get too cramped */
+                margin-top: 0;
+            }
+            .table th, .table td { 
+                padding: 8px 10px;
+                font-size: 14px;
+                white-space: nowrap;
+            }
+            
+            /* Stack flex containers on mobile */
+            .flex.justify-between {
+                flex-direction: column;
+                gap: 15px;
+                align-items: stretch;
+            }
+            .flex.gap-2, .flex.gap-3 {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            
+            /* Button adjustments */
+            .btn {
+                font-size: 14px;
+                padding: 10px 15px;
+                min-width: 100px;
+            }
+            
+            /* Modal adjustments */
+            .modal-content {
+                width: 95%;
+                margin: 5% auto;
+                padding: 20px;
+            }
+            
+            /* Form improvements */
+            .form-input, .form-select {
+                font-size: 16px; /* Prevents zoom on iOS */
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container { padding: 10px; }
+            .admin-section { 
+                padding: 15px; 
+            }
+            .section-title { 
+                font-size: 1.2rem; 
+            }
+            .nav-link {
+                font-size: 13px;
+                padding: 10px 15px;
+            }
+            .table th, .table td { 
+                padding: 6px 8px;
+                font-size: 13px;
+            }
+            .btn {
+                font-size: 13px;
+                padding: 8px 12px;
+                min-width: 80px;
+            }
+            .flex.gap-2, .flex.gap-3 {
+                flex-direction: column;
+                gap: 8px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -4158,38 +4598,42 @@ app.get('/admin', (c) => {
             <!-- Recent Users -->
             <div class="admin-section">
                 <div class="section-title">👥 Recent Users</div>
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Email</th>
-                            <th>Tier</th>
-                            <th>Usage Today</th>
-                            <th>Joined</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="recentUsers">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Tier</th>
+                                <th>Usage Today</th>
+                                <th>Joined</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentUsers">
                         <tr><td colspan="5">Loading...</td></tr>
                     </tbody>
                 </table>
+                </div>
             </div>
 
             <!-- Recent Invites -->
             <div class="admin-section">
                 <div class="section-title">📧 Recent Invites</div>
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Email</th>
-                            <th>Invited By</th>
-                            <th>Created</th>
-                            <th>Expires</th>
-                        </tr>
-                    </thead>
-                    <tbody id="recentInvites">
-                        <tr><td colspan="4">Loading...</td></tr>
-                    </tbody>
-                </table>
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Invited By</th>
+                                <th>Created</th>
+                                <th>Expires</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentInvites">
+                            <tr><td colspan="4">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- System Settings -->
@@ -4643,6 +5087,7 @@ app.get('/settings', (c) => {
             --text-primary: #333;
             --text-secondary: #666;
             --border-color: #e1e5e9;
+            --accent-color: #405de6;
             --success-color: #10b981;
             --warning-color: #f59e0b;
             --error-color: #ef4444;
@@ -4655,6 +5100,27 @@ app.get('/settings', (c) => {
             --text-primary: #ffffff;
             --text-secondary: #b0b0b0;
             --border-color: #404040;
+            --accent-color: #405de6;
+        }
+        
+        [data-theme="purple-creative"] {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e1e5e9;
+            --accent-color: #8B5CF6;
+        }
+        
+        [data-theme="ocean-blue"] {
+            --primary-gradient: linear-gradient(135deg, #0EA5E9 0%, #3B82F6 100%);
+            --background-gradient: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%);
+            --card-background: #ffffff;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --border-color: #e1e5e9;
+            --accent-color: #0EA5E9;
         }
         
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -4675,8 +5141,15 @@ app.get('/settings', (c) => {
         .btn { padding: 12px 24px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; font-size: 14px; }
         .btn-primary { background: var(--primary-gradient); color: white; }
         .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(64, 93, 230, 0.4); }
-        .btn-secondary { background: var(--border-color); color: var(--text-primary); }
-        .btn-secondary:hover { background: #d1d5db; }
+        .btn-secondary { 
+            background: var(--card-background); 
+            color: var(--text-primary); 
+            border: 1px solid var(--border-color);
+        }
+        .btn-secondary:hover { 
+            background: var(--text-secondary); 
+            color: var(--card-background);
+        }
         .btn-success { background: var(--success-color); color: white; }
         .btn-warning { background: var(--warning-color); color: white; }
         .btn-danger { background: var(--error-color); color: white; }
@@ -4697,6 +5170,39 @@ app.get('/settings', (c) => {
         .mb-3 { margin-bottom: 12px; }
         .text-sm { font-size: 12px; }
         .text-muted { color: var(--text-secondary); }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .container { padding: 15px; }
+            .header { padding: 20px; }
+            .header h1 { font-size: 2rem; }
+            .settings-section { padding: 20px; }
+            .settings-grid { 
+                grid-template-columns: 1fr; 
+                gap: 15px; 
+            }
+            .section-title { font-size: 1.3rem; }
+            .form-input, .form-select, .form-textarea {
+                font-size: 16px; /* Prevents zoom on iOS */
+            }
+            .btn {
+                width: 100%;
+                margin-bottom: 10px;
+            }
+            .integration-header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container { padding: 10px; }
+            .header { padding: 15px; }
+            .header h1 { font-size: 1.8rem; }
+            .settings-section { padding: 15px; }
+            .section-title { font-size: 1.2rem; }
+        }
     </style>
 </head>
 <body>
@@ -4739,6 +5245,16 @@ app.get('/settings', (c) => {
                                 <option value="inspirational">💭 Inspirational</option>
                                 <option value="edgy">🖤 Edgy</option>
                             </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="themeSelector">Theme</label>
+                            <select id="themeSelector" class="form-select" onchange="changeTheme()">
+                                <option value="default">🎨 Default</option>
+                                <option value="dark">🌙 Dark</option>
+                                <option value="purple-creative">💜 Purple</option>
+                                <option value="ocean-blue">🌊 Ocean</option>
+                            </select>
+                            <p class="text-sm text-muted">Choose your preferred color theme</p>
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="autoWeather">
@@ -5139,7 +5655,34 @@ app.get('/settings', (c) => {
             }
         }
 
-        document.addEventListener('DOMContentLoaded', checkAuth);
+        // Theme changing functionality
+        function changeTheme() {
+            const themeSelector = document.getElementById('themeSelector');
+            const selectedTheme = themeSelector.value;
+            
+            localStorage.setItem('selectedTheme', selectedTheme);
+            
+            if (selectedTheme === 'default') {
+                document.body.removeAttribute('data-theme');
+            } else {
+                document.body.setAttribute('data-theme', selectedTheme);
+            }
+        }
+
+        function loadSavedTheme() {
+            const savedTheme = localStorage.getItem('selectedTheme') || 'default';
+            const themeSelector = document.getElementById('themeSelector');
+            
+            if (themeSelector) {
+                themeSelector.value = savedTheme;
+                changeTheme();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAuth();
+            loadSavedTheme();
+        });
     </script>
 </body>
 </html>
@@ -5187,7 +5730,15 @@ app.get('/admin/users', (c) => {
         .section-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 20px; color: var(--text-primary); }
         .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
         .btn-primary { background: var(--primary-gradient); color: white; }
-        .btn-secondary { background: #f1f5f9; color: #475569; }
+        .btn-secondary { 
+            background: var(--card-background); 
+            color: var(--text-primary); 
+            border: 1px solid var(--border-color);
+        }
+        .btn-secondary:hover { 
+            background: var(--text-secondary); 
+            color: var(--card-background);
+        }
         .btn-danger { background: #ef4444; color: white; }
         .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         .table th, .table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
@@ -5285,22 +5836,24 @@ app.get('/admin/users', (c) => {
                     </div>
                 </div>
                 
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Email</th>
-                            <th>Type</th>
-                            <th>Tier</th>
-                            <th>Usage Today</th>
-                            <th>Status</th>
-                            <th>Joined</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="usersTable">
-                        <tr><td colspan="7">Loading users...</td></tr>
-                    </tbody>
-                </table>
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Type</th>
+                                <th>Tier</th>
+                                <th>Usage Today</th>
+                                <th>Status</th>
+                                <th>Joined</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTable">
+                            <tr><td colspan="7">Loading users...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- Pending Invites Management -->
@@ -5313,21 +5866,23 @@ app.get('/admin/users', (c) => {
                     </div>
                 </div>
                 
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Email</th>
-                            <th>Invited By</th>
-                            <th>Tier</th>
-                            <th>Created</th>
-                            <th>Expires</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="invitesTable">
-                        <tr><td colspan="6">Loading invites...</td></tr>
-                    </tbody>
-                </table>
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Invited By</th>
+                                <th>Tier</th>
+                                <th>Created</th>
+                                <th>Expires</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="invitesTable">
+                            <tr><td colspan="6">Loading invites...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -5866,7 +6421,15 @@ app.get('/admin/tiers', (c) => {
         .section-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 20px; color: var(--text-primary); }
         .btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
         .btn-primary { background: var(--primary-gradient); color: white; }
-        .btn-secondary { background: #f1f5f9; color: #475569; }
+        .btn-secondary { 
+            background: var(--card-background); 
+            color: var(--text-primary); 
+            border: 1px solid var(--border-color);
+        }
+        .btn-secondary:hover { 
+            background: var(--text-secondary); 
+            color: var(--card-background);
+        }
         .btn-danger { background: #ef4444; color: white; }
         .btn-success { background: #10b981; color: white; }
         .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
@@ -5914,21 +6477,23 @@ app.get('/admin/tiers', (c) => {
                     </div>
                 </div>
                 
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Daily Limit</th>
-                            <th>Description</th>
-                            <th>Users</th>
-                            <th>Created</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tiersTable">
-                        <tr><td colspan="6">Loading tiers...</td></tr>
-                    </tbody>
-                </table>
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Daily Limit</th>
+                                <th>Description</th>
+                                <th>Users</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tiersTable">
+                            <tr><td colspan="6">Loading tiers...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
