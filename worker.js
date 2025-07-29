@@ -847,7 +847,7 @@ D1Database.prototype.createInviteToken = async function(email, invitedBy, token,
         
         console.log('About to prepare INSERT statement');
         const stmt = this.db.prepare(`
-            INSERT INTO invite_tokens (email, invited_by, token, expires_at, tier_id, personal_message) 
+            INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id, personal_message) 
             VALUES (?, ?, ?, ?, ?, ?)
         `);
         console.log('INSERT statement prepared successfully');
@@ -903,16 +903,16 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
             CREATE TABLE IF NOT EXISTS invite_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL,
-                invited_by INTEGER,
+                invited_by_user_id INTEGER,
                 token TEXT UNIQUE NOT NULL,
                 expires_at DATETIME NOT NULL,
                 tier_id INTEGER,
                 personal_message TEXT,
                 used_at DATETIME,
-                used_by INTEGER,
+                used_by_user_id INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (invited_by) REFERENCES users(id),
-                FOREIGN KEY (used_by) REFERENCES users(id)
+                FOREIGN KEY (invited_by_user_id) REFERENCES users(id),
+                FOREIGN KEY (used_by_user_id) REFERENCES users(id)
             )
         `);
         await stmt.run();
@@ -1015,17 +1015,17 @@ D1Database.prototype.getPendingInvites = async function() {
                 AND i.expires_at > datetime('now')
                 ORDER BY i.created_at DESC
             `);
-        } else if (columnNames.includes('invited_by')) {
+        } else if (columnNames.includes('invited_by_user_id')) {
             stmt = this.db.prepare(`
                 SELECT i.*, COALESCE(u.email, 'System') as invited_by_email 
                 FROM invite_tokens i
-                LEFT JOIN users u ON i.invited_by = u.id
+                LEFT JOIN users u ON i.invited_by_user_id = u.id
                 WHERE i.used_at IS NULL 
                 AND i.expires_at > datetime('now')
                 ORDER BY i.created_at DESC
             `);
         } else {
-            // Fallback for tables without invited_by column
+            // Fallback for tables without invited_by_user_id column
             stmt = this.db.prepare(`
                 SELECT *, 'System' as invited_by_email
                 FROM invite_tokens
@@ -3760,7 +3760,7 @@ app.get('/auth', async (c) => {
             }
             
             // Get tier info if assigned in invite
-            const invitedBy = await database.getUserById(invite.invited_by_user_id || invite.invited_by);
+            const invitedBy = await database.getUserById(invite.invited_by_user_id);
             const tierName = invite.assigned_tier_id ? 
                 (await database.getTierById(invite.assigned_tier_id))?.name || 'Default' : 'Default';
                 
