@@ -1979,6 +1979,57 @@ app.delete('/api/user/settings/mastodon', authenticateToken, async (c) => {
     }
 });
 
+// Location settings endpoints
+app.post('/api/settings/location', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { locationZoom } = await c.req.json();
+        
+        if (!locationZoom || locationZoom < 1 || locationZoom > 18) {
+            return c.json({ error: 'Location zoom must be between 1 and 18' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        
+        // Save location zoom setting
+        const result = await database.setUserSetting(user.id, 'location', 'zoom_level', locationZoom.toString(), false);
+        
+        if (result) {
+            return c.json({ success: true, message: 'Location settings saved' });
+        } else {
+            return c.json({ error: 'Failed to save location settings' }, 500);
+        }
+    } catch (error) {
+        return c.json({ error: 'Failed to save location settings: ' + error.message }, 500);
+    }
+});
+
+app.get('/api/settings', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Get location settings
+        const locationSettings = await database.getUserSettings(user.id, 'location');
+        const settings = {};
+        
+        locationSettings.forEach(setting => {
+            if (setting.setting_key === 'zoom_level') {
+                settings.locationZoom = parseInt(setting.setting_value) || 18;
+            }
+        });
+        
+        // Default to zoom level 18 if not set
+        if (!settings.locationZoom) {
+            settings.locationZoom = 18;
+        }
+        
+        return c.json(settings);
+    } catch (error) {
+        return c.json({ error: 'Failed to load settings: ' + error.message }, 500);
+    }
+});
+
 app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
@@ -2146,7 +2197,7 @@ app.delete('/api/user/settings/linkedin', authenticateToken, async (c) => {
 });
 
 // Advanced prompt building with EXIF extraction and weather data
-async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null) {
+async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null, zoomLevel = 18) {
     
     if (!base64Image) {
         throw new Error('No image data provided');
@@ -2255,7 +2306,7 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                     extractedData.gpsLongitude = lon;
                     
                     if (lat && lon && !isNaN(lat) && !isNaN(lon)) {
-                        const location = await reverseGeocode(lat, lon);
+                        const location = await reverseGeocode(lat, lon, zoomLevel);
                         if (location) {
                             context.push('Location: ' + location);
                             extractedData.locationName = location;
@@ -2449,10 +2500,10 @@ function convertDMSToDD(dmsArray, ref) {
 }
 
 // Reverse geocoding function
-async function reverseGeocode(latitude, longitude) {
+async function reverseGeocode(latitude, longitude, zoomLevel = 18) {
     try {
         const response = await fetch(
-            'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=18&addressdetails=1',
+            'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=' + zoomLevel + '&addressdetails=1',
             {
                 headers: {
                     'User-Agent': 'AI Caption Studio'
@@ -2696,8 +2747,17 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         // Use weather from context or default to true
         const shouldIncludeWeather = context.includeWeather !== undefined ? context.includeWeather : true;
         
+        // Get user's location zoom preference
+        const locationSettings = await database.getUserSettings(user.id, 'location');
+        let userZoomLevel = 18; // Default to highest precision
+        locationSettings.forEach(setting => {
+            if (setting.setting_key === 'zoom_level') {
+                userZoomLevel = parseInt(setting.setting_value) || 18;
+            }
+        });
+        
         // Always extract EXIF data and build enhanced prompt
-        const result = await buildPromptFromImageWithExtraction(base64Image, shouldIncludeWeather, style, c.env);
+        const result = await buildPromptFromImageWithExtraction(base64Image, shouldIncludeWeather, style, c.env, userZoomLevel);
         finalPrompt = result.prompt;
         extractedData = result.extractedData;
         
@@ -3560,8 +3620,24 @@ app.get('/', (c) => {
                 // Handle GPS/Location data
                 if (gpsData && gpsData.latitude && gpsData.longitude) {
                     
+                    // Get user's zoom preference
+                    let userZoomLevel = 18; // Default to highest precision
+                    try {
+                        const settingsResponse = await fetch('/api/settings', {
+                            headers: {
+                                'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                            }
+                        });
+                        if (settingsResponse.ok) {
+                            const settings = await settingsResponse.json();
+                            userZoomLevel = settings.locationZoom || 18;
+                        }
+                    } catch (error) {
+                        console.log('Could not load user zoom preference, using default');
+                    }
+                    
                     // Get location name from coordinates
-                    const locationName = await reverseGeocode(gpsData.latitude, gpsData.longitude);
+                    const locationName = await reverseGeocode(gpsData.latitude, gpsData.longitude, userZoomLevel);
                     
                     if (locationName) {
                         locationInput.value = locationName;
@@ -3608,10 +3684,10 @@ app.get('/', (c) => {
             }
         }
 
-            async function reverseGeocode(latitude, longitude) {
+            async function reverseGeocode(latitude, longitude, zoomLevel = 18) {
             try {
                 const response = await fetch(
-                    'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=18&addressdetails=1',
+                    'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=' + zoomLevel + '&addressdetails=1',
                     {
                         headers: {
                             'User-Agent': 'AI Caption Studio'
@@ -5079,6 +5155,16 @@ app.get('/settings', (c) => {
                             <label class="form-label" for="customPrompt">Custom Prompt Addition</label>
                             <textarea id="customPrompt" class="form-textarea" placeholder="Add any custom instructions that will be included in all your caption requests..."></textarea>
                         </div>
+                        <div class="form-group">
+                            <label class="form-label" for="locationZoom">📍 Location Detail Level</label>
+                            <select id="locationZoom" class="form-select">
+                                <option value="10">City Level - "New York, NY, USA"</option>
+                                <option value="14">District Level - "Manhattan, New York, NY, USA"</option>
+                                <option value="16">Neighborhood Level - "SoHo, Manhattan, New York, NY, USA"</option>
+                                <option value="18" selected>Street Level - "123 Broadway, SoHo, Manhattan, New York, NY, USA"</option>
+                            </select>
+                            <p class="text-sm text-muted">Control how detailed your location information should be when extracted from photos</p>
+                        </div>
                     </div>
                 </div>
                 <button class="btn btn-primary" onclick="savePreferences()">💾 Save Preferences</button>
@@ -5181,7 +5267,7 @@ app.get('/settings', (c) => {
             }
         }
 
-        function loadPreferences() {
+        async function loadPreferences() {
             // Load saved preferences from localStorage
             const savedStyle = localStorage.getItem('defaultStyle') || 'creative';
             const autoWeather = localStorage.getItem('autoWeather') !== 'false';
@@ -5192,6 +5278,23 @@ app.get('/settings', (c) => {
             document.getElementById('autoWeather').checked = autoWeather;
             document.getElementById('defaultHashtagCount').value = hashtagCount;
             document.getElementById('customPrompt').value = customPrompt;
+            
+            // Load location zoom setting from server
+            try {
+                const response = await fetch('/api/settings', {
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    }
+                });
+                if (response.ok) {
+                    const settings = await response.json();
+                    if (settings.locationZoom) {
+                        document.getElementById('locationZoom').value = settings.locationZoom;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading location zoom setting:', error);
+            }
         }
 
         async function savePreferences() {
@@ -5199,6 +5302,7 @@ app.get('/settings', (c) => {
             const autoWeather = document.getElementById('autoWeather').checked;
             const hashtagCount = document.getElementById('defaultHashtagCount').value;
             const customPrompt = document.getElementById('customPrompt').value;
+            const locationZoom = document.getElementById('locationZoom').value;
             
             // Save to localStorage
             localStorage.setItem('defaultStyle', style);
@@ -5206,7 +5310,29 @@ app.get('/settings', (c) => {
             localStorage.setItem('defaultHashtagCount', hashtagCount);
             localStorage.setItem('customPrompt', customPrompt);
             
-            alert('✅ Preferences saved successfully!');
+            // Save location zoom to server
+            try {
+                const response = await fetch('/api/settings/location', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({
+                        locationZoom: parseInt(locationZoom)
+                    })
+                });
+
+                if (response.ok) {
+                    alert('✅ Preferences saved successfully!');
+                } else {
+                    const error = await response.json();
+                    alert('❌ Error saving location preference: ' + (error.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error saving location preference:', error);
+                alert('❌ Error saving location preference. Other preferences saved locally.');
+            }
         }
 
         async function loadSocialMediaSettings() {

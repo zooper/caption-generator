@@ -183,15 +183,18 @@
             font-size: 0.9rem;
         }
 
-        .form-group input, .form-group textarea {
+        .form-group input, .form-group textarea, .form-group select {
             padding: 12px 15px;
             border: 2px solid var(--border-color);
             border-radius: 8px;
             font-size: 14px;
             transition: border-color 0.2s;
+            background: var(--card-background);
+            color: var(--text-primary);
+            width: 100%;
         }
 
-        .form-group input:focus, .form-group textarea:focus {
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
             outline: none;
             border-color: var(--accent-color);
         }
@@ -427,13 +430,20 @@
 
         <div class="notification" id="notification"></div>
 
-        <!-- Theme Section -->
+        <!-- Preferences Section -->
         <div class="settings-section">
             <div class="section-header">
-                <h2>🎨 Theme</h2>
+                <h2>⚙️ Preferences</h2>
             </div>
             
-            <div class="theme-selector">
+            <!-- Theme Selection -->
+            <div class="setting-card">
+                <div class="setting-header">
+                    <h3>🎨 Theme</h3>
+                    <p>Choose your preferred color theme</p>
+                </div>
+                
+                <div class="theme-selector">
                 <div class="theme-grid">
                     <div class="theme-option" data-theme="purple-creative">
                         <div class="theme-preview purple-creative">
@@ -494,6 +504,31 @@
                             <p>Dark • Natural</p>
                         </div>
                     </div>
+                </div>
+            </div>
+            
+            <!-- Location Settings -->
+            <div class="setting-card">
+                <div class="setting-header">
+                    <h3>🎯 Location Precision</h3>
+                    <p>Control how detailed your location information should be when extracted from photos</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="locationZoom">Location Detail Level</label>
+                    <select id="locationZoom">
+                        <option value="10">City Level - "New York, NY, USA"</option>
+                        <option value="14">District Level - "Manhattan, New York, NY, USA"</option>
+                        <option value="16">Neighborhood Level - "SoHo, Manhattan, New York, NY, USA"</option>
+                        <option value="18" selected>Street Level - "123 Broadway, SoHo, Manhattan, New York, NY, USA"</option>
+                    </select>
+                    <div class="help-text">Higher precision may not always be available depending on the location and photo GPS accuracy</div>
+                </div>
+
+                <div class="setting-actions">
+                    <button type="button" class="btn btn-primary" onclick="saveLocationSettings()">
+                        💾 Save Location Settings
+                    </button>
                 </div>
             </div>
         </div>
@@ -581,6 +616,9 @@
                 // Theme elements
                 this.themeOptions = document.querySelectorAll('.theme-option');
                 
+                // Location elements
+                this.locationZoom = document.getElementById('locationZoom');
+                
                 // Mastodon elements
                 this.mastodonCard = document.getElementById('mastodonCard');
                 this.mastodonStatus = document.getElementById('mastodonStatus');
@@ -635,6 +673,9 @@
 
             async loadUserSettings() {
                 try {
+                    // Load location settings
+                    await this.loadLocationSettings();
+                    
                     // Load Mastodon settings
                     const response = await fetch('/api/settings/mastodon', {
                         headers: { 'Authorization': `Bearer ${this.authToken}` }
@@ -835,6 +876,53 @@
                 }
             }
 
+            // Location Settings Methods
+            async saveLocationSettings() {
+                const zoomLevel = this.locationZoom.value;
+                
+                try {
+                    const response = await fetch('/api/settings/location', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${this.authToken}`
+                        },
+                        body: JSON.stringify({
+                            locationZoom: parseInt(zoomLevel)
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.showNotification('Location settings saved successfully!', 'success');
+                    } else {
+                        const error = await response.json();
+                        this.showNotification(error.error || 'Failed to save location settings', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error saving location settings:', error);
+                    this.showNotification('Failed to save location settings', 'error');
+                }
+            }
+
+            async loadLocationSettings() {
+                try {
+                    const response = await fetch('/api/settings', {
+                        headers: {
+                            'Authorization': `Bearer ${this.authToken}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        const settings = await response.json();
+                        if (settings.locationZoom) {
+                            this.locationZoom.value = settings.locationZoom;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error loading location settings:', error);
+                }
+            }
+
             // Theme Management Methods
             loadTheme() {
                 const savedTheme = localStorage.getItem('app_theme') || 'purple-creative';
@@ -880,9 +968,17 @@
             }
         }
 
+        // Global function for location settings
+        async function saveLocationSettings() {
+            const settingsManager = window.settingsManagerInstance;
+            if (settingsManager) {
+                await settingsManager.saveLocationSettings();
+            }
+        }
+
         // Initialize settings manager when page loads
         document.addEventListener('DOMContentLoaded', () => {
-            new SettingsManager();
+            window.settingsManagerInstance = new SettingsManager();
         });
     </script>
 </body>

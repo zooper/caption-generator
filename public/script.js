@@ -241,8 +241,27 @@ class CaptionGenerator {
                 // Show that we're reverse geocoding
                 this.showNotification('🌍 Looking up location name...', 'info');
                 
+                // Get user's zoom preference
+                let userZoomLevel = 18; // Default to highest precision
+                try {
+                    const authToken = localStorage.getItem('auth_token');
+                    if (authToken) {
+                        const settingsResponse = await fetch('/api/settings', {
+                            headers: {
+                                'Authorization': `Bearer ${authToken}`
+                            }
+                        });
+                        if (settingsResponse.ok) {
+                            const settings = await settingsResponse.json();
+                            userZoomLevel = settings.locationZoom || 18;
+                        }
+                    }
+                } catch (error) {
+                    console.log('Could not load user zoom preference, using default');
+                }
+                
                 // Get location name from coordinates
-                const locationName = await this.reverseGeocode(gpsData.latitude, gpsData.longitude);
+                const locationName = await this.reverseGeocode(gpsData.latitude, gpsData.longitude, userZoomLevel);
                 
                 if (locationName) {
                     this.locationInput.value = locationName;
@@ -294,11 +313,11 @@ class CaptionGenerator {
         }
     }
 
-    async reverseGeocode(latitude, longitude) {
+    async reverseGeocode(latitude, longitude, zoomLevel = 18) {
         try {
             // Using a free geocoding service (Nominatim from OpenStreetMap)
             const response = await fetch(
-                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1&_=${Date.now()}`,
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=${zoomLevel}&addressdetails=1&_=${Date.now()}`,
                 {
                     headers: {
                         'User-Agent': 'AI Caption Studio'
