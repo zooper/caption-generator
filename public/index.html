@@ -4,28 +4,444 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Caption Studio</title>
-    <link rel="stylesheet" href="themes.css">
-    <link rel="stylesheet" href="styles.css">
-    <script src="theme-loader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+    <style>
+        /* Theme System */
+        :root {
+            --primary-gradient: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --accent-color: #405de6;
+            --accent-rgb: 64, 93, 230;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --card-background: #ffffff;
+            --border-color: #e1e5e9;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --hover-shadow: rgba(64, 93, 230, 0.3);
+            --success-color: #10b981;
+        }
+        
+        [data-theme="dark"] {
+            --primary-gradient: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            --background-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            --accent-color: #405de6;
+            --accent-rgb: 64, 93, 230;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --card-background: #2a2a3e;
+            --border-color: #404040;
+            --shadow-color: rgba(0, 0, 0, 0.3);
+            --hover-shadow: rgba(64, 93, 230, 0.5);
+        }
+        
+        [data-theme="purple-creative"] {
+            --primary-gradient: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
+            --background-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --accent-color: #8B5CF6;
+            --accent-rgb: 139, 92, 246;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --card-background: #ffffff;
+            --border-color: #e1e5e9;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --hover-shadow: rgba(139, 92, 246, 0.3);
+        }
+        
+        [data-theme="ocean-blue"] {
+            --primary-gradient: linear-gradient(135deg, #2196F3 0%, #21CBF3 100%);
+            --background-gradient: linear-gradient(135deg, #0c4a6e 0%, #0891b2 100%);
+            --accent-color: #2196F3;
+            --accent-rgb: 33, 150, 243;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --card-background: #ffffff;
+            --border-color: #e1e5e9;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --hover-shadow: rgba(33, 150, 243, 0.3);
+        }
+        </style>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--card-background); color: var(--text-primary); transition: all 0.3s ease; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { 
+            background: var(--card-background); 
+            border-radius: 15px; 
+            padding: 20px; 
+            margin-bottom: 40px; 
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .header-title {
+            flex: 1;
+            text-align: left;
+        }
+        .header h1 { 
+            background: var(--primary-gradient); 
+            -webkit-background-clip: text; 
+            -webkit-text-fill-color: transparent; 
+            background-clip: text; 
+            font-size: 2.5em; 
+            margin-bottom: 8px;
+            line-height: 1.1;
+        }
+        .header-subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1em;
+            margin: 0;
+        }
+        .auth-section { 
+            flex-shrink: 0;
+            min-width: 200px;
+        }
+        .auth-form { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); min-width: 300px; }
+        .auth-input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        .auth-btn { 
+            width: 100%; 
+            padding: 10px; 
+            background: var(--primary-gradient); 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            transition: all 0.2s ease;
+        }
+        .auth-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(64, 93, 230, 0.3);
+        }
+        .user-info { text-align: right; }
+        .user-welcome {
+            color: var(--text-primary);
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+        .user-controls {
+            display: flex; 
+            flex-wrap: wrap;
+            gap: 8px; 
+            justify-content: flex-end;
+            align-items: center;
+        }
+        .control-btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .control-btn.primary {
+            background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%);
+            color: white;
+        }
+        .control-btn.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(64, 93, 230, 0.3);
+        }
+        .control-btn.secondary {
+            background: var(--card-background);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+        .control-btn.secondary:hover {
+            background: var(--text-secondary);
+            color: var(--card-background);
+            transform: translateY(-1px);
+        }
+        .theme-selector {
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--card-background);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 13px;
+        }
+        
+        /* Mobile responsive design */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 15px;
+            }
+            .header-title {
+                text-align: center;
+            }
+            .header h1 {
+                font-size: 2em;
+            }
+            .auth-section {
+                min-width: auto;
+                align-self: stretch;
+            }
+            .user-info {
+                text-align: center;
+            }
+            .user-controls {
+                justify-content: center;
+                gap: 6px;
+            }
+            .control-btn {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .header {
+                padding: 15px;
+            }
+            .header h1 {
+                font-size: 1.8em;
+            }
+            .header-subtitle {
+                font-size: 1em;
+            }
+            .user-controls {
+                flex-direction: column;
+                gap: 8px;
+            }
+            .control-btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+        .login-section { text-align: center; margin: 40px 0; }
+        .login-form { 
+            max-width: 400px; 
+            margin: 0 auto; 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+        }
+        .main-content { display: none; grid-template-columns: 1fr 1fr; gap: 40px; }
+        .upload-section { 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+        }
+        .upload-area { border: 3px dashed #e0e0e0; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .upload-area:hover { border-color: #405de6; background: #f8f9ff; }
+        .upload-area.dragover { border-color: #405de6; background: #f0f4ff; }
+        .preview-image { max-width: 100%; max-height: 300px; border-radius: 8px; }
+        .style-options { margin-top: 30px; }
+        .style-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
+        .style-btn { 
+            padding: 12px; 
+            border: 2px solid var(--border-color); 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            border-radius: 8px; 
+            cursor: pointer; 
+            transition: all 0.3s; 
+        }
+        .style-btn:hover { 
+            border-color: var(--accent-color); 
+            background: var(--text-secondary);
+            color: var(--card-background);
+        }
+        .style-btn.active { 
+            border-color: var(--accent-color); 
+            background: var(--primary-gradient); 
+            color: white; 
+        }
+        .results-section { 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1); 
+        }
+        .generate-btn { 
+            width: 100%; 
+            padding: 15px; 
+            background: var(--primary-gradient); 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            margin-top: 20px; 
+            transition: all 0.2s ease;
+        }
+        .generate-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(64, 93, 230, 0.3);
+        }
+        .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .loading { display: none; text-align: center; padding: 20px; }
+        .result-card { 
+            margin-top: 20px; 
+            padding: 20px; 
+            border: 1px solid var(--border-color); 
+            border-radius: 8px; 
+            background: var(--card-background);
+            color: var(--text-primary);
+        }
+        .copy-btn { 
+            margin-top: 10px; 
+            padding: 8px 16px; 
+            background: var(--card-background); 
+            color: var(--text-primary);
+            border: 1px solid var(--border-color); 
+            border-radius: 4px; 
+            cursor: pointer; 
+            transition: all 0.2s ease;
+        }
+        .copy-btn:hover {
+            background: var(--text-secondary);
+            color: var(--card-background);
+        }
+        .social-preview { margin-bottom: 20px; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; }
+        .social-preview-header { padding: 15px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .social-preview-content { padding: 15px; }
+        .mastodon-preview { border-left: 4px solid #6364ff; }
+        .linkedin-preview { border-left: 4px solid #0077b5; }
+        .preview-text { margin: 10px 0; line-height: 1.5; }
+        .preview-hashtags { color: #0077b5; font-size: 0.9em; margin-top: 10px; }
+        .preview-alt { color: #666; font-size: 0.85em; font-style: italic; margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; }
+        .preview-actions { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
+        .post-btn { 
+            padding: 8px 16px; 
+            background: var(--primary-gradient); 
+            color: white; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 14px; 
+            font-weight: 500; 
+            transition: all 0.2s ease;
+        }
+        .post-btn:hover:not(:disabled) { 
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(64, 93, 230, 0.3);
+        }
+        .post-btn:disabled { 
+            background: var(--text-secondary); 
+            cursor: not-allowed; 
+            opacity: 0.6;
+        }
+        .hidden { display: none; }
+        /* Enhanced mobile responsiveness */
+        @media (max-width: 768px) { 
+            .container { padding: 15px; }
+            .main-content { 
+                grid-template-columns: 1fr; 
+                gap: 20px;
+            } 
+            .main-content.show { display: grid; }
+            .upload-section, .results-section { 
+                padding: 20px; 
+            }
+            .login-form {
+                padding: 20px;
+                margin: 0 10px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container { padding: 10px; }
+            .upload-section, .results-section { 
+                padding: 15px; 
+            }
+            .style-btn {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+            .generate-btn {
+                font-size: 14px;
+                padding: 12px 20px;
+            }
+        }
+        
+        /* Simple loading animations */
+        .generate-btn.loading {
+            background: #ff6b6b !important;
+            animation: pulse 1.5s ease-in-out infinite;
+            transform: scale(0.98);
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <header class="header">
-            <h1>🎨 AI Caption Studio</h1>
-            <p>AI-powered captions, hashtags, and alt text for any social platform</p>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>🎨 AI Caption Studio</h1>
+                    <p class="header-subtitle">AI-powered captions, hashtags, and alt text for any social platform</p>
+                </div>
+                <div class="auth-section">
+                    <div id="authStatus" class="user-info hidden">
+                        <div class="user-welcome">Welcome, <span id="userEmail"></span>!</div>
+                        <div class="user-controls">
+                            <select id="themeSelector" onchange="changeTheme()" class="theme-selector">
+                                <option value="default">🎨 Default</option>
+                                <option value="dark">🌙 Dark</option>
+                                <option value="purple-creative">💜 Purple</option>
+                                <option value="ocean-blue">🌊 Ocean</option>
+                            </select>
+                            <button id="adminButton" onclick="window.location.href='/admin'" class="control-btn primary" style="display: none;">🛠️ Admin</button>
+                            <button onclick="window.location.href='/settings'" class="control-btn secondary">⚙️ Settings</button>
+                            <button onclick="logout()" class="control-btn secondary">Logout</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </header>
+
+        <!-- Login Section (shown when not authenticated) -->
+        <div id="loginSection" class="login-section">
+            <div class="login-form">
+                <h2>🔐 Login to Continue</h2>
+                <p>Enter your email to receive a magic login link</p>
+                <input type="email" id="emailInput" class="auth-input" placeholder="your@email.com" required>
+                <button id="loginButton" class="auth-btn">Send Magic Link</button>
+                <div id="loginMessage" style="margin-top: 15px;"></div>
+            </div>
+        </div>
 
         <main class="main-content">
             <div class="upload-section">
                 <div class="upload-area" id="uploadArea">
-                    <div class="upload-placeholder" id="uploadPlaceholder">
-                        <div class="upload-icon">📁</div>
+                    <div id="uploadPlaceholder">
+                        <div style="font-size: 48px; margin-bottom: 20px;">📁</div>
                         <h3>Drop your image here</h3>
                         <p>or click to browse</p>
-                        <p class="file-info">JPG, PNG, GIF up to 10MB</p>
+                        <p style="color: #666; font-size: 14px;">JPG, PNG, GIF up to 10MB</p>
                     </div>
-                    <img class="preview-image" id="previewImage" style="display: none;" alt="Preview">
+                    <img class="preview-image hidden" id="previewImage" alt="Preview">
                     <input type="file" id="fileInput" accept="image/*" style="display: none;">
                 </div>
 
@@ -41,72 +457,43 @@
                     </div>
                 </div>
 
-                <div class="context-section">
+                <div class="context-section" style="margin-top: 20px;">
                     <h3>Add Context (Optional)</h3>
-                    <div class="context-grid">
+                    <p style="font-size: 14px; color: #666; margin-bottom: 20px;">Provide additional context to help AI generate more personalized captions</p>
+                    
+                    <div class="context-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 20px;">
                         <div class="context-field">
-                            <label for="cameraInput">📷 Camera/Gear</label>
-                            <input type="text" id="cameraInput" placeholder="e.g., Canon R5, iPhone 15 Pro, Sony A7IV">
+                            <label for="cameraInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📷 Camera/Gear</label>
+                            <input type="text" id="cameraInput" placeholder="Auto-detected or add manually..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
                         <div class="context-field">
-                            <label for="eventInput">🎉 Event/Occasion</label>
-                            <input type="text" id="eventInput" placeholder="e.g., Wedding, Concert, Vacation, Birthday">
+                            <label for="eventInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">🎉 Event/Occasion</label>
+                            <input type="text" id="eventInput" placeholder="e.g., Wedding, Concert, Vacation, Birthday" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
                         <div class="context-field">
-                            <label for="locationInput">📍 Location</label>
-                            <input type="text" id="locationInput" placeholder="e.g., Paris, Beach sunset, Home studio">
+                            <label for="locationInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">📍 Location</label>
+                            <input type="text" id="locationInput" placeholder="Auto-detected or add manually..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
                         <div class="context-field">
-                            <label for="moodInput">💭 Mood/Vibe</label>
-                            <input type="text" id="moodInput" placeholder="e.g., Nostalgic, Energetic, Peaceful, Fun">
+                            <label for="moodInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">💭 Mood/Vibe</label>
+                            <input type="text" id="moodInput" placeholder="e.g., Nostalgic, Energetic, Peaceful, Fun" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
                         <div class="context-field">
-                            <label for="subjectInput">👤 Subject/Focus</label>
-                            <input type="text" id="subjectInput" placeholder="e.g., Portrait, Landscape, Food, Pet">
+                            <label for="subjectInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">👤 Subject/Focus</label>
+                            <input type="text" id="subjectInput" placeholder="e.g., Portrait, Landscape, Food, Pet" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
                         <div class="context-field">
-                            <label for="customInput">✏️ Custom Notes</label>
-                            <input type="text" id="customInput" placeholder="Any other details you want to include">
-                        </div>
-                        <div class="context-field">
-                            <label for="weatherToggle">🌤️ Include Weather</label>
-                            <div class="weather-toggle-container">
-                                <input type="checkbox" id="weatherToggle" class="weather-checkbox">
-                                <span class="weather-description">Auto-detect weather from photo location & time</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="template-section">
-                        <h4>📋 Templates</h4>
-                        <div class="template-controls">
-                            <select class="template-select" id="templateSelect">
-                                <option value="">Choose a saved template...</option>
-                            </select>
-                            <button class="load-template-btn" id="loadTemplateBtn" disabled>📂 Load</button>
-                            <button class="delete-template-btn" id="deleteTemplateBtn" disabled>🗑️ Delete</button>
+                            <label for="customInput" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px;">✏️ Custom Notes</label>
+                            <input type="text" id="customInput" placeholder="Any other details you want to include" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                         </div>
                     </div>
                     
-                    <div class="context-actions">
-                        <button class="clear-context-btn" id="clearContextBtn">🗑️ Clear All</button>
-                        <button class="save-context-btn" id="saveContextBtn">💾 Save as Template</button>
-                    </div>
-                </div>
-
-                <div class="mastodon-section">
-                    <h3>🐘 Mastodon Settings</h3>
-                    <div class="mastodon-config">
-                        <div class="config-field">
-                            <label for="mastodonInstance">Instance URL</label>
-                            <input type="url" id="mastodonInstance" placeholder="https://mastodon.social" 
-                                   value="https://mastodon.social">
+                    <div class="weather-section" style="background: #f0f4ff; padding: 15px; border-radius: 8px; border: 1px solid #d0d7ff; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <input type="checkbox" id="weatherToggle" checked style="margin: 0;">
+                            <label for="weatherToggle" style="font-weight: bold; margin: 0;">🌤️ Include Weather Data</label>
                         </div>
-                        <div class="config-field">
-                            <label for="mastodonToken">Access Token</label>
-                            <input type="password" id="mastodonToken" placeholder="Your Mastodon access token">
-                            <small>Get your token from: Settings → Development → New Application</small>
-                        </div>
-                        <button class="test-mastodon-btn" id="testMastodonBtn">🔍 Test Connection</button>
+                        <p style="font-size: 12px; color: #666; margin: 0;">Automatically detect weather conditions from photo location & time for enhanced context</p>
                     </div>
                 </div>
 
@@ -117,87 +504,685 @@
             </div>
 
             <div class="results-section">
-                <div class="results-placeholder" id="resultsPlaceholder">
-                    <div class="placeholder-icon">✨</div>
-                    <h3>Your caption will appear here</h3>
-                    <p>Upload an image and choose a style to get started</p>
-                </div>
-
-                <div class="results-content" id="resultsContent" style="display: none;">
-                    <div class="weather-info-card" id="weatherInfoCard" style="display: none;">
-                        <div class="card-header">
-                            <h3>🌤️ Weather Info</h3>
-                            <span class="weather-timestamp" id="weatherTimestamp">Photo date & time</span>
-                        </div>
-                        <div class="weather-details">
-                            <div class="weather-main">
-                                <span class="weather-temp" id="weatherTemp">--°C</span>
-                                <span class="weather-desc" id="weatherDesc">--</span>
-                            </div>
-                            <div class="weather-extras">
-                                <span class="weather-humidity" id="weatherHumidity">💧 --%</span>
-                                <span class="weather-wind" id="weatherWind">💨 -- km/h</span>
-                            </div>
-                        </div>
+                <h3>Generated Content</h3>
+                <div id="results" class="hidden">
+                    <div class="result-card">
+                        <h4>📝 Caption</h4>
+                        <p id="captionText"></p>
+                        <button class="copy-btn" onclick="copyToClipboard('captionText', this)">📋 Copy Caption</button>
                     </div>
-
-                    <div class="caption-card">
-                        <div class="card-header">
-                            <h3>📝 Caption</h3>
-                            <span class="char-count" id="charCount">0 characters</span>
-                        </div>
-                        <div class="caption-text" id="captionText"></div>
-                        <button class="copy-btn" id="copyCaptionBtn">
-                            <span>📋 Copy Caption</span>
-                        </button>
+                    <div class="result-card">
+                        <h4>🏷️ Hashtags</h4>
+                        <p id="hashtagsText"></p>
+                        <button class="copy-btn" onclick="copyToClipboard('hashtagsText', this)">📋 Copy Hashtags</button>
                     </div>
-
-                    <div class="hashtags-card">
-                        <div class="card-header">
-                            <h3>#️⃣ Hashtags</h3>
-                            <span class="hashtag-count" id="hashtagCount">0 tags</span>
-                        </div>
-                        <div class="hashtags-text" id="hashtagsText"></div>
-                        <button class="copy-btn" id="copyHashtagsBtn">
-                            <span>📋 Copy Hashtags</span>
-                        </button>
+                    <div class="result-card">
+                        <h4>♿ Alt Text</h4>
+                        <p id="altText"></p>
+                        <button class="copy-btn" onclick="copyToClipboard('altText', this)">📋 Copy Alt Text</button>
                     </div>
-
-                    <div class="alttext-card">
-                        <div class="card-header">
-                            <h3>♿ Alt Text</h3>
-                            <span class="alttext-count" id="alttextCount">For accessibility</span>
-                        </div>
-                        <div class="alttext-text" id="alttextText">Alt text will appear here...</div>
+                    <div class="result-card" id="metadataCard" style="display: none;">
+                        <h4>📊 Photo Metadata</h4>
+                        <div id="metadataContent" style="font-size: 14px; color: #666;"></div>
                     </div>
-
-                    <div class="mastodon-card">
-                        <div class="card-header">
-                            <h3>🐘 Post to Mastodon</h3>
-                            <span class="mastodon-status" id="mastodonStatus">Ready to post</span>
-                        </div>
-                        <div class="mastodon-preview">
-                            <div class="post-preview" id="postPreview">
-                                <p><em>Caption and hashtags will appear here...</em></p>
-                            </div>
-                        </div>
-                        <div class="mastodon-actions">
-                            <button class="post-mastodon-btn" id="postMastodonBtn" disabled>
-                                <span class="btn-text">🚀 Post to Mastodon</span>
-                                <div class="loading-spinner" style="display: none;"></div>
-                            </button>
-                        </div>
+                    <div class="result-card" id="socialPreviewCard" style="display: none;">
+                        <h4>📱 Social Media Previews</h4>
+                        <div id="socialPreviewContent"></div>
                     </div>
                 </div>
             </div>
         </main>
-
-        <div class="notification" id="notification" style="display: none;">
-            <span class="notification-text"></span>
-        </div>
-
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        let selectedStyle = 'creative';
+        let uploadedImage = null;
+        let isAuthenticated = false;
+
+        // Authentication functions
+        async function checkAuth() {
+            try {
+                // Try cookie-based auth first, then localStorage fallback
+                let authHeader = {};
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    authHeader['Authorization'] = 'Bearer ' + token;
+                }
+                
+                const response = await fetch('/api/auth/me', {
+                    headers: authHeader,
+                    credentials: 'include' // Include cookies
+                });
+                
+                if (response.ok) {
+                    const user = await response.json();
+                    showAuthenticatedState(user);
+                } else {
+                    showLoginForm();
+                }
+            } catch (error) {
+                showLoginForm();
+            }
+        }
+
+        function showAuthenticatedState(user) {
+            isAuthenticated = true;
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('authStatus').classList.remove('hidden');
+            document.getElementById('userEmail').textContent = user.email;
+            document.querySelector('.main-content').style.display = 'grid';
+            
+            // Show admin button if user is admin
+            const adminButton = document.getElementById('adminButton');
+            if (user.isAdmin && adminButton) {
+                adminButton.style.display = 'inline-block';
+            }
+        }
+
+        function showLoginForm() {
+            isAuthenticated = false;
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('authStatus').classList.add('hidden');
+            document.querySelector('.main-content').style.display = 'none';
+            
+            // Hide admin button
+            const adminButton = document.getElementById('adminButton');
+            if (adminButton) {
+                adminButton.style.display = 'none';
+            }
+        }
+
+        // Theme management functions
+        function changeTheme() {
+            const themeSelector = document.getElementById('themeSelector');
+            const selectedTheme = themeSelector.value;
+            
+            // Remove existing theme classes
+            document.body.removeAttribute('data-theme');
+            
+            // Apply new theme
+            if (selectedTheme !== 'default') {
+                document.body.setAttribute('data-theme', selectedTheme);
+            }
+            
+            // Save theme preference
+            localStorage.setItem('selectedTheme', selectedTheme);
+            
+        }
+        
+        function loadSavedTheme() {
+            const savedTheme = localStorage.getItem('selectedTheme') || 'default';
+            const themeSelector = document.getElementById('themeSelector');
+            
+            if (themeSelector) {
+                themeSelector.value = savedTheme;
+                
+                // Apply the saved theme
+                if (savedTheme !== 'default') {
+                    document.body.setAttribute('data-theme', savedTheme);
+                }
+            }
+        }
+
+        // Check authentication on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            checkAuth();
+            loadSavedTheme();
+            
+            // File upload handling - moved inside DOMContentLoaded
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+            const previewImage = document.getElementById('previewImage');
+            const uploadPlaceholder = document.getElementById('uploadPlaceholder');
+            const generateBtn = document.getElementById('generateBtn');
+
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) handleFile(files[0]);
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) handleFile(e.target.files[0]);
+            });
+
+                function handleFile(file) {
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('File too large. Please select an image under 10MB.');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    previewImage.src = e.target.result;
+                    previewImage.classList.remove('hidden');
+                    uploadPlaceholder.classList.add('hidden');
+                    uploadedImage = e.target.result.split(',')[1]; // Remove data:image/jpeg;base64,
+                    generateBtn.disabled = false;
+                    
+                    // Extract EXIF metadata immediately when image is loaded
+                    extractMetadataFromEXIF(file);
+                };
+                reader.readAsDataURL(file);
+            }
+
+            async function extractMetadataFromEXIF(file) {
+            try {
+                const locationInput = document.getElementById('locationInput');
+                const cameraInput = document.getElementById('cameraInput');
+                
+                // Clear previous auto-detected values (but preserve any user-entered values)
+                if (!locationInput.value || locationInput.dataset.autoDetected === 'true') {
+                    locationInput.value = '';
+                    locationInput.dataset.autoDetected = 'false';
+                }
+                if (!cameraInput.value || cameraInput.dataset.autoDetected === 'true') {
+                    cameraInput.value = '';
+                    cameraInput.dataset.autoDetected = 'false';
+                }
+                
+                // Check if exifr is available
+                if (typeof exifr === 'undefined') {
+                    return;
+                }
+
+                
+                // Extract both GPS and camera data
+                const [gpsData, allExifData] = await Promise.all([
+                    exifr.gps(file).catch(() => null),
+                    exifr.parse(file).catch(err => {
+                        return null;
+                    })
+                ]);
+                
+                
+                let hasData = false;
+                
+                // Handle GPS/Location data
+                if (gpsData && gpsData.latitude && gpsData.longitude) {
+                    
+                    // Get user's zoom preference
+                    let userZoomLevel = 18; // Default to highest precision
+                    try {
+                        const settingsResponse = await fetch('/api/settings', {
+                            headers: {
+                                'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                            }
+                        });
+                        if (settingsResponse.ok) {
+                            const settings = await settingsResponse.json();
+                            userZoomLevel = settings.locationZoom || 18;
+                        }
+                    } catch (error) {
+                        console.log('Could not load user zoom preference, using default');
+                    }
+                    
+                    // Get location name from coordinates
+                    const locationName = await reverseGeocode(gpsData.latitude, gpsData.longitude, userZoomLevel);
+                    
+                    if (locationName) {
+                        locationInput.value = locationName;
+                        locationInput.dataset.autoDetected = 'true';
+                        hasData = true;
+                    } else {
+                        // Fallback to showing coordinates
+                        locationInput.value = gpsData.latitude.toFixed(4) + ', ' + gpsData.longitude.toFixed(4);
+                        locationInput.dataset.autoDetected = 'true';
+                        hasData = true;
+                    }
+                }
+                
+                // Handle Camera data
+                if (allExifData && (allExifData.Make || allExifData.Model)) {
+                    const cameraParts = [];
+                    
+                    if (allExifData.Make) {
+                        cameraParts.push(allExifData.Make);
+                    }
+                    
+                    if (allExifData.Model && (!allExifData.Make || !allExifData.Model.includes(allExifData.Make))) {
+                        cameraParts.push(allExifData.Model);
+                    }
+                    
+                    if (allExifData.LensModel) {
+                        cameraParts.push('(' + allExifData.LensModel + ')');
+                    }
+                    
+                    const cameraInfo = cameraParts.join(' ').trim();
+                    if (cameraInfo) {
+                        cameraInput.value = cameraInfo;
+                        cameraInput.dataset.autoDetected = 'true';
+                        hasData = true;
+                    }
+                } else {
+                }
+                
+                if (hasData) {
+                } else {
+                }
+                
+            } catch (error) {
+            }
+        }
+
+            async function reverseGeocode(latitude, longitude, zoomLevel = 18) {
+            try {
+                const response = await fetch(
+                    'https://nominatim.openstreetmap.org/reverse?format=json&lat=' + latitude + '&lon=' + longitude + '&zoom=' + zoomLevel + '&addressdetails=1',
+                    {
+                        headers: {
+                            'User-Agent': 'AI Caption Studio'
+                        }
+                    }
+                );
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data && data.address) {
+                        const parts = [];
+                        
+                        // Add building/house number and street
+                        if (data.address.house_number && data.address.road) {
+                            parts.push(data.address.house_number + ' ' + data.address.road);
+                        } else if (data.address.road) {
+                            parts.push(data.address.road);
+                        }
+                        
+                        // Add neighbourhood/suburb/district
+                        if (data.address.neighbourhood) parts.push(data.address.neighbourhood);
+                        else if (data.address.suburb) parts.push(data.address.suburb);
+                        else if (data.address.quarter) parts.push(data.address.quarter);
+                        else if (data.address.district) parts.push(data.address.district);
+                        
+                        // Add city/town/village
+                        if (data.address.city) parts.push(data.address.city);
+                        else if (data.address.town) parts.push(data.address.town);
+                        else if (data.address.village) parts.push(data.address.village);
+                        else if (data.address.municipality) parts.push(data.address.municipality);
+                        
+                        // Add state/province
+                        if (data.address.state) parts.push(data.address.state);
+                        else if (data.address.province) parts.push(data.address.province);
+                        
+                        // Add country
+                        if (data.address.country) parts.push(data.address.country);
+                        
+                        return parts.join(', ') || data.display_name;
+                    }
+                }
+            } catch (error) {
+            }
+            
+            return null;
+        }
+
+            // Style selection
+            document.querySelectorAll('.style-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedStyle = btn.dataset.style;
+                });
+            });
+
+            // Generate caption
+            generateBtn.addEventListener('click', async () => {
+            if (!uploadedImage) return;
+
+            // Show loading state
+            generateBtn.textContent = '⏳ Generating...';
+            generateBtn.style.backgroundColor = '#ff6b6b';
+            generateBtn.style.opacity = '0.8';
+            generateBtn.disabled = true;
+
+            try {
+                let headers = { 'Content-Type': 'application/json' };
+                const token = localStorage.getItem('auth_token');
+                if (token) {
+                    headers['Authorization'] = 'Bearer ' + token;
+                }
+                
+                // Collect context data from input fields
+                const contextData = {
+                    camera: document.getElementById('cameraInput').value.trim(),
+                    event: document.getElementById('eventInput').value.trim(),
+                    location: document.getElementById('locationInput').value.trim(),
+                    mood: document.getElementById('moodInput').value.trim(),
+                    subject: document.getElementById('subjectInput').value.trim(),
+                    custom: document.getElementById('customInput').value.trim(),
+                    includeWeather: document.getElementById('weatherToggle').checked,
+                    customPrompt: localStorage.getItem('customPrompt') || ''
+                };
+                
+                
+                const response = await fetch('/api/generate-caption', {
+                    method: 'POST',
+                    headers: headers,
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        base64Image: uploadedImage,
+                        style: selectedStyle,
+                        context: contextData
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                // Parse the response content
+                const content = data.content;
+                const captionMatch = content.match(/CAPTION:\s*(.+?)(?=\\n|HASHTAGS:|ALT_TEXT:|$)/s);
+                const hashtagsMatch = content.match(/HASHTAGS:\s*(.+?)(?=\\n|ALT_TEXT:|$)/s);
+                const altTextMatch = content.match(/ALT_TEXT:\s*(.+?)$/s);
+
+                document.getElementById('captionText').textContent = captionMatch ? captionMatch[1].trim() : 'No caption generated';
+                document.getElementById('hashtagsText').textContent = hashtagsMatch ? hashtagsMatch[1].trim() : 'No hashtags generated';
+                document.getElementById('altText').textContent = altTextMatch ? altTextMatch[1].trim() : 'No alt text generated';
+
+                // Display extracted metadata if available
+                const metadataCard = document.getElementById('metadataCard');
+                const metadataContent = document.getElementById('metadataContent');
+                let metadataHtml = '';
+                
+                if (data.cameraInfo && (data.cameraInfo.make || data.cameraInfo.model)) {
+                    metadataHtml += '<div><strong>📷 Camera:</strong> ' + (data.cameraInfo.make || '') + ' ' + (data.cameraInfo.model || '') + '</div>';
+                }
+                
+                if (data.locationName) {
+                    metadataHtml += '<div><strong>📍 Location:</strong> ' + data.locationName + '</div>';
+                }
+                
+                if (data.weatherData) {
+                    metadataHtml += '<div><strong>🌤️ Weather:</strong> ' + data.weatherData + '</div>';
+                }
+                
+                if (data.photoDateTime) {
+                    const photoDate = new Date(data.photoDateTime);
+                    metadataHtml += '<div><strong>📅 Photo Date:</strong> ' + photoDate.toLocaleDateString() + ' ' + photoDate.toLocaleTimeString() + '</div>';
+                }
+                
+                
+                if (metadataHtml) {
+                    metadataContent.innerHTML = metadataHtml;
+                    metadataCard.style.display = 'block';
+                } else {
+                    metadataCard.style.display = 'none';
+                }
+
+                // Display social media previews if connected accounts exist
+                const socialPreviewCard = document.getElementById('socialPreviewCard');
+                const socialPreviewContent = document.getElementById('socialPreviewContent');
+                
+                if (data.connectedAccounts && (data.connectedAccounts.mastodon || data.connectedAccounts.linkedin)) {
+                    
+                    const captionText = captionMatch ? captionMatch[1].trim() : '';
+                    const hashtagsText = hashtagsMatch ? hashtagsMatch[1].trim() : '';
+                    const altTextContent = altTextMatch ? altTextMatch[1].trim() : '';
+                    
+                    let socialPreviewHtml = '';
+                    
+                    // Mastodon preview
+                    if (data.connectedAccounts.mastodon && data.connectedAccounts.mastodon.instance) {
+                        const instanceName = data.connectedAccounts.mastodon.instance.replace('https://', '').replace('http://', '');
+                        socialPreviewHtml += '<div class="social-preview mastodon-preview">' +
+                            '<div class="social-preview-header">' +
+                            '<span>🐘</span>' +
+                            '<span>Mastodon Preview (' + instanceName + ')</span>' +
+                            '</div>' +
+                            '<div class="social-preview-content">' +
+                            '<div class="preview-text">' + captionText + '</div>' +
+                            (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
+                            (altTextContent ? '<div class="preview-alt">Alt text: ' + altTextContent + '</div>' : '') +
+                            '<div class="preview-actions">' +
+                            '<button class="post-btn" onclick="postToMastodon()">📝 Post to Mastodon</button>' +
+                            '</div>' +
+                            '</div>' +
+                            '</div>';
+                    }
+                    
+                    // LinkedIn preview
+                    if (data.connectedAccounts.linkedin && data.connectedAccounts.linkedin.connected) {
+                        socialPreviewHtml += '<div class="social-preview linkedin-preview">' +
+                            '<div class="social-preview-header">' +
+                            '<span>💼</span>' +
+                            '<span>LinkedIn Preview</span>' +
+                            '</div>' +
+                            '<div class="social-preview-content">' +
+                            '<div class="preview-text">' + captionText + '</div>' +
+                            (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
+                            '</div>' +
+                            '</div>';
+                    }
+                    
+                    if (socialPreviewHtml) {
+                        socialPreviewContent.innerHTML = socialPreviewHtml;
+                        socialPreviewCard.style.display = 'block';
+                    }
+                } else {
+                    socialPreviewCard.style.display = 'none';
+                }
+
+                document.getElementById('results').classList.remove('hidden');
+            } catch (error) {
+                alert('Error generating caption: ' + error.message);
+            } finally {
+                // Reset button state
+                generateBtn.textContent = 'Generate Caption';
+                generateBtn.style.backgroundColor = '';
+                generateBtn.style.opacity = '';
+                generateBtn.disabled = false;
+            }
+        });
+
+
+            async function postToMastodon() {
+            try {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '⏳ Posting...';
+
+                // Get the generated content
+                const captionText = document.getElementById('captionText').textContent;
+                const hashtagsText = document.getElementById('hashtagsText').textContent;
+                const altText = document.getElementById('altText').textContent;
+                
+                // Combine caption and hashtags for the post
+                const postContent = captionText + (hashtagsText ? ' ' + hashtagsText : '');
+
+                const response = await fetch('/api/user/post/mastodon', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        status: postContent,
+                        alt_text: altText,
+                        image_data: uploadedImage // Send the base64 image data
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = '✅ Posted!';
+                    if (result.url) {
+                        setTimeout(() => {
+                            if (confirm('Post successful! Would you like to view it on Mastodon?')) {
+                                window.open(result.url, '_blank');
+                            }
+                        }, 500);
+                    }
+                } else {
+                    btn.textContent = '❌ Failed';
+                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                event.target.textContent = '❌ Error';
+                alert('Error posting to Mastodon: ' + error.message);
+            } finally {
+                setTimeout(() => {
+                    event.target.disabled = false;
+                    event.target.textContent = '📝 Post to Mastodon';
+                }, 3000);
+            }
+        }
+
+            // Authentication functions need to be inside DOMContentLoaded too
+            async function requestLogin() {
+                const email = document.getElementById('emailInput').value;
+                const messageDiv = document.getElementById('loginMessage');
+                
+                if (!email) {
+                    messageDiv.innerHTML = '<p style="color: red;">Please enter your email address</p>';
+                    return;
+                }
+
+                messageDiv.innerHTML = '<p style="color: blue;">Sending magic link...</p>';
+
+                try {
+                    const response = await fetch('/api/auth/request-login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        messageDiv.innerHTML = '<p style="color: green;">✅ ' + data.message + '</p>' + '<p style="font-size: 12px; color: #666;">Link expires in ' + data.expiresIn + '</p>';
+                        if (data.loginUrl) {
+                            messageDiv.innerHTML += '<p style="font-size: 12px; margin-top: 10px;"><a href="' + data.loginUrl + '" target="_blank">Click here if email fails</a></p>';
+                        }
+                    } else {
+                        messageDiv.innerHTML = '<p style="color: red;">❌ ' + data.error + '</p>';
+                    }
+                } catch (error) {
+                    messageDiv.innerHTML = '<p style="color: red;">❌ Failed to send magic link: ' + error.message + '</p>';
+                }
+            }
+
+            window.logout = async function() {
+                try {
+                    const token = localStorage.getItem('auth_token');
+                    if (token) {
+                        await fetch('/api/auth/logout', {
+                            method: 'POST',
+                            headers: { 'Authorization': 'Bearer ' + token },
+                            credentials: 'include'
+                        });
+                    }
+                } catch (error) {
+                    // Server logout failed, but continue with local cleanup
+                }
+                
+                // Clear local storage and cookies
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('user_email');
+                document.cookie = 'auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                
+                showLoginForm();
+            }
+
+            // Add event listener to login button
+            const loginButton = document.getElementById('loginButton');
+            if (loginButton) {
+                loginButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    requestLogin();
+                });
+            }
+            
+            // Add Enter key listener to email input
+            const emailInput = document.getElementById('emailInput');
+            if (emailInput) {
+                emailInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        requestLogin();
+                    }
+                });
+            }
+            
+        }); // End of DOMContentLoaded callback
+        
+        // Global functions that need to be accessible from onclick handlers
+        function copyToClipboard(elementId, buttonElement) {
+            const text = document.getElementById(elementId).textContent;
+            const btn = buttonElement || event.target;
+            const originalText = btn.textContent;
+            
+            // Try modern clipboard API first
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => {
+                    // Show success feedback
+                    btn.textContent = '✅ Copied!';
+                    btn.style.background = 'var(--success-color)';
+                    btn.style.color = 'white';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '';
+                        btn.style.color = '';
+                    }, 2000);
+                }).catch((err) => {
+                    fallbackCopyToClipboard(text, btn, originalText);
+                });
+            } else {
+                // Fallback for older browsers or non-HTTPS
+                fallbackCopyToClipboard(text, btn, originalText);
+            }
+        }
+        
+        function fallbackCopyToClipboard(text, btn, originalText) {
+            // Create a temporary textarea element
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            
+            try {
+                textArea.focus();
+                textArea.select();
+                const successful = document.execCommand('copy');
+                
+                if (successful) {
+                    btn.textContent = '✅ Copied!';
+                    btn.style.background = 'var(--success-color)';
+                    btn.style.color = 'white';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '';
+                        btn.style.color = '';
+                    }, 2000);
+                } else {
+                    btn.textContent = '❌ Copy failed';
+                    setTimeout(() => btn.textContent = originalText, 2000);
+                }
+            } catch (err) {
+                btn.textContent = '❌ Copy failed';
+                setTimeout(() => btn.textContent = originalText, 2000);
+            } finally {
+                document.body.removeChild(textArea);
+            }
+        }
+    </script>
 </body>
 </html>

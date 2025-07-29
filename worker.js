@@ -1,7 +1,6 @@
 // Cloudflare Worker for AI Caption Studio using Hono
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { serveStatic } from 'hono/cloudflare-workers';
 import { getCookie, setCookie } from 'hono/cookie';
 import jwt from 'jsonwebtoken';
 import exifr from 'exifr';
@@ -2004,6 +2003,28 @@ app.post('/api/settings/location', authenticateToken, async (c) => {
     }
 });
 
+app.get('/api/settings/mastodon', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        const settings = await database.getUserSettings(user.id, 'social');
+        const mastodonSettings = {};
+        
+        settings.forEach(setting => {
+            if (setting.setting_key === 'mastodon_instance') {
+                mastodonSettings.instance = setting.setting_value;
+            } else if (setting.setting_key === 'mastodon_token') {
+                mastodonSettings.token = setting.encrypted ? '••••••••' : setting.setting_value;
+            }
+        });
+        
+        return c.json(mastodonSettings);
+    } catch (error) {
+        return c.json({ error: 'Failed to load Mastodon settings: ' + error.message }, 500);
+    }
+});
+
 app.get('/api/settings', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
@@ -2905,8 +2926,10 @@ app.get('/test', (c) => {
   `);
 });
 
-// Main page route
-app.get('/', (c) => {
+// Static file routes - these will be handled by serveStatic middleware at the end
+
+// Legacy embedded HTML route (will be removed)
+app.get('/legacy', (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -4234,17 +4257,14 @@ app.get('/auth', async (c) => {
         }
     }
     
-    // Default auth page if no invite token
-    return c.html(`
-        <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
-            <h1>🔐 Authentication</h1>
-            <p>Authentication is integrated into the main page.</p>
-            <a href="/" style="color: #405de6;">← Back to Main</a>
-        </div>
-    `);
+    // Default auth page if no invite token - redirect to static auth.html
+    return c.redirect('/auth.html');
 });
 
-app.get('/admin', (c) => {
+// Admin route will be handled by static file serving
+
+// Legacy embedded admin HTML (will be removed)
+app.get('/legacy-admin', (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -4948,7 +4968,10 @@ app.get('/admin', (c) => {
   `);
 });
 
-app.get('/settings', (c) => {
+// Settings route will be handled by static file serving
+
+// Legacy embedded settings HTML (will be removed)
+app.get('/legacy-settings', (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -5616,7 +5639,10 @@ app.get('/settings', (c) => {
 });
 
 // Admin Users Page
-app.get('/admin/users', (c) => {
+// Admin users route will be handled by static file serving
+
+// Legacy embedded admin users HTML (will be removed)
+app.get('/legacy-admin-users', (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -6295,7 +6321,10 @@ app.get('/admin/users', (c) => {
 });
 
 // Admin Tiers Page
-app.get('/admin/tiers', (c) => {
+// Admin tiers route will be handled by static file serving
+
+// Legacy embedded admin tiers HTML (will be removed)
+app.get('/legacy-admin-tiers', (c) => {
   return c.html(`
 <!DOCTYPE html>
 <html lang="en">
@@ -6613,6 +6642,26 @@ app.get('/admin/tiers', (c) => {
 </body>
 </html>
   `);
+});
+
+// Add a test route to verify the worker is working
+app.get('/test-worker', (c) => {
+  return c.json({ message: 'Worker is running', timestamp: new Date().toISOString() });
+});
+
+// Static page routes - serve HTML files for main application pages
+// These routes serve the actual HTML pages (not API endpoints)
+
+// Admin users management
+app.get('/admin/users', async (c) => {
+  // Serve the admin-users.html file
+  return c.redirect('/admin-users.html');
+});
+
+// Admin tiers management  
+app.get('/admin/tiers', async (c) => {
+  // Serve the admin-tiers.html file
+  return c.redirect('/admin-tiers.html');
 });
 
 export default app;
