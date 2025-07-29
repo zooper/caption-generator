@@ -5068,6 +5068,12 @@ app.get('/admin/users', (c) => {
             try {
                 const token = localStorage.getItem('auth_token');
                 console.log('Admin auth check - Token exists:', !!token);
+                console.log('Admin auth check - Token value:', token ? token.substring(0, 20) + '...' : 'null');
+                
+                if (!token) {
+                    console.log('No auth token found, showing login required');
+                    return;
+                }
                 
                 const response = await fetch('/api/auth/me', {
                     headers: { 'Authorization': 'Bearer ' + token },
@@ -5075,6 +5081,7 @@ app.get('/admin/users', (c) => {
                 });
                 
                 console.log('Admin auth check - Response status:', response.status);
+                console.log('Admin auth check - Response headers:', response.headers);
                 
                 if (response.ok) {
                     const user = await response.json();
@@ -5082,6 +5089,7 @@ app.get('/admin/users', (c) => {
                     console.log('Admin auth check - Is admin:', user.isAdmin);
                     
                     if (user.isAdmin) {
+                        console.log('User is admin, showing admin content');
                         document.getElementById('loginRequired').classList.add('hidden');
                         document.getElementById('adminContent').classList.remove('hidden');
                         loadUsers();
@@ -5090,6 +5098,8 @@ app.get('/admin/users', (c) => {
                     }
                 } else {
                     console.log('Auth response not ok:', response.status, response.statusText);
+                    const errorText = await response.text();
+                    console.log('Auth response error body:', errorText);
                 }
             } catch (error) {
                 console.error('Auth check failed:', error);
