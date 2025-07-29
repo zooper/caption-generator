@@ -25,7 +25,7 @@ class D1Database {
             const result = await stmt.bind(email, isAdmin).first();
             
             if (isAdmin) {
-                console.log('Admin user created:', email);
+                // Admin user created
             }
             
             return result;
@@ -171,12 +171,6 @@ class D1Database {
             
             return id;
         } catch (error) {
-            console.error('Failed to log query:', error);
-            console.error('Error details:', {
-                message: error.message,
-                stack: error.stack,
-                name: error.name
-            });
             // Don't throw error to avoid breaking the main flow
         }
     }
@@ -224,7 +218,6 @@ class D1Database {
                         try {
                             await this.db.prepare(`ALTER TABLE query_logs ADD COLUMN ${col.name} ${col.definition}`).run();
                         } catch (alterError) {
-                            console.error(`Failed to add ${col.name} column:`, alterError);
                         }
                     }
                 }
@@ -234,7 +227,6 @@ class D1Database {
             const finalTableInfo = await this.db.prepare(`PRAGMA table_info(query_logs)`).all();
             
         } catch (error) {
-            console.error('Error in ensureQueryLogsTable:', error);
         }
     }
 
@@ -256,10 +248,8 @@ class D1Database {
             `);
             
             const result = await stmt.bind(userId).run();
-            console.log('Daily usage incremented for user:', userId, 'result:', result);
             return true;
         } catch (error) {
-            console.error('Failed to increment daily usage:', error);
             return false;
         }
     }
@@ -279,7 +269,6 @@ class D1Database {
             `);
             await stmt.run();
         } catch (error) {
-            console.log('Could not ensure daily_usage table exists:', error);
         }
     }
 
@@ -293,7 +282,6 @@ class D1Database {
             return result ? result.setting_value : defaultValue;
         } catch (error) {
             // If table doesn't exist yet, return default
-            console.log('System settings table may not exist:', error.message);
             return defaultValue;
         }
     }
@@ -312,10 +300,8 @@ class D1Database {
                     updated_at = datetime('now')
             `);
             const result = await stmt.bind(key, value).run();
-            console.log(`System setting ${key} = ${value} saved successfully`);
             return true;
         } catch (error) {
-            console.error('Failed to set system setting:', error);
             return false;
         }
     }
@@ -333,7 +319,6 @@ class D1Database {
             `);
             await stmt.run();
         } catch (error) {
-            console.log('Could not ensure system_settings table exists:', error);
         }
     }
 
@@ -348,7 +333,6 @@ class D1Database {
             const result = await stmt.all();
             return result.results || [];
         } catch (error) {
-            console.log('System settings table may not exist:', error.message);
             return [];
         }
     }
@@ -397,7 +381,6 @@ class D1Database {
                         try {
                             const alterResult = await this.db.prepare(`ALTER TABLE user_settings ADD COLUMN ${col.name} ${col.definition}`).run();
                         } catch (alterError) {
-                            console.error(`Failed to add ${col.name} column:`, alterError);
                         }
                     } else {
                     }
@@ -408,12 +391,7 @@ class D1Database {
             const finalTableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
             
         } catch (error) {
-            console.error('Error in ensureUserSettingsTable:', error);
-            console.error('Error details:', {
-                message: error.message,
-                stack: error.stack,
-                name: error.name
-            });
+            // Error handling
         }
     }
 
@@ -429,14 +407,12 @@ class D1Database {
             const result = await stmt.bind(userId, category).all();
             return result.results || [];
         } catch (error) {
-            console.error('Failed to get user settings:', error);
             return [];
         }
     }
 
     async setUserSetting(userId, category, settingKey, settingValue, encrypted = false) {
         try {
-            console.log(`setUserSetting called:`, { userId, category, settingKey, valueLength: settingValue?.length, encrypted });
             
             await this.ensureUserSettingsTable();
             
@@ -446,13 +422,10 @@ class D1Database {
                 WHERE user_id = ? AND category = ? AND setting_key = ?
             `);
             
-            console.log(`Checking for existing setting: userId=${userId}, category=${category}, key=${settingKey}`);
             const existing = await existingStmt.bind(userId, category, settingKey).first();
-            console.log(`Existing record found:`, existing);
             
             if (existing) {
                 // Update existing record
-                console.log(`Updating existing record with id=${existing.id}`);
                 
                 // Check what columns exist in the table to build the correct UPDATE
                 const tableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
@@ -485,23 +458,17 @@ class D1Database {
                     WHERE id = ?
                 `;
                 
-                console.log('Update SQL:', updateSQL);
-                console.log('Update values:', updateValues);
                 
                 const updateStmt = this.db.prepare(updateSQL);
                 const result = await updateStmt.bind(...updateValues).run();
-                console.log(`Update result:`, result);
-                const changes = result.meta?.changes || result.changes || 0;
-                console.log(`User setting ${category}.${settingKey} updated for user ${userId}, changes: ${changes}`);
+                const changes = (result.meta && result.meta.changes) || result.changes || 0;
                 return changes > 0;
             } else {
                 // Insert new record
-                console.log(`Inserting new record`);
                 
                 // Check what columns exist in the table to build the correct INSERT
                 const tableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
                 const columns = (tableInfo.results || []).map(col => col.name);
-                console.log('Available columns for INSERT:', columns);
                 
                 // Build INSERT statement based on available columns
                 let insertColumns = ['user_id', 'setting_key', 'setting_value'];
@@ -542,23 +509,13 @@ class D1Database {
                     VALUES (${placeholders.join(', ')})
                 `;
                 
-                console.log('Insert SQL:', insertSQL);
-                console.log('Insert values:', insertValues);
                 
                 const insertStmt = this.db.prepare(insertSQL);
                 const result = await insertStmt.bind(...insertValues).run();
-                console.log(`Insert result:`, result);
-                const changes = result.meta?.changes || result.changes || 0;
-                console.log(`User setting ${category}.${settingKey} created for user ${userId}, changes: ${changes}`);
+                const changes = (result.meta && result.meta.changes) || result.changes || 0;
                 return changes > 0;
             }
         } catch (error) {
-            console.error(`Failed to set user setting ${category}.${settingKey} for user ${userId}:`, error);
-            console.error('Error details:', {
-                message: error.message,
-                stack: error.stack,
-                name: error.name
-            });
             return false;
         }
     }
@@ -572,11 +529,9 @@ class D1Database {
                 WHERE user_id = ? AND category = ? AND setting_key = ?
             `);
             const result = await stmt.bind(userId, category, settingKey).run();
-            const changes = result.meta?.changes || result.changes || 0;
-            console.log(`User setting ${category}.${settingKey} deleted for user ${userId}, changes: ${changes}`);
+            const changes = result.meta && result.meta.changes || result.changes || 0;
             return changes > 0;
         } catch (error) {
-            console.error('Failed to delete user setting:', error);
             return false;
         }
     }
@@ -584,7 +539,6 @@ class D1Database {
     async deleteUser(userId) {
         try {
             // Start a transaction by deleting related data first
-            console.log(`Deleting user ${userId} and all related data...`);
             
             // Delete user settings
             const settingsStmt = this.db.prepare('DELETE FROM user_settings WHERE user_id = ?');
@@ -611,11 +565,9 @@ class D1Database {
             const userStmt = this.db.prepare('DELETE FROM users WHERE id = ?');
             const result = await userStmt.bind(userId).run();
             
-            const changes = result.meta?.changes || result.changes || 0;
-            console.log(`User ${userId} deleted, changes: ${changes}`);
+            const changes = result.meta && result.meta.changes || result.changes || 0;
             return changes > 0;
         } catch (error) {
-            console.error('Failed to delete user:', error);
             return false;
         }
     }
@@ -736,7 +688,7 @@ D1Database.prototype.toggleUserStatus = async function(userId) {
         UPDATE users SET is_active = NOT is_active WHERE id = ?
     `);
     const result = await stmt.bind(userId).run();
-    const changes = result.meta?.changes || result.changes || 0;
+    const changes = result.meta && result.meta.changes || result.changes || 0;
     return changes > 0;
 };
 
@@ -778,7 +730,7 @@ D1Database.prototype.updateTier = async function(tierId, name, dailyLimit, descr
         WHERE id = ?
     `);
     const result = await stmt.bind(name, dailyLimit, description, tierId).run();
-    const changes = result.meta?.changes || result.changes || 0;
+    const changes = result.meta && result.meta.changes || result.changes || 0;
     return changes > 0;
 };
 
@@ -797,69 +749,53 @@ D1Database.prototype.deleteTier = async function(tierId) {
         DELETE FROM user_tiers WHERE id = ?
     `);
     const result = await stmt.bind(tierId).run();
-    const changes = result.meta?.changes || result.changes || 0;
+    const changes = result.meta && result.meta.changes || result.changes || 0;
     return changes > 0;
 };
 
 D1Database.prototype.setUserTier = async function(userId, tierId) {
     try {
-        console.log('Database setUserTier called:', { userId, tierId });
         const stmt = this.db.prepare(`
             UPDATE users SET tier_id = ? WHERE id = ?
         `);
         const result = await stmt.bind(tierId, userId).run();
-        console.log('setUserTier result:', result);
         
         // D1 result structure: result.meta.changes or result.changes
-        const changes = result.meta?.changes || result.changes || 0;
-        console.log('Changes detected:', changes);
+        const changes = result.meta && result.meta.changes || result.changes || 0;
         return changes > 0;
     } catch (error) {
-        console.error('Error in setUserTier:', error);
         throw error;
     }
 };
 
 D1Database.prototype.createInviteToken = async function(email, invitedBy, token, expiresAt, tierId = null, personalMessage = null) {
     try {
-        console.log('createInviteToken called with:', { email, invitedBy, token, expiresAt, tierId, personalMessage });
         
         // First ensure the invite_tokens table exists with proper schema
         await this.ensureInviteTokensTable();
-        console.log('ensureInviteTokensTable completed successfully');
         
         // Debug: List all tables to see what exists
         try {
             const tablesResult = await this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-            console.log('All tables in database:', tablesResult.results?.map(t => t.name) || 'No results');
             
             // Check the actual schema of invite_tokens table
             const schemaResult = await this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invite_tokens'").all();
-            console.log('invite_tokens table schema:', schemaResult.results?.[0]?.sql || 'No schema found');
             
             // Check for any foreign keys or constraints that reference 'tiers'
             const fkResult = await this.db.prepare("SELECT sql FROM sqlite_master WHERE sql LIKE '%tiers%'").all();
-            console.log('Objects referencing tiers:', fkResult.results || 'None found');
             
         } catch (listError) {
-            console.log('Could not list tables:', listError.message);
         }
         
-        console.log('About to prepare INSERT statement');
         const stmt = this.db.prepare(`
             INSERT INTO invite_tokens (email, invited_by_user_id, token, expires_at, tier_id, personal_message) 
             VALUES (?, ?, ?, ?, ?, ?)
         `);
-        console.log('INSERT statement prepared successfully');
         
-        console.log('About to bind parameters and execute');
         const result = await stmt.bind(email, invitedBy, token, expiresAt, tierId, personalMessage).run();
-        console.log('INSERT completed successfully:', result);
         
         return { email, token, expiresAt, tierId, personalMessage };
     } catch (error) {
-        console.error('Error creating invite token:', error);
-        console.error('Error stack:', error.stack);
         throw error;
     }
 };
@@ -876,9 +812,7 @@ D1Database.prototype.ensureUserTiersTable = async function() {
             )
         `);
         await stmt.run();
-        console.log('user_tiers table ensured');
     } catch (error) {
-        console.log('Could not ensure user_tiers table exists:', error);
     }
 };
 
@@ -889,14 +823,12 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
         
         // Check if the table has the wrong foreign key constraint
         const schemaResult = await this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='invite_tokens'").all();
-        const currentSchema = schemaResult.results?.[0]?.sql || '';
+        const currentSchema = schemaResult.results&& [0]&& sql || '';
         
         if (currentSchema.includes('REFERENCES tiers(id)')) {
-            console.log('Found incorrect foreign key constraint, recreating table...');
             
             // Drop and recreate the table with correct schema
             await this.db.prepare('DROP TABLE IF EXISTS invite_tokens').run();
-            console.log('Dropped invite_tokens table with incorrect schema');
         }
         
         const stmt = this.db.prepare(`
@@ -923,10 +855,8 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
                 ALTER TABLE invite_tokens ADD COLUMN tier_id INTEGER
             `);
             await alterStmt.run();
-            console.log('Added tier_id column to invite_tokens table');
         } catch (alterError) {
             // Column likely already exists, which is fine
-            console.log('tier_id column already exists or could not be added:', alterError.message);
         }
         
         // Add personal_message column if it doesn't exist (for existing tables)
@@ -935,15 +865,11 @@ D1Database.prototype.ensureInviteTokensTable = async function() {
                 ALTER TABLE invite_tokens ADD COLUMN personal_message TEXT
             `);
             await alterStmt2.run();
-            console.log('Added personal_message column to invite_tokens table');
         } catch (alterError) {
             // Column likely already exists, which is fine
-            console.log('personal_message column already exists or could not be added:', alterError.message);
         }
         
-        console.log('invite_tokens table ensured');
     } catch (error) {
-        console.log('Could not ensure invite_tokens table exists:', error);
     }
 };
 
@@ -958,13 +884,11 @@ D1Database.prototype.getInviteToken = async function(token) {
         const result = await stmt.bind(token).first();
         return result;
     } catch (error) {
-        console.error('Error getting invite token:', error);
         return null;
     }
 };
 
 D1Database.prototype.useInviteToken = async function(token, userId) {
-    console.log('useInviteToken called with:', { token, userId, userIdType: typeof userId });
     
     try {
         const stmt = this.db.prepare(`
@@ -972,13 +896,10 @@ D1Database.prototype.useInviteToken = async function(token, userId) {
             SET used_at = datetime('now'), used_by_user_id = ? 
             WHERE token = ?
         `);
-        console.log('About to bind parameters:', { userId, token });
         const result = await stmt.bind(userId, token).run();
-        console.log('useInviteToken result:', result);
-        const changes = result.meta?.changes || result.changes || 0;
+        const changes = result.meta && result.meta.changes || result.changes || 0;
         return changes > 0;
     } catch (error) {
-        console.error('Error in useInviteToken:', error);
         throw error;
     }
 };
@@ -992,7 +913,6 @@ D1Database.prototype.getPendingInvites = async function() {
         const tableExists = await tableCheck.first();
         
         if (!tableExists) {
-            console.log('invite_tokens table does not exist, returning empty array');
             return [];
         }
         
@@ -1002,7 +922,6 @@ D1Database.prototype.getPendingInvites = async function() {
         `);
         const columns = await columnsCheck.all();
         const columnNames = (columns.results || []).map(col => col.name);
-        console.log('invite_tokens table columns:', columnNames);
         
         // Use different query based on available columns
         let stmt;
@@ -1038,7 +957,6 @@ D1Database.prototype.getPendingInvites = async function() {
         const result = await stmt.all();
         return result.results || [];
     } catch (error) {
-        console.error('Error in getPendingInvites:', error);
         return [];
     }
 };
@@ -1103,7 +1021,6 @@ async function sendMagicLinkEmail(email, loginUrl, env) {
     }
 
     const result = await response.json();
-    console.log('Email sent successfully via Resend:', result.id);
     return result;
 }
 
@@ -1155,7 +1072,6 @@ app.post('/api/auth/request-login', async (c) => {
                 expiresIn: '15 minutes'
             });
         } catch (emailError) {
-            console.error('Email sending failed:', emailError);
             
             // Fallback: show link for development if email fails
             return c.json({ 
@@ -1167,7 +1083,6 @@ app.post('/api/auth/request-login', async (c) => {
         }
 
     } catch (error) {
-        console.error('Magic link request error:', error);
         return c.json({ error: 'Failed to generate magic link' }, 500);
     }
 });
@@ -1238,7 +1153,6 @@ app.get('/auth/verify', async (c) => {
         `);
 
     } catch (error) {
-        console.error('Login verification error:', error);
         return c.html('<h1>❌ Login Failed</h1><p>Login verification failed.</p><a href="/">← Back</a>');
     }
 });
@@ -1273,7 +1187,6 @@ app.post('/api/auth/logout', authenticateToken, async (c) => {
         
         return c.json({ success: true, message: 'Logged out successfully' });
     } catch (error) {
-        console.error('Logout error:', error);
         return c.json({ error: 'Logout failed' }, 500);
     }
 });
@@ -1282,7 +1195,6 @@ app.post('/api/auth/logout', authenticateToken, async (c) => {
 app.post('/api/auth/accept-invite', async (c) => {
     try {
         const { email, inviteToken } = await c.req.json();
-        console.log('Accept invite called with:', { email, inviteToken });
         
         if (!email || !inviteToken) {
             return c.json({ error: 'Email and invite token are required' }, 400);
@@ -1291,9 +1203,7 @@ app.post('/api/auth/accept-invite', async (c) => {
         const database = new D1Database(c.env.DB);
         
         // Validate the invite token
-        console.log('Getting invite token...');
         const invite = await database.getInviteToken(inviteToken);
-        console.log('Invite token result:', invite);
         if (!invite) {
             return c.json({ error: 'Invalid or expired invite token' }, 400);
         }
@@ -1303,33 +1213,24 @@ app.post('/api/auth/accept-invite', async (c) => {
         }
         
         // Check if user already exists
-        console.log('Checking if user exists...');
         const existingUser = await database.getUserByEmail(email);
-        console.log('Existing user result:', existingUser);
         if (existingUser) {
             return c.json({ error: 'User already exists' }, 400);
         }
         
         // Create the user account
-        console.log('Creating user account...');
         const user = await database.createUser(email, c.env);
-        console.log('User created:', user);
         
         // Assign tier if specified in the invite
         if (invite.tier_id) {
-            console.log('Assigning tier:', invite.tier_id);
             const tierInfo = await database.getTierById(invite.tier_id);
-            console.log('Tier info:', tierInfo);
             if (tierInfo) {
                 await database.setUserTier(user.id, invite.tier_id);
-                console.log(`Assigned tier ${tierInfo.name} to user ${email}`);
             }
         }
         
         // Mark the invite token as used
-        console.log('Marking invite as used with user ID:', user.id);
         await database.useInviteToken(inviteToken, user.id);
-        console.log('Invite token marked as used successfully');
         
         // Create a login session for the new user
         const sessionId = crypto.randomUUID();
@@ -1339,9 +1240,7 @@ app.post('/api/auth/accept-invite', async (c) => {
         const ipAddress = c.req.header('cf-connecting-ip') || 'unknown';
         const userAgent = c.req.header('user-agent') || '';
         
-        console.log('Creating session with:', { sessionId, userId: user.id, expiresAt, ipAddress, userAgent });
         await database.createSession(sessionId, user.id, expiresAt, ipAddress, userAgent);
-        console.log('Session created successfully');
         
         // Create JWT token
         const token = jwt.sign({ sessionId }, c.env.JWT_SECRET || JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -1366,7 +1265,6 @@ app.post('/api/auth/accept-invite', async (c) => {
         });
         
     } catch (error) {
-        console.error('Accept invite error:', error);
         return c.json({ error: 'Failed to accept invitation' }, 500);
     }
 });
@@ -1405,7 +1303,6 @@ app.post('/api/admin/users', authenticateToken, requireAdmin, async (c) => {
             return c.json({ error: 'Failed to create user' }, 500);
         }
     } catch (error) {
-        console.error('Error creating user:', error);
         return c.json({ error: 'Failed to create user' }, 500);
     }
 });
@@ -1465,18 +1362,12 @@ app.get('/api/admin/stats', authenticateToken, requireAdmin, async (c) => {
         const userCount = await database.db.prepare('SELECT COUNT(*) as count FROM users').first();
         const queryCount = await database.db.prepare('SELECT COUNT(*) as count FROM query_logs').first();
         
-        console.log('Admin stats query results:', {
-            userCount: userCount?.count || 0,
-            queryCount: queryCount?.count || 0
-        });
-        
         return c.json({
-            totalUsers: userCount?.count || 0,
-            totalQueries: queryCount?.count || 0,
+            totalUsers: (userCount && userCount.count) || 0,
+            totalQueries: (queryCount && queryCount.count) || 0,
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        console.error('Admin stats error:', error);
         return c.json({ error: 'Failed to fetch stats: ' + error.message }, 500);
     }
 });
@@ -1594,13 +1485,11 @@ app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async
         const { userId } = c.req.param();
         const { tierId } = await c.req.json();
         
-        console.log('Updating user tier:', { userId, tierId });
         
         const database = new D1Database(c.env.DB);
         
         // Handle clearing tier (tierId is null/empty)
         if (!tierId || tierId === '' || tierId === 'null') {
-            console.log('Clearing tier for user:', userId);
             const success = await database.setUserTier(userId, null);
             if (success) {
                 return c.json({ 
@@ -1615,11 +1504,9 @@ app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async
         // Verify tier exists for non-null tierId
         const tier = await database.getTierById(tierId);
         if (!tier) {
-            console.log('Tier not found:', tierId);
             return c.json({ error: 'Invalid tier ID' }, 400);
         }
         
-        console.log('Setting user tier:', { userId, tierId, tierName: tier.name });
         const success = await database.setUserTier(userId, tierId);
         
         if (success) {
@@ -1628,11 +1515,9 @@ app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async
                 message: `User tier updated to "${tier.name}"` 
             });
         } else {
-            console.log('setUserTier returned false for userId:', userId);
             return c.json({ error: 'User not found' }, 404);
         }
     } catch (error) {
-        console.error('Error updating user tier:', error);
         return c.json({ error: 'Failed to update user tier: ' + error.message }, 500);
     }
 });
@@ -1673,7 +1558,6 @@ app.delete('/api/admin/users/:userId', authenticateToken, requireAdmin, async (c
         }
         
     } catch (error) {
-        console.error('Error deleting user:', error);
         return c.json({ error: 'Failed to delete user: ' + error.message }, 500);
     }
 });
@@ -1700,9 +1584,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
             // Debug: List all tables in the database
             try {
                 const tablesResult = await database.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-                console.log('Available tables in database:', tablesResult.results?.map(t => t.name) || 'No results');
             } catch (dbError) {
-                console.log('Could not list tables:', dbError.message);
             }
             
             tierInfo = await database.getTierById(tierId);
@@ -1786,7 +1668,6 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
                 expiresIn: '7 days'
             });
         } catch (emailError) {
-            console.error('Email sending failed:', emailError);
             return c.json({ 
                 success: true, 
                 message: `Invitation created but email sending failed: ${emailError.message}`,
@@ -1795,7 +1676,6 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
         }
 
     } catch (error) {
-        console.error('Invite error:', error);
         return c.json({ error: 'Failed to send invitation' }, 500);
     }
 });
@@ -1804,10 +1684,8 @@ app.get('/api/admin/invites', authenticateToken, requireAdmin, async (c) => {
     try {
         const database = new D1Database(c.env.DB);
         const invites = await database.getPendingInvites();
-        console.log('Invites fetched successfully:', invites.length, 'invites');
         return c.json(invites);
     } catch (error) {
-        console.error('Error in /api/admin/invites:', error);
         return c.json({ error: 'Failed to fetch invites: ' + error.message }, 500);
     }
 });
@@ -1886,7 +1764,6 @@ app.post('/api/admin/invites/:token/resend', authenticateToken, requireAdmin, as
 
         if (!emailResponse.ok) {
             const errorData = await emailResponse.text();
-            console.error('Resend API error:', errorData);
             // Still return success since the token was updated, just note email issue
             return c.json({ 
                 success: true, 
@@ -1901,7 +1778,6 @@ app.post('/api/admin/invites/:token/resend', authenticateToken, requireAdmin, as
             newToken: newToken
         });
     } catch (error) {
-        console.error('Error resending invite:', error);
         return c.json({ error: 'Failed to resend invitation: ' + error.message }, 500);
     }
 });
@@ -1928,7 +1804,7 @@ app.delete('/api/admin/invites/:token', authenticateToken, requireAdmin, async (
         `);
         const result = await deleteStmt.bind(token).run();
         
-        const changes = result.meta?.changes || result.changes || 0;
+        const changes = result.meta && result.meta.changes || result.changes || 0;
         if (changes > 0) {
             return c.json({ 
                 success: true, 
@@ -1938,7 +1814,6 @@ app.delete('/api/admin/invites/:token', authenticateToken, requireAdmin, async (
             return c.json({ error: 'Failed to delete invitation' }, 500);
         }
     } catch (error) {
-        console.error('Error deleting invite:', error);
         return c.json({ error: 'Failed to delete invitation: ' + error.message }, 500);
     }
 });
@@ -2069,14 +1944,7 @@ app.post('/api/user/settings/mastodon', authenticateToken, async (c) => {
         const user = c.get('user');
         const { instance, token } = await c.req.json();
         
-        console.log('Mastodon settings save request:', {
-            userId: user.id,
-            instance: instance ? instance.substring(0, 20) + '...' : 'null',
-            tokenLength: token ? token.length : 0
-        });
-        
         if (!instance || !token) {
-            console.log('Missing instance or token');
             return c.json({ error: 'Instance URL and token are required' }, 400);
         }
         
@@ -2086,19 +1954,12 @@ app.post('/api/user/settings/mastodon', authenticateToken, async (c) => {
         const instanceResult = await database.setUserSetting(user.id, 'social', 'mastodon_instance', instance, false);
         const tokenResult = await database.setUserSetting(user.id, 'social', 'mastodon_token', token, true);
         
-        console.log('Mastodon settings save results:', {
-            instanceSaved: instanceResult,
-            tokenSaved: tokenResult
-        });
-        
         if (instanceResult && tokenResult) {
             return c.json({ success: true, message: 'Mastodon settings saved' });
         } else {
-            console.error('One or both settings failed to save');
             return c.json({ error: 'Failed to save one or more settings' }, 500);
         }
     } catch (error) {
-        console.error('Mastodon settings save error:', error);
         return c.json({ error: 'Failed to save Mastodon settings: ' + error.message }, 500);
     }
 });
@@ -2145,13 +2006,6 @@ app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
             return c.json({ error: 'Mastodon account not properly configured' }, 400);
         }
         
-        console.log('Posting to Mastodon:', {
-            instance: mastodonInstance,
-            statusLength: status.length,
-            hasImage: !!image_data,
-            hasAltText: !!alt_text
-        });
-        
         // First upload the image if provided
         let mediaId = null;
         if (image_data) {
@@ -2176,12 +2030,9 @@ app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
                 if (mediaResponse.ok) {
                     const mediaResult = await mediaResponse.json();
                     mediaId = mediaResult.id;
-                    console.log('Media uploaded successfully:', mediaId);
                 } else {
-                    console.error('Media upload failed:', mediaResponse.status, await mediaResponse.text());
                 }
             } catch (mediaError) {
-                console.error('Media upload error:', mediaError);
                 // Continue without media if upload fails
             }
         }
@@ -2207,7 +2058,6 @@ app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
         
         if (postResponse.ok) {
             const postResult = await postResponse.json();
-            console.log('Post created successfully:', postResult.id);
             
             return c.json({ 
                 success: true, 
@@ -2217,14 +2067,12 @@ app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
             });
         } else {
             const errorText = await postResponse.text();
-            console.error('Post creation failed:', postResponse.status, errorText);
             return c.json({ 
                 error: 'Failed to create post on Mastodon: ' + postResponse.status 
             }, 500);
         }
         
     } catch (error) {
-        console.error('Mastodon post error:', error);
         return c.json({ error: 'Failed to post to Mastodon: ' + error.message }, 500);
     }
 });
@@ -2250,7 +2098,7 @@ app.post('/api/user/settings/test-linkedin', authenticateToken, async (c) => {
             const userData = await response.json();
             return c.json({ 
                 success: true, 
-                message: `Connected as ${userData.firstName?.localized?.en_US} ${userData.lastName?.localized?.en_US}` 
+                message: `Connected as ${(userData.firstName && userData.firstName.localized && userData.firstName.localized.en_US) || ''} ${(userData.lastName && userData.lastName.localized && userData.lastName.localized.en_US) || ''}` 
             });
         } else {
             return c.json({ 
@@ -2301,7 +2149,6 @@ app.delete('/api/user/settings/linkedin', authenticateToken, async (c) => {
 async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null) {
     
     if (!base64Image) {
-        console.error('No base64Image provided to buildPromptFromImageWithExtraction');
         throw new Error('No image data provided');
     }
     
@@ -2380,16 +2227,9 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                             extractedData.photoDateTime = parsedDate.toISOString();
                             extractedData.dateTimeSource = field;
                             context.push('Photo taken: ' + parsedDate.toLocaleDateString() + ' ' + parsedDate.toLocaleTimeString());
-                            console.log('Photo date extracted from ' + field + ':', {
-                                original: exifData[field],
-                                converted: dateStr,
-                                parsed: parsedDate,
-                                iso: parsedDate.toISOString()
-                            });
                             break;
                         }
                     } catch (error) {
-                        console.log('Failed to parse ' + field + ':', error.message);
                     }
                 }
             }
@@ -2401,49 +2241,40 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                     context.push('Camera/Gear: ' + camera.trim());
                     extractedData.cameraMake = exifData.Make;
                     extractedData.cameraModel = exifData.Model;
-                    console.log('Camera detected:', camera);
                 }
             }
             
             // GPS location context
             if (exifData.GPSLatitude && exifData.GPSLongitude) {
-                console.log('GPS coordinates found:', exifData.GPSLatitude, exifData.GPSLongitude);
                 try {
                     // Convert DMS (degrees, minutes, seconds) to decimal degrees
                     const lat = convertDMSToDD(exifData.GPSLatitude, exifData.GPSLatitudeRef);
                     const lon = convertDMSToDD(exifData.GPSLongitude, exifData.GPSLongitudeRef);
-                    console.log('Converted to decimal degrees:', lat, lon);
                     
                     extractedData.gpsLatitude = lat;
                     extractedData.gpsLongitude = lon;
                     
                     if (lat && lon && !isNaN(lat) && !isNaN(lon)) {
-                        console.log('Attempting reverse geocoding...');
                         const location = await reverseGeocode(lat, lon);
                         if (location) {
                             context.push('Location: ' + location);
                             extractedData.locationName = location;
-                            console.log('Location detected:', location);
                         }
                         
                         // Fetch weather data if requested and we have GPS coordinates
                         if (includeWeather && env) {
-                            console.log('Fetching weather data for coordinates:', lat, lon);
                             const weatherData = await getHistoricalWeather(lat, lon, exifData, env);
                             if (weatherData) {
                                 context.push('Weather: ' + weatherData);
                                 extractedData.weatherData = weatherData;
-                                console.log('Weather data added:', weatherData);
                             }
                         }
                     }
                 } catch (e) {
-                    console.log('GPS processing error:', e.message);
                 }
             }
         }
     } catch (error) {
-        console.log('EXIF extraction failed:', error.message);
     }
     
     const contextString = context.length > 0 ? '\\n\\nAdditional Context:\\n' + context.join('\\n') : '';
@@ -2486,6 +2317,8 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         '   - Includes relevant emojis\\n' +
         '   - Feels authentic and natural (NO forced questions or call-to-actions)\\n' +
         '   - Sounds like something a real person would write\\n' +
+        '   - IMPORTANT: Do NOT include any hashtags in the caption text\\n' +
+        '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
         '\\n2. 10-15 hashtags that:\\n' +
         '   - Mix popular (#photography, #instagood) and niche tags\\n' +
@@ -2493,6 +2326,7 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         '   - Include location-based tags if applicable\\n' +
         '   - Avoid banned or shadowbanned hashtags\\n' +
         '   - Range from broad to specific\\n' +
+        '   - These should be completely separate from the caption above\\n' +
         (context.length > 0 ? '   - Include relevant hashtags based on the context provided\\n' : '') +
         '\\n3. Alt text for accessibility (1-2 sentences):\\n' +
         '   - Describe what is actually visible in the image\\n' +
@@ -2501,7 +2335,7 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         '   - Keep it concise but descriptive\\n' +
         contextString + '\\n\\n' +
         'Format your response as:\\n' +
-        'CAPTION: [your caption here]\\n' +
+        'CAPTION: [your caption here - NO hashtags allowed]\\n' +
         'HASHTAGS: [hashtags separated by spaces]\\n' +
         'ALT_TEXT: [descriptive alt text for accessibility]';
     
@@ -2576,6 +2410,8 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
         '   - Includes relevant emojis\\n' +
         '   - Feels authentic and natural (NO forced questions or call-to-actions)\\n' +
         '   - Sounds like something a real person would write\\n' +
+        '   - IMPORTANT: Do NOT include any hashtags in the caption text\\n' +
+        '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
         '\\n2. 10-15 hashtags that:\\n' +
         '   - Mix popular (#photography, #instagood) and niche tags\\n' +
@@ -2583,6 +2419,7 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
         '   - Include location-based tags if applicable\\n' +
         '   - Avoid banned or shadowbanned hashtags\\n' +
         '   - Range from broad to specific\\n' +
+        '   - These should be completely separate from the caption above\\n' +
         (context.length > 0 ? '   - Include relevant hashtags based on the context provided\\n' : '') +
         '\\n3. Alt text for accessibility (1-2 sentences):\\n' +
         '   - Describe what is actually visible in the image\\n' +
@@ -2591,7 +2428,7 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
         '   - Keep it concise but descriptive\\n' +
         contextString + '\\n\\n' +
         'Format your response as:\\n' +
-        'CAPTION: [your caption here]\\n' +
+        'CAPTION: [your caption here - NO hashtags allowed]\\n' +
         'HASHTAGS: [hashtags separated by spaces]\\n' +
         'ALT_TEXT: [descriptive alt text for accessibility]';
     
@@ -2639,7 +2476,6 @@ async function reverseGeocode(latitude, longitude) {
             }
         }
     } catch (error) {
-        console.log('Reverse geocoding failed:', error.message);
     }
     
     return null;
@@ -2649,11 +2485,9 @@ async function reverseGeocode(latitude, longitude) {
 async function getHistoricalWeather(latitude, longitude, exifData, env) {
     try {
         if (!env.OPENWEATHER_API_KEY) {
-            console.log('OpenWeatherMap API key not configured');
             return null;
         }
         
-        console.log('Attempting to fetch weather data for coordinates:', latitude, longitude);
         
         // Extract date from EXIF data, default to current time if not available
         let photoTimestamp = Date.now();
@@ -2665,7 +2499,6 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
         for (const field of dateFields) {
             if (exifData && exifData[field]) {
                 try {
-                    console.log('Trying to parse ' + field + ':', exifData[field]);
                     
                     let dateStr = exifData[field];
                     let parsedDate;
@@ -2682,28 +2515,19 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                     if (parsedDate && !isNaN(parsedDate.getTime())) {
                         photoTimestamp = parsedDate.getTime();
                         dateSource = field;
-                        console.log('Weather: Photo date extracted from ' + field + ':', {
-                            original: exifData[field],
-                            converted: dateStr,
-                            parsed: parsedDate,
-                            timestamp: photoTimestamp
-                        });
                         break;
                     }
                 } catch (dateError) {
-                    console.log('Failed to parse ' + field + ':', dateError.message);
                 }
             }
         }
         
-        console.log('Photo timestamp source: ' + dateSource + ', date: ' + new Date(photoTimestamp));
         
         // Validate timestamp is reasonable (not in the future, not before 2000)
         const now = Date.now();
         const year2000 = new Date('2000-01-01').getTime();
         
         if (photoTimestamp > now || photoTimestamp < year2000) {
-            console.log('Photo timestamp seems invalid, using current time:', new Date(photoTimestamp));
             photoTimestamp = now;
             dateSource = 'current_time_fallback';
         }
@@ -2726,7 +2550,6 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
             apiDescription = 'historical';
         }
         
-        console.log('Fetching ' + apiDescription + ' weather data from OpenWeatherMap...');
         
         const response = await fetch(weatherUrl, {
             headers: {
@@ -2736,12 +2559,9 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
         
         if (!response.ok) {
             const errorText = await response.text();
-            console.log('OpenWeatherMap API error: ' + response.status + ' ' + response.statusText);
-            console.log('Error details:', errorText);
             
             // If historical API fails, try current weather as fallback
             if (apiDescription === 'historical') {
-                console.log('Historical weather API failed, falling back to current weather');
                 const fallbackUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=' + latitude + '&lon=' + longitude + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
                 const fallbackResponse = await fetch(fallbackUrl);
                 
@@ -2752,7 +2572,6 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                                            (fallbackData.main.humidity ? ', ' + fallbackData.main.humidity + '% humidity' : '') +
                                            (fallbackData.wind ? ', ' + Math.round(fallbackData.wind.speed * 3.6) + ' km/h wind' : '') +
                                            ' (current weather - historical not available)';
-                        console.log('Fallback weather data:', weatherText);
                         return weatherText;
                     }
                 }
@@ -2792,12 +2611,10 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                                (weatherInfo.humidity ? ', ' + weatherInfo.humidity + '% humidity' : '') +
                                (weatherInfo.windSpeed ? ', ' + weatherInfo.windSpeed + ' km/h wind' : '');
             
-            console.log('Weather data formatted:', weatherText);
             return weatherText;
         }
         
     } catch (error) {
-        console.log('Weather API request failed:', error.message);
     }
     
     return null;
@@ -2823,7 +2640,6 @@ async function getConnectedSocialAccounts(database, userId) {
         
         return connected;
     } catch (error) {
-        console.error('Failed to get connected social accounts:', error);
         return { mastodon: null, linkedin: null };
     }
 }
@@ -2893,10 +2709,8 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         
         // If user provided a custom prompt, we could use it instead, but for now always use enhanced
         if (prompt && prompt.trim() !== '') {
-            console.log('User provided custom prompt, but using enhanced prompt with EXIF data for better results');
         }
     } catch (extractionError) {
-        console.log('EXIF extraction failed, using basic prompt:', extractionError.message);
         // Fallback to basic prompt if extraction fails
         const styleInstructions = {
           creative: 'creative and artistic',
@@ -2909,7 +2723,7 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         
         const selectedStyle = styleInstructions[style] || styleInstructions.creative;
         
-        finalPrompt = prompt || 'Analyze this image for Instagram posting. Generate:\\n\\n1. A ' + selectedStyle + ' caption that:\\n   - Captures the main subject/scene\\n   - Is 1-3 sentences\\n   - Includes relevant emojis\\n   - Feels authentic and natural\\n\\n2. 10-15 hashtags that:\\n   - Mix popular and niche tags\\n   - Are relevant to image content\\n   - Range from broad to specific\\n\\n3. Alt text for accessibility (1-2 sentences):\\n   - Describe what is actually visible in the image\\n   - Include important visual details for screen readers\\n\\nFormat your response as:\\nCAPTION: [your caption here]\\nHASHTAGS: [hashtags separated by spaces]\\nALT_TEXT: [descriptive alt text for accessibility]';
+        finalPrompt = prompt || 'Analyze this image for Instagram posting. Generate:\\n\\n1. A ' + selectedStyle + ' caption that:\\n   - Captures the main subject/scene\\n   - Is 1-3 sentences\\n   - Includes relevant emojis\\n   - Feels authentic and natural\\n   - IMPORTANT: Do NOT include any hashtags in the caption text\\n   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n\\n2. 10-15 hashtags that:\\n   - Mix popular and niche tags\\n   - Are relevant to image content\\n   - Range from broad to specific\\n   - These should be completely separate from the caption above\\n\\n3. Alt text for accessibility (1-2 sentences):\\n   - Describe what is actually visible in the image\\n   - Include important visual details for screen readers\\n\\nFormat your response as:\\nCAPTION: [your caption here - NO hashtags allowed]\\nHASHTAGS: [hashtags separated by spaces]\\nALT_TEXT: [descriptive alt text for accessibility]';
     }
 
     // Call OpenAI API
@@ -2944,7 +2758,6 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('OpenAI API Error:', response.status, errorData);
       return c.json({ error: 'OpenAI API request failed: ' + response.status }, response.status);
     }
 
@@ -2953,7 +2766,6 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     
     // Log the query and increment usage
     const queryId = crypto.randomUUID();
-    console.log('Logging query for user:', user.id, 'queryId:', queryId);
     
     const logResult = await database.logQuery({
         id: queryId,
@@ -2965,12 +2777,6 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     });
     
     const usageResult = await database.incrementDailyUsage(user.id);
-    
-    console.log('Caption generation tracking results:', {
-        queryLogged: logResult,
-        usageIncremented: usageResult,
-        userId: user.id
-    });
     
     // Include extracted data in response if available
     const responseData = { content: responseContent };
@@ -2993,7 +2799,6 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     return c.json(responseData);
     
   } catch (error) {
-    console.error('Caption generation error:', error);
     return c.json({ error: 'Internal server error' }, 500);
   }
 });
@@ -3012,7 +2817,6 @@ app.get('/test', (c) => {
     <div id="result"></div>
     <script>
         function testFunction() {
-            console.log('Test function called');
             document.getElementById('result').innerHTML = 'Button works!';
         }
     </script>
@@ -3393,6 +3197,31 @@ app.get('/', (c) => {
                 padding: 12px 20px;
             }
         }
+        
+        /* Simple loading animations */
+        .generate-btn.loading {
+            background: #ff6b6b !important;
+            animation: pulse 1.5s ease-in-out infinite;
+            transform: scale(0.98);
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
     </style>
 </head>
 <body>
@@ -3498,14 +3327,14 @@ app.get('/', (c) => {
                     </div>
                 </div>
 
-                <button class="generate-btn" id="generateBtn" disabled>🚀 Generate Caption</button>
+                <button class="generate-btn" id="generateBtn" disabled>
+                    <span class="btn-text">Generate Caption</span>
+                    <div class="loading-spinner" style="display: none;"></div>
+                </button>
             </div>
 
             <div class="results-section">
                 <h3>Generated Content</h3>
-                <div class="loading" id="loading">
-                    <p>🤖 AI is analyzing your image...</p>
-                </div>
                 <div id="results" class="hidden">
                     <div class="result-card">
                         <h4>📝 Caption</h4>
@@ -3546,7 +3375,6 @@ app.get('/', (c) => {
                 // Try cookie-based auth first, then localStorage fallback
                 let authHeader = {};
                 const token = localStorage.getItem('auth_token');
-                console.log('checkAuth - Found token:', token ? 'YES' : 'NO');
                 if (token) {
                     authHeader['Authorization'] = 'Bearer ' + token;
                 }
@@ -3610,7 +3438,6 @@ app.get('/', (c) => {
             // Save theme preference
             localStorage.setItem('selectedTheme', selectedTheme);
             
-            console.log('Theme changed to:', selectedTheme);
         }
         
         function loadSavedTheme() {
@@ -3695,29 +3522,23 @@ app.get('/', (c) => {
                 
                 // Check if exifr is available
                 if (typeof exifr === 'undefined') {
-                    console.log('EXIFR library not loaded');
                     return;
                 }
 
-                console.log('Attempting to parse file:', file.name, file.type);
                 
                 // Extract both GPS and camera data
                 const [gpsData, allExifData] = await Promise.all([
                     exifr.gps(file).catch(() => null),
                     exifr.parse(file).catch(err => {
-                        console.error('EXIF parse error:', err);
                         return null;
                     })
                 ]);
                 
-                console.log('GPS data:', gpsData);
-                console.log('All EXIF data:', allExifData);
                 
                 let hasData = false;
                 
                 // Handle GPS/Location data
                 if (gpsData && gpsData.latitude && gpsData.longitude) {
-                    console.log('GPS coordinates found:', gpsData.latitude, gpsData.longitude);
                     
                     // Get location name from coordinates
                     const locationName = await reverseGeocode(gpsData.latitude, gpsData.longitude);
@@ -3755,20 +3576,15 @@ app.get('/', (c) => {
                         cameraInput.value = cameraInfo;
                         cameraInput.dataset.autoDetected = 'true';
                         hasData = true;
-                        console.log('Camera info extracted:', cameraInfo);
                     }
                 } else {
-                    console.log('No camera data found in EXIF');
                 }
                 
                 if (hasData) {
-                    console.log('EXIF metadata extracted successfully');
                 } else {
-                    console.log('No EXIF metadata found in this image');
                 }
                 
             } catch (error) {
-                console.error('EXIF extraction error:', error);
             }
         }
 
@@ -3799,7 +3615,6 @@ app.get('/', (c) => {
                     }
                 }
             } catch (error) {
-                console.log('Reverse geocoding failed:', error.message);
             }
             
             return null;
@@ -3818,8 +3633,10 @@ app.get('/', (c) => {
             generateBtn.addEventListener('click', async () => {
             if (!uploadedImage) return;
 
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('results').classList.add('hidden');
+            // Show loading state
+            generateBtn.textContent = '⏳ Generating...';
+            generateBtn.style.backgroundColor = '#ff6b6b';
+            generateBtn.style.opacity = '0.8';
             generateBtn.disabled = true;
 
             try {
@@ -3841,7 +3658,6 @@ app.get('/', (c) => {
                     customPrompt: localStorage.getItem('customPrompt') || ''
                 };
                 
-                console.log('Context data:', contextData);
                 
                 const response = await fetch('/api/generate-caption', {
                     method: 'POST',
@@ -3855,7 +3671,6 @@ app.get('/', (c) => {
                 });
 
                 const data = await response.json();
-                console.log('Server response data:', data);
                 
                 if (data.error) {
                     alert('Error: ' + data.error);
@@ -3877,13 +3692,6 @@ app.get('/', (c) => {
                 const metadataContent = document.getElementById('metadataContent');
                 let metadataHtml = '';
                 
-                console.log('Checking metadata:', {
-                    cameraInfo: data.cameraInfo,
-                    locationName: data.locationName,
-                    weatherData: data.weatherData,
-                    photoDateTime: data.photoDateTime
-                });
-                
                 if (data.cameraInfo && (data.cameraInfo.make || data.cameraInfo.model)) {
                     metadataHtml += '<div><strong>📷 Camera:</strong> ' + (data.cameraInfo.make || '') + ' ' + (data.cameraInfo.model || '') + '</div>';
                 }
@@ -3901,15 +3709,12 @@ app.get('/', (c) => {
                     metadataHtml += '<div><strong>📅 Photo Date:</strong> ' + photoDate.toLocaleDateString() + ' ' + photoDate.toLocaleTimeString() + '</div>';
                 }
                 
-                console.log('Generated metadata HTML:', metadataHtml);
                 
                 if (metadataHtml) {
                     metadataContent.innerHTML = metadataHtml;
                     metadataCard.style.display = 'block';
-                    console.log('Metadata card shown');
                 } else {
                     metadataCard.style.display = 'none';
-                    console.log('No metadata to display');
                 }
 
                 // Display social media previews if connected accounts exist
@@ -3917,7 +3722,6 @@ app.get('/', (c) => {
                 const socialPreviewContent = document.getElementById('socialPreviewContent');
                 
                 if (data.connectedAccounts && (data.connectedAccounts.mastodon || data.connectedAccounts.linkedin)) {
-                    console.log('Connected accounts found:', data.connectedAccounts);
                     
                     const captionText = captionMatch ? captionMatch[1].trim() : '';
                     const hashtagsText = hashtagsMatch ? hashtagsMatch[1].trim() : '';
@@ -3961,18 +3765,19 @@ app.get('/', (c) => {
                     if (socialPreviewHtml) {
                         socialPreviewContent.innerHTML = socialPreviewHtml;
                         socialPreviewCard.style.display = 'block';
-                        console.log('Social media previews shown');
                     }
                 } else {
                     socialPreviewCard.style.display = 'none';
-                    console.log('No connected social accounts for preview');
                 }
 
                 document.getElementById('results').classList.remove('hidden');
             } catch (error) {
                 alert('Error generating caption: ' + error.message);
             } finally {
-                document.getElementById('loading').style.display = 'none';
+                // Reset button state
+                generateBtn.textContent = 'Generate Caption';
+                generateBtn.style.backgroundColor = '';
+                generateBtn.style.opacity = '';
                 generateBtn.disabled = false;
             }
         });
@@ -4023,7 +3828,6 @@ app.get('/', (c) => {
                     alert('Failed to post: ' + (result.error || 'Unknown error'));
                 }
             } catch (error) {
-                console.error('Post error:', error);
                 event.target.textContent = '❌ Error';
                 alert('Error posting to Mastodon: ' + error.message);
             } finally {
@@ -4064,12 +3868,11 @@ app.get('/', (c) => {
                         messageDiv.innerHTML = '<p style="color: red;">❌ ' + data.error + '</p>';
                     }
                 } catch (error) {
-                    console.error('Login request failed:', error);
                     messageDiv.innerHTML = '<p style="color: red;">❌ Failed to send magic link: ' + error.message + '</p>';
                 }
             }
 
-            async function logout() {
+            window.logout = async function() {
                 try {
                     const token = localStorage.getItem('auth_token');
                     if (token) {
@@ -4132,7 +3935,6 @@ app.get('/', (c) => {
                         btn.style.color = '';
                     }, 2000);
                 }).catch((err) => {
-                    console.error('Failed to copy: ', err);
                     fallbackCopyToClipboard(text, btn, originalText);
                 });
             } else {
@@ -4169,7 +3971,6 @@ app.get('/', (c) => {
                     setTimeout(() => btn.textContent = originalText, 2000);
                 }
             } catch (err) {
-                console.error('Fallback copy failed: ', err);
                 btn.textContent = '❌ Copy failed';
                 setTimeout(() => btn.textContent = originalText, 2000);
             } finally {
@@ -4216,7 +4017,7 @@ app.get('/auth', async (c) => {
             // Get tier info if assigned in invite
             const invitedBy = await database.getUserById(invite.invited_by_user_id);
             const tierName = invite.assigned_tier_id ? 
-                (await database.getTierById(invite.assigned_tier_id))?.name || 'Default' : 'Default';
+                (await database.getTierById(invite.assigned_tier_id))&& name || 'Default' : 'Default';
                 
             return c.html(`
                 <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 30px; text-align: center; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
@@ -4268,12 +4069,9 @@ app.get('/auth', async (c) => {
                                         localStorage.setItem('auth_token', result.token);
                                         localStorage.setItem('user', JSON.stringify(result.user));
                                         
-                                        console.log('Token stored:', localStorage.getItem('auth_token'));
-                                        console.log('User stored:', localStorage.getItem('user'));
                                         
                                         messageDiv.innerHTML = '<p style="color: green;">✅ Welcome! Redirecting to Caption Studio...</p>';
                                         setTimeout(() => {
-                                            console.log('Redirecting to main page...');
                                             window.location.href = '/';
                                         }, 1500);
                                     } else {
@@ -4300,7 +4098,6 @@ app.get('/auth', async (c) => {
                                     button.textContent = '🚀 Get Started';
                                 }
                             } catch (error) {
-                                console.error('Accept invite error:', error);
                                 messageDiv.innerHTML = '<p style="color: red;">❌ Failed to accept invitation. Please try again.</p>';
                                 button.disabled = false;
                                 button.textContent = '🚀 Get Started';
@@ -4311,7 +4108,6 @@ app.get('/auth', async (c) => {
             `);
             
         } catch (error) {
-            console.error('Error processing invite:', error);
             return c.html(`
                 <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
                     <h2>❌ Error Processing Invitation</h2>
@@ -4725,12 +4521,10 @@ app.get('/admin', (c) => {
                     }
                 }
             } catch (error) {
-                console.error('Auth check failed:', error);
             }
         }
 
         async function loadAdminData() {
-            console.log('Loading admin data...');
             try {
                 await Promise.all([
                     loadStats(),
@@ -4738,14 +4532,11 @@ app.get('/admin', (c) => {
                     loadRecentInvites(),
                     loadSystemSettings()
                 ]);
-                console.log('Admin data loading completed');
             } catch (error) {
-                console.error('Error loading admin data:', error);
             }
         }
 
         async function loadStats() {
-            console.log('Loading stats...');
             try {
                 const [statsResponse, invitesResponse, tiersResponse] = await Promise.all([
                     fetch('/api/admin/stats', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') } }),
@@ -4753,53 +4544,37 @@ app.get('/admin', (c) => {
                     fetch('/api/admin/tiers', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') } })
                 ]);
 
-                console.log('Stats responses:', {
-                    statsOk: statsResponse.ok,
-                    invitesOk: invitesResponse.ok,
-                    tiersOk: tiersResponse.ok
-                });
-
                 if (statsResponse.ok) {
                     const stats = await statsResponse.json();
-                    console.log('Stats data:', stats);
                     document.getElementById('totalUsers').textContent = stats.totalUsers;
                     document.getElementById('totalQueries').textContent = stats.totalQueries;
                 } else {
-                    console.error('Stats response not ok:', statsResponse.status, await statsResponse.text());
                 }
 
                 if (invitesResponse.ok) {
                     const invites = await invitesResponse.json();
-                    console.log('Invites data:', invites);
                     document.getElementById('pendingInvites').textContent = invites.length;
                 } else {
-                    console.error('Invites response not ok:', invitesResponse.status, await invitesResponse.text());
                 }
 
                 if (tiersResponse.ok) {
                     const tiers = await tiersResponse.json();
-                    console.log('Tiers data:', tiers);
                     document.getElementById('activeTiers').textContent = tiers.length;
                 } else {
-                    console.error('Tiers response not ok:', tiersResponse.status, await tiersResponse.text());
                 }
             } catch (error) {
-                console.error('Error loading stats:', error);
             }
         }
 
         async function loadRecentUsers() {
-            console.log('Loading recent users...');
             try {
                 const response = await fetch('/api/admin/usage-stats', {
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
-                console.log('Recent users response:', response.ok, response.status);
                 
                 if (response.ok) {
                     const users = await response.json();
-                    console.log('Recent users data:', users);
                     const tbody = document.getElementById('recentUsers');
                     tbody.innerHTML = users.slice(0, 10).map(user => 
                         '<tr>' +
@@ -4811,27 +4586,22 @@ app.get('/admin', (c) => {
                         '</tr>'
                     ).join('');
                 } else {
-                    console.error('Recent users response not ok:', response.status, await response.text());
                     document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users (Status: ' + response.status + ')</td></tr>';
                 }
             } catch (error) {
-                console.error('Error loading recent users:', error);
                 document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users: ' + error.message + '</td></tr>';
             }
         }
 
         async function loadRecentInvites() {
-            console.log('Loading recent invites...');
             try {
                 const response = await fetch('/api/admin/invites', {
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
-                console.log('Recent invites response:', response.ok, response.status);
                 
                 if (response.ok) {
                     const invites = await response.json();
-                    console.log('Recent invites data:', invites);
                     const tbody = document.getElementById('recentInvites');
                     tbody.innerHTML = invites.slice(0, 5).map(invite => 
                         '<tr>' +
@@ -4842,11 +4612,9 @@ app.get('/admin', (c) => {
                         '</tr>'
                     ).join('');
                 } else {
-                    console.error('Recent invites response not ok:', response.status, await response.text());
                     document.getElementById('recentInvites').innerHTML = '<tr><td colspan="4">Failed to load invites (Status: ' + response.status + ')</td></tr>';
                 }
             } catch (error) {
-                console.error('Error loading recent invites:', error);
                 document.getElementById('recentInvites').innerHTML = '<tr><td colspan="4">Failed to load invites: ' + error.message + '</td></tr>';
             }
         }
@@ -4875,7 +4643,6 @@ app.get('/admin', (c) => {
                     });
                 }
             } catch (error) {
-                console.error('Failed to load tiers:', error);
             }
             
             document.getElementById('inviteModal').style.display = 'block';
@@ -4965,14 +4732,12 @@ app.get('/admin', (c) => {
                     document.getElementById('registrationOpen').value = data.settings.registration_open || 'true';
                 }
             } catch (error) {
-                console.error('Error loading system settings:', error);
             }
         }
 
         async function saveSystemSettings() {
             try {
                 const registrationValue = document.getElementById('registrationOpen').value;
-                console.log('Saving registration setting:', registrationValue);
                 
                 const settings = {
                     registration_open: registrationValue
@@ -4988,7 +4753,6 @@ app.get('/admin', (c) => {
                 });
 
                 const result = await response.json();
-                console.log('Save response:', result);
                 
                 if (result.success) {
                     alert('✅ System settings saved successfully!');
@@ -5000,7 +4764,6 @@ app.get('/admin', (c) => {
                     alert('❌ Error: ' + result.error);
                 }
             } catch (error) {
-                console.error('Save error:', error);
                 alert('❌ Failed to save system settings: ' + error.message);
             }
         }
@@ -5012,7 +4775,6 @@ app.get('/admin', (c) => {
                     credentials: 'include'
                 });
             } catch (error) {
-                console.log('Server logout failed:', error);
             }
             
             localStorage.removeItem('auth_token');
@@ -5376,7 +5138,6 @@ app.get('/settings', (c) => {
                     loadSocialMediaSettings();
                 }
             } catch (error) {
-                console.error('Auth check failed:', error);
             }
         }
 
@@ -5436,7 +5197,6 @@ app.get('/settings', (c) => {
                     }
                 }
             } catch (error) {
-                console.log('Could not load social media settings:', error);
             }
         }
 
@@ -5961,7 +5721,6 @@ app.get('/admin/users', (c) => {
                     }
                 }
             } catch (error) {
-                console.error('Auth check failed:', error);
             }
         }
 
@@ -6007,7 +5766,6 @@ app.get('/admin/users', (c) => {
                     throw new Error('Failed to load users or tiers');
                 }
             } catch (error) {
-                console.error('Error loading users:', error);
                 document.getElementById('usersTable').innerHTML = '<tr><td colspan="7">Failed to load users</td></tr>';
             }
         }
@@ -6215,7 +5973,6 @@ app.get('/admin/users', (c) => {
                 // Check if invitesTable element exists first
                 const tbody = document.getElementById('invitesTable');
                 if (!tbody) {
-                    console.log('invitesTable element not found, skipping loadInvites');
                     return;
                 }
 
@@ -6252,12 +6009,10 @@ app.get('/admin/users', (c) => {
                             '</tr>';
                     }).join('');
                 } else {
-                    console.error('Failed to load invites:', response.status);
                     tbody.innerHTML = 
                         '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load invites</td></tr>';
                 }
             } catch (error) {
-                console.error('Error loading invites:', error);
                 // Don't try to access DOM if there's an error and element might not exist
                 const tbody = document.getElementById('invitesTable');
                 if (tbody) {
@@ -6294,14 +6049,11 @@ app.get('/admin/users', (c) => {
         };
 
         window.deleteInvite = async function(token, email) {
-            console.log('deleteInvite called with token:', token, 'email:', email);
             
             if (!confirm('Are you sure you want to delete the invitation for "' + email + '"?')) {
-                console.log('User cancelled deletion');
                 return;
             }
             
-            console.log('User confirmed deletion, making API call...');
             
             try {
                 const response = await fetch('/api/admin/invites/' + token, {
@@ -6309,10 +6061,8 @@ app.get('/admin/users', (c) => {
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
-                console.log('Delete response status:', response.status);
                 
                 const result = await response.json();
-                console.log('Delete response data:', result);
                 
                 if (result.success) {
                     showNotification('✅ ' + result.message, 'success');
@@ -6321,7 +6071,6 @@ app.get('/admin/users', (c) => {
                     showNotification('❌ Error: ' + result.error, 'error');
                 }
             } catch (error) {
-                console.error('Delete error:', error);
                 showNotification('❌ Failed to delete invitation: ' + error.message, 'error');
             }
         };
@@ -6364,7 +6113,6 @@ app.get('/admin/users', (c) => {
                     credentials: 'include'
                 });
             } catch (error) {
-                console.log('Server logout failed:', error);
             }
             
             localStorage.removeItem('auth_token');
@@ -6542,7 +6290,6 @@ app.get('/admin/tiers', (c) => {
                     }
                 }
             } catch (error) {
-                console.error('Auth check failed:', error);
             }
         }
 
@@ -6679,7 +6426,6 @@ app.get('/admin/tiers', (c) => {
                     credentials: 'include'
                 });
             } catch (error) {
-                console.log('Server logout failed:', error);
             }
             
             localStorage.removeItem('auth_token');

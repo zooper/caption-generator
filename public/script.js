@@ -135,7 +135,6 @@ class CaptionGenerator {
             // Update visibility of Mastodon preview card
             this.updateMastodonCardVisibility();
         } catch (error) {
-            console.error('Failed to load Mastodon settings:', error);
             this.updateMastodonStatus('Failed to load settings', 'error');
             this.postMastodonBtn.disabled = true;
             this.isMastodonConfigured = false;
@@ -217,7 +216,6 @@ class CaptionGenerator {
         try {
             // Check if exifr is available
             if (typeof exifr === 'undefined') {
-                console.log('EXIFR library not loaded');
                 this.showNotification('⚠️ EXIF library not available', 'error');
                 return;
             }
@@ -225,25 +223,20 @@ class CaptionGenerator {
             // Show that we're trying to extract metadata
             this.showNotification('🔍 Checking for image metadata...', 'info');
 
-            console.log('Attempting to parse file:', file.name, file.type);
             
             // Extract both GPS and camera data
             const [gpsData, allExifData] = await Promise.all([
                 exifr.gps(file).catch(() => null),
                 exifr.parse(file).catch(err => {
-                    console.error('EXIF parse error:', err);
                     return null;
                 })
             ]);
             
-            console.log('GPS data:', gpsData);
-            console.log('All EXIF data:', allExifData);
             
             let hasData = false;
             
             // Handle GPS/Location data
             if (gpsData && gpsData.latitude && gpsData.longitude) {
-                console.log('GPS coordinates found:', gpsData.latitude, gpsData.longitude);
                 
                 // Show that we're reverse geocoding
                 this.showNotification('🌍 Looking up location name...', 'info');
@@ -281,10 +274,8 @@ class CaptionGenerator {
                 if (cameraInfo) {
                     this.cameraInput.value = cameraInfo;
                     hasData = true;
-                    console.log('Camera info extracted:', cameraInfo);
                 }
             } else {
-                console.log('No camera data found in EXIF');
             }
             
             // Show appropriate notification
@@ -299,7 +290,6 @@ class CaptionGenerator {
             }
             
         } catch (error) {
-            console.error('EXIF extraction error:', error);
             this.showNotification('⚠️ Could not read image metadata', 'error');
         }
     }
@@ -333,7 +323,6 @@ class CaptionGenerator {
                 }
             }
         } catch (error) {
-            console.log('Reverse geocoding failed:', error.message);
         }
         
         return null;
@@ -361,7 +350,6 @@ class CaptionGenerator {
             this.displayResults(responseData);
             this.showNotification('Caption generated successfully!');
         } catch (error) {
-            console.error('Error generating caption:', error);
             this.showNotification('Failed to generate caption. Please try again.', 'error');
         } finally {
             this.setLoadingState(false);
@@ -633,7 +621,6 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
                 this.redirectToLogin();
             }
         } catch (error) {
-            console.error('Authentication check failed:', error);
             this.redirectToLogin();
         }
     }
@@ -650,7 +637,6 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         // Show user info in the interface
         if (this.currentUser) {
             // You can add a user info display here
-            console.log('Logged in as:', this.currentUser.email);
             
             // Add logout button to the interface if needed
             this.addUserControls();
@@ -847,7 +833,6 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
                 }
             });
         } catch (error) {
-            console.error('Logout request failed:', error);
         } finally {
             // Clear local storage and redirect regardless of server response
             localStorage.removeItem('auth_token');
@@ -938,17 +923,36 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
 
     setLoadingState(loading) {
         const btnText = this.generateBtn.querySelector('.btn-text');
-        const spinner = this.generateBtn.querySelector('.loading-spinner');
+        let spinner = this.generateBtn.querySelector('.loading-spinner');
+        
+        
+        // If spinner doesn't exist, create it
+        if (!spinner) {
+            spinner = document.createElement('div');
+            spinner.className = 'loading-spinner';
+            spinner.style.display = 'none';
+            this.generateBtn.appendChild(spinner);
+        }
         
         if (loading) {
-            btnText.textContent = 'Generating...';
+            btnText.textContent = '🔄 Generating...';
             spinner.style.display = 'inline-block';
             this.generateBtn.disabled = true;
+            this.generateBtn.classList.add('loading');
         } else {
             btnText.textContent = 'Generate Caption';
             spinner.style.display = 'none';
             this.generateBtn.disabled = false;
+            this.generateBtn.classList.remove('loading');
         }
+    }
+
+    // Test function to debug spinner
+    testSpinner() {
+        this.setLoadingState(true);
+        setTimeout(() => {
+            this.setLoadingState(false);
+        }, 3000);
     }
 
     async copyToClipboard(type) {
@@ -1018,7 +1022,6 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
         } catch (error) {
-            console.error('Mastodon connection test failed:', error);
             this.updateMastodonStatus('Connection failed', 'error');
             this.showNotification('❌ Failed to connect to Mastodon. Check your instance URL and token.', 'error');
             this.postMastodonBtn.disabled = true;
@@ -1090,7 +1093,6 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             }
 
         } catch (error) {
-            console.error('Failed to post to Mastodon:', error);
             this.updateMastodonStatus('Post failed', 'error');
             this.showNotification(`❌ Failed to post: ${error.message}`, 'error');
         } finally {
@@ -1119,7 +1121,6 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         }
 
         const media = await response.json();
-        console.log('Media uploaded with alt text:', altText);
         return media.id;
     }
 
@@ -1169,13 +1170,50 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
                 body: JSON.stringify({ caption: fullCaption })
             });
         } catch (error) {
-            console.log('Could not store caption for extension:', error);
             // Don't show error to user as this is optional functionality
         }
     }
 
 }
 
+// Simple test to verify script loading
+window.scriptLoaded = true;
+
+// Simple test function that should always work
+window.simpleTest = function() {
+    alert('Script is loaded and working!');
+};
+
+// Global test function for debugging
+window.testSpinner = function() {
+    const generateBtn = document.getElementById('generateBtn');
+    const btnText = generateBtn.querySelector('.btn-text');
+    let spinner = generateBtn.querySelector('.loading-spinner');
+    
+    
+    // Create spinner if it doesn't exist
+    if (!spinner) {
+        spinner = document.createElement('div');
+        spinner.className = 'loading-spinner';
+        spinner.style.display = 'none';
+        generateBtn.appendChild(spinner);
+    }
+    
+    // Show loading state
+    btnText.textContent = '🔄 Testing Spinner...';
+    spinner.style.display = 'inline-block';
+    generateBtn.disabled = true;
+    generateBtn.classList.add('loading');
+    
+    // Clear after 3 seconds
+    setTimeout(() => {
+        btnText.textContent = 'Generate Caption';
+        spinner.style.display = 'none';
+        generateBtn.disabled = false;
+        generateBtn.classList.remove('loading');
+    }, 3000);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
-    new CaptionGenerator();
+    const app = new CaptionGenerator();
 });

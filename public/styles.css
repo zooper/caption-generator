@@ -314,6 +314,10 @@ body {
     transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
 }
 
 .generate-btn:hover:not(:disabled) {
@@ -322,20 +326,33 @@ body {
 }
 
 .generate-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.8;
     cursor: not-allowed;
     transform: none;
 }
 
+.generate-btn.loading {
+    background: linear-gradient(135deg, #405de6 0%, #5b68e6 50%, #405de6 100%);
+    background-size: 200% 100%;
+    animation: loading-gradient 2s ease-in-out infinite;
+}
+
+@keyframes loading-gradient {
+    0% { background-position: 200% 0; }
+    50% { background-position: 0% 0; }
+    100% { background-position: -200% 0; }
+}
+
 .loading-spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid transparent;
-    border-top: 2px solid white;
+    width: 24px;
+    height: 24px;
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top: 4px solid white;
     border-radius: 50%;
     animation: spin 1s linear infinite;
     display: inline-block;
-    margin-left: 10px;
+    flex-shrink: 0;
+    position: relative;
 }
 
 @keyframes spin {
