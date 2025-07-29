@@ -1643,8 +1643,8 @@ app.delete('/api/admin/users/:userId', authenticateToken, requireAdmin, async (c
         
         const database = new D1Database(c.env.DB);
         
-        // Check if user exists first
-        const user = await database.getUserById(userId);
+        // Check if user exists first (including inactive users for deletion)
+        const user = await database.db.prepare('SELECT * FROM users WHERE id = ?').bind(userId).first();
         if (!user) {
             return c.json({ error: 'User not found' }, 404);
         }
