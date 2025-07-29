@@ -114,7 +114,7 @@ class D1Database {
 
     async getUserById(userId) {
         const stmt = this.db.prepare(`
-            SELECT * FROM users WHERE id = ?
+            SELECT * FROM users WHERE id = ? AND is_active = 1
         `);
         const result = await stmt.bind(userId).first();
         return result || null;
