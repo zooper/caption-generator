@@ -599,7 +599,7 @@ class D1Database {
             await usageStmt.bind(userId).run();
             
             // Mark any invites sent by this user as expired (don't delete to preserve audit trail)
-            const invitesStmt = this.db.prepare('UPDATE invite_tokens SET expires_at = datetime("now", "-1 day") WHERE invited_by = ?');
+            const invitesStmt = this.db.prepare('UPDATE invite_tokens SET expires_at = datetime("now", "-1 day") WHERE invited_by_user_id = ?');
             await invitesStmt.bind(userId).run();
             
             // Finally delete the user record
@@ -1367,6 +1367,44 @@ app.post('/api/auth/accept-invite', async (c) => {
 });
 
 // Admin endpoints
+
+// Create new user (admin only)
+app.post('/api/admin/users', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { email, isAdmin } = await c.req.json();
+        
+        if (!email || !email.includes('@')) {
+            return c.json({ error: 'Valid email address is required' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        
+        // Check if user already exists
+        const existingUser = await database.db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+        if (existingUser) {
+            return c.json({ error: 'User with this email already exists' }, 400);
+        }
+        
+        // Create the user
+        const result = await database.db.prepare(
+            'INSERT INTO users (email, is_admin, is_active, created_at) VALUES (?, ?, ?, datetime("now"))'
+        ).bind(email, isAdmin ? 1 : 0, 1).run();
+        
+        if (result.success) {
+            return c.json({ 
+                success: true, 
+                message: `User ${email} created successfully${isAdmin ? ' as admin' : ''}`,
+                userId: result.meta.last_row_id
+            });
+        } else {
+            return c.json({ error: 'Failed to create user' }, 500);
+        }
+    } catch (error) {
+        console.error('Error creating user:', error);
+        return c.json({ error: 'Failed to create user' }, 500);
+    }
+});
+
 app.get('/api/admin/users', authenticateToken, requireAdmin, async (c) => {
     try {
         const database = new D1Database(c.env.DB);
@@ -5013,6 +5051,58 @@ app.get('/admin/users', (c) => {
         .gap-2 { gap: 8px; }
         .items-center { align-items: center; }
         .justify-between { justify-content: space-between; }
+        
+        /* Modal Styling */
+        .modal { 
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; 
+            top: 0; 
+            width: 100%; 
+            height: 100%; 
+            background-color: rgba(0, 0, 0, 0.5); 
+        }
+        .modal-content { 
+            background-color: var(--card-background); 
+            margin: 10% auto; 
+            padding: 30px; 
+            border-radius: 15px; 
+            width: 90%; 
+            max-width: 500px; 
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            color: var(--text-primary);
+        }
+        .modal-content h3 {
+            margin: 0 0 20px 0;
+            color: var(--text-primary);
+        }
+        .modal-content input[type="email"],
+        .modal-content input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--card-background);
+            color: var(--text-primary);
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        .modal-content input[type="email"]:focus,
+        .modal-content input[type="text"]:focus {
+            outline: none;
+            border-color: #8B5CF6;
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        }
+        .modal-content label {
+            color: var(--text-primary);
+            font-weight: 500;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .modal-content input[type="checkbox"] {
+            margin-right: 8px;
+        }
     </style>
 </head>
 <body>
@@ -5040,6 +5130,7 @@ app.get('/admin/users', (c) => {
                     <div class="flex gap-2">
                         <button class="btn btn-primary" onclick="refreshUsers()">🔄 Refresh</button>
                         <button class="btn btn-secondary" onclick="showInviteModal()">📧 Send Invite</button>
+                        <button class="btn btn-primary" onclick="showAddUserModal()">👤 Add User</button>
                     </div>
                 </div>
                 
@@ -5063,43 +5154,74 @@ app.get('/admin/users', (c) => {
         </div>
     </div>
 
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>⚠️ Delete User</h3>
+            <p id="deleteModalText">Are you sure you want to delete this user?</p>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="confirmDelete()">Delete User</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Second Confirmation Modal -->
+    <div id="confirmModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>🔐 Final Confirmation</h3>
+            <p>To confirm deletion, please type <strong>"DELETE"</strong> (all caps):</p>
+            <input type="text" id="confirmInput" placeholder="Type DELETE here" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;">
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="finalDelete()">Confirm Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add User Modal -->
+    <div id="addUserModal" class="modal">
+        <div class="modal-content">
+            <h3>👤 Add New User</h3>
+            <div style="margin: 20px 0;">
+                <label for="addUserEmail">Email Address:</label>
+                <input type="email" id="addUserEmail" placeholder="Enter user email">
+            </div>
+            <div style="margin: 20px 0;">
+                <label for="addUserAdmin" style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="addUserAdmin">
+                    <span>Make this user an admin</span>
+                </label>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="closeAddUserModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="createUser()">Create User</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div id="notification" style="display: none; position: fixed; top: 20px; right: 20px; padding: 15px; border-radius: 5px; color: white; z-index: 1001;"></div>
+
     <script>
+        let currentDeleteUserId = null;
+        let currentDeleteUserEmail = null;
+
         async function checkAdminAuth() {
             try {
-                const token = localStorage.getItem('auth_token');
-                console.log('Admin auth check - Token exists:', !!token);
-                console.log('Admin auth check - Token value:', token ? token.substring(0, 20) + '...' : 'null');
-                
-                if (!token) {
-                    console.log('No auth token found, showing login required');
-                    return;
-                }
-                
                 const response = await fetch('/api/auth/me', {
-                    headers: { 'Authorization': 'Bearer ' + token },
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
                     credentials: 'include'
                 });
                 
-                console.log('Admin auth check - Response status:', response.status);
-                console.log('Admin auth check - Response headers:', response.headers);
-                
                 if (response.ok) {
                     const user = await response.json();
-                    console.log('Admin auth check - User data:', user);
-                    console.log('Admin auth check - Is admin:', user.isAdmin);
-                    
                     if (user.isAdmin) {
-                        console.log('User is admin, showing admin content');
+                        document.getElementById('adminHeader').style.display = 'flex';
                         document.getElementById('loginRequired').classList.add('hidden');
                         document.getElementById('adminContent').classList.remove('hidden');
                         loadUsers();
-                    } else {
-                        console.log('User is not an admin');
                     }
-                } else {
-                    console.log('Auth response not ok:', response.status, response.statusText);
-                    const errorText = await response.text();
-                    console.log('Auth response error body:', errorText);
                 }
             } catch (error) {
                 console.error('Auth check failed:', error);
@@ -5128,20 +5250,12 @@ app.get('/admin/users', (c) => {
                     tbody.innerHTML = users.map(user => 
                         '<tr>' +
                         '<td>' + user.email + '</td>' +
-                        '<td><span class="badge ' + (user.is_admin ? 'badge-admin">🛠️ Admin' : 'badge-user">👤 User') + '</span></td>' +
-                        '<td>' + createTierDropdown(user) + '</td>' +
-                        '<td>' + (user.usage_today || 0) + '/' + (user.daily_limit === -1 ? '∞' : user.daily_limit || 0) + '</td>' +
-                        '<td><span class="badge ' + (user.is_active ? 'badge-active">✅ Active' : 'badge-inactive">❌ Inactive') + '</span></td>' +
+                        '<td>' + (user.is_admin ? 'Admin' : 'User') + '</td>' +
+                        '<td>-</td>' +
+                        '<td>' + (user.usage_today || 0) + '</td>' +
+                        '<td>' + (user.is_active ? 'Active' : 'Inactive') + '</td>' +
                         '<td>' + new Date(user.created_at).toLocaleDateString() + '</td>' +
-                        '<td>' +
-                        '<div class="flex gap-2">' +
-                        (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
-                        (user.is_active ? 
-                            '<button class="btn btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate</button>' : 
-                            '<button class="btn btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate</button>') +
-                        '<button class="btn btn-danger" onclick="deleteUser(' + user.id + ')" data-email="' + user.email.replace(/"/g, '&quot;') + '">🗑️ Delete</button>' +
-                        '</div>' +
-                        '</td>' +
+                        '<td><button class="btn btn-danger" onclick="deleteUser(' + user.id + ', &quot;' + user.email + '&quot;)">🗑️ Delete</button></td>' +
                         '</tr>'
                     ).join('');
                 } else {
@@ -5232,46 +5346,119 @@ app.get('/admin/users', (c) => {
             }
         }
 
-        async function deleteUser(userId) {
-            // Get the email from the button's data attribute
-            const userEmail = event.target.getAttribute('data-email');
-            
-            // Show confirmation dialog
-            const confirmMessage = "WARNING: This will permanently delete the user \"" + userEmail + "\" and ALL their data including:\n\n" +
-                "- User account and profile\n" +
-                "- All caption generation history\n" +
-                "- Usage statistics\n" +
-                "- Settings and preferences\n" +
-                "- Social media connections\n\n" +
-                "This action CANNOT be undone.\n\n" +
-                "Are you absolutely sure you want to delete this user?";
-            
-            if (!confirm(confirmMessage)) {
+        function deleteUser(userId, userEmail) {
+            currentDeleteUserId = userId;
+            currentDeleteUserEmail = userEmail;
+            document.getElementById('deleteModalText').textContent = 
+                'Are you sure you want to permanently delete user "' + userEmail + '" and ALL their data?';
+            document.getElementById('deleteModal').style.display = 'block';
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').style.display = 'none';
+            currentDeleteUserId = null;
+            currentDeleteUserEmail = null;
+        }
+
+        function confirmDelete() {
+            document.getElementById('deleteModal').style.display = 'none';
+            document.getElementById('confirmInput').value = '';
+            document.getElementById('confirmModal').style.display = 'block';
+        }
+
+        function closeConfirmModal() {
+            document.getElementById('confirmModal').style.display = 'none';
+            document.getElementById('confirmInput').value = '';
+        }
+
+        async function finalDelete() {
+            const confirmText = document.getElementById('confirmInput').value;
+            if (confirmText !== 'DELETE') {
+                showNotification('❌ Deletion cancelled - you must type "DELETE" exactly', 'error');
                 return;
             }
             
-            // Second confirmation for extra safety
-            const finalConfirm = prompt('To confirm deletion, please type "DELETE" (all caps):');
-            if (finalConfirm !== 'DELETE') {
-                alert('Deletion cancelled - confirmation text did not match');
-                return;
-            }
+            document.getElementById('confirmModal').style.display = 'none';
             
             try {
-                const response = await fetch('/api/admin/users/' + userId, {
+                const response = await fetch('/api/admin/users/' + currentDeleteUserId, {
                     method: 'DELETE',
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
                 const result = await response.json();
                 if (result.success) {
-                    alert('✅ ' + result.message);
-                    loadUsers(); // Refresh the users list
+                    showNotification('✅ ' + result.message, 'success');
+                    loadUsers();
                 } else {
-                    alert('❌ Error: ' + result.error);
+                    showNotification('❌ Error: ' + result.error, 'error');
                 }
             } catch (error) {
-                alert('❌ Failed to delete user: ' + error.message);
+                showNotification('❌ Failed to delete user: ' + error.message, 'error');
+            }
+            
+            currentDeleteUserId = null;
+            currentDeleteUserEmail = null;
+        }
+
+        function showNotification(message, type) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.style.backgroundColor = type === 'success' ? '#10b981' : '#ef4444';
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 4000);
+        }
+
+        function showAddUserModal() {
+            document.getElementById('addUserEmail').value = '';
+            document.getElementById('addUserAdmin').checked = false;
+            document.getElementById('addUserModal').style.display = 'block';
+        }
+
+        function closeAddUserModal() {
+            document.getElementById('addUserModal').style.display = 'none';
+        }
+
+        async function createUser() {
+            const email = document.getElementById('addUserEmail').value.trim();
+            const isAdmin = document.getElementById('addUserAdmin').checked;
+            
+            if (!email) {
+                showNotification('❌ Please enter an email address', 'error');
+                return;
+            }
+            
+            if (!email.includes('@')) {
+                showNotification('❌ Please enter a valid email address', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/admin/users', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ 
+                        email: email,
+                        isAdmin: isAdmin
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    showNotification('✅ User created successfully!', 'success');
+                    closeAddUserModal();
+                    loadUsers();
+                } else {
+                    showNotification('❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('❌ Failed to create user: ' + error.message, 'error');
             }
         }
 

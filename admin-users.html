@@ -478,7 +478,7 @@
                 this.currentUser = null;
                 
                 if (!this.authToken) {
-                    window.location.href = '/auth';
+                    window.location.href = '/';
                     return;
                 }
 
@@ -535,11 +535,11 @@
                         }
                         this.initializeData();
                     } else {
-                        window.location.href = '/auth';
+                        window.location.href = '/';
                     }
                 } catch (error) {
                     console.error('Admin access check failed:', error);
-                    window.location.href = '/auth';
+                    window.location.href = '/';
                 }
             }
 
