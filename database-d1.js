@@ -112,6 +112,14 @@ class D1Database {
         return result || null;
     }
 
+    async getUserById(userId) {
+        const stmt = this.db.prepare(`
+            SELECT * FROM users WHERE id = ?
+        `);
+        const result = await stmt.bind(userId).first();
+        return result || null;
+    }
+
     async createLoginToken(email, token, expiresAt, ipAddress, userAgent) {
         const stmt = this.db.prepare(`
             INSERT INTO login_tokens (token, email, expires_at, ip_address, user_agent) 

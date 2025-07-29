@@ -580,6 +580,40 @@ class D1Database {
             return false;
         }
     }
+
+    async deleteUser(userId) {
+        try {
+            // Start a transaction by deleting related data first
+            console.log(`Deleting user ${userId} and all related data...`);
+            
+            // Delete user settings
+            const settingsStmt = this.db.prepare('DELETE FROM user_settings WHERE user_id = ?');
+            await settingsStmt.bind(userId).run();
+            
+            // Delete user sessions  
+            const sessionsStmt = this.db.prepare('DELETE FROM user_sessions WHERE user_id = ?');
+            await sessionsStmt.bind(userId).run();
+            
+            // Delete daily usage records
+            const usageStmt = this.db.prepare('DELETE FROM daily_usage WHERE user_id = ?');
+            await usageStmt.bind(userId).run();
+            
+            // Mark any invites sent by this user as expired (don't delete to preserve audit trail)
+            const invitesStmt = this.db.prepare('UPDATE invite_tokens SET expires_at = datetime("now", "-1 day") WHERE invited_by = ?');
+            await invitesStmt.bind(userId).run();
+            
+            // Finally delete the user record
+            const userStmt = this.db.prepare('DELETE FROM users WHERE id = ?');
+            const result = await userStmt.bind(userId).run();
+            
+            const changes = result.meta?.changes || result.changes || 0;
+            console.log(`User ${userId} deleted, changes: ${changes}`);
+            return changes > 0;
+        } catch (error) {
+            console.error('Failed to delete user:', error);
+            return false;
+        }
+    }
 }
 
 const app = new Hono();
@@ -1557,6 +1591,47 @@ app.post('/api/admin/users/:userId/tier', authenticateToken, requireAdmin, async
     } catch (error) {
         console.error('Error updating user tier:', error);
         return c.json({ error: 'Failed to update user tier: ' + error.message }, 500);
+    }
+});
+
+// Delete user endpoint
+app.delete('/api/admin/users/:userId', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { userId } = c.req.param();
+        
+        if (!userId) {
+            return c.json({ error: 'User ID is required' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        
+        // Check if user exists first
+        const user = await database.getUserById(userId);
+        if (!user) {
+            return c.json({ error: 'User not found' }, 404);
+        }
+        
+        // Prevent admin from deleting themselves
+        const requestingUser = c.get('user');
+        if (requestingUser.id === parseInt(userId)) {
+            return c.json({ error: 'Cannot delete your own account' }, 400);
+        }
+        
+        // Perform the deletion (cascades to related data)
+        const success = await database.deleteUser(userId);
+        
+        if (success) {
+            return c.json({ 
+                success: true, 
+                message: `User "${user.email}" has been permanently deleted` 
+            });
+        } else {
+            return c.json({ error: 'Failed to delete user' }, 500);
+        }
+        
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        return c.json({ error: 'Failed to delete user: ' + error.message }, 500);
     }
 });
 
@@ -5040,6 +5115,7 @@ app.get('/admin/users', (c) => {
                         '<div class="flex gap-2">' +
                         (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
                         '<button class="btn ' + (user.is_active ? 'btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate' : 'btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate') + '</button>' +
+                        '<button class="btn btn-danger" onclick="deleteUser(' + user.id + ', \'' + user.email.replace(/'/g, "\\'") + '\')">🗑️ Delete</button>' +
                         '</div>' +
                         '</td>' +
                         '</tr>'
@@ -5129,6 +5205,49 @@ app.get('/admin/users', (c) => {
                 }
             } catch (error) {
                 alert('❌ Failed to update user: ' + error.message);
+            }
+        }
+
+        async function deleteUser(userId, userEmail) {
+            // Show confirmation dialog
+            const confirmMessage = `⚠️ WARNING: This will permanently delete the user "${userEmail}" and ALL their data including:
+
+• User account and profile
+• All caption generation history
+• Usage statistics
+• Settings and preferences
+• Social media connections
+
+This action CANNOT be undone.
+
+Are you absolutely sure you want to delete this user?`;
+            
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+            
+            // Second confirmation for extra safety
+            const finalConfirm = prompt('To confirm deletion, please type "DELETE" (all caps):');
+            if (finalConfirm !== 'DELETE') {
+                alert('❌ Deletion cancelled - confirmation text did not match');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/admin/users/' + userId, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('✅ ' + result.message);
+                    loadUsers(); // Refresh the users list
+                } else {
+                    alert('❌ Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to delete user: ' + error.message);
             }
         }
 
