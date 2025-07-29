@@ -60,4 +60,4 @@ ehthumbs.db
 .wrangler/
 
 # Secret setup scripts (contains API keys when modified)
-set-secrets-with-values.sh
+set-secrets-with-values.sh.dev.vars

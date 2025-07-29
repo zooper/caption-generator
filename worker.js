@@ -646,7 +646,7 @@ const authenticateToken = async (c, next) => {
             return c.json({ error: 'Access token required' }, 401);
         }
 
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, c.env.JWT_SECRET || JWT_SECRET);
         const database = new D1Database(c.env.DB);
         const session = await database.getSession(decoded.sessionId);
         
@@ -969,7 +969,7 @@ D1Database.prototype.useInviteToken = async function(token, userId) {
     try {
         const stmt = this.db.prepare(`
             UPDATE invite_tokens 
-            SET used_at = datetime('now'), used_by = ? 
+            SET used_at = datetime('now'), used_by_user_id = ? 
             WHERE token = ?
         `);
         console.log('About to bind parameters:', { userId, token });
@@ -1214,7 +1214,7 @@ app.get('/auth/verify', async (c) => {
         await database.createSession(sessionId, user.id, sessionExpiresAt, ipAddress, userAgent);
 
         // Create JWT token
-        const jwtToken = jwt.sign({ sessionId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        const jwtToken = jwt.sign({ sessionId }, c.env.JWT_SECRET || JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
         // Set secure cookie (httpOnly=false so JavaScript can access it for backup)
         setCookie(c, 'auth_token', jwtToken, {
@@ -1809,6 +1809,137 @@ app.get('/api/admin/invites', authenticateToken, requireAdmin, async (c) => {
     } catch (error) {
         console.error('Error in /api/admin/invites:', error);
         return c.json({ error: 'Failed to fetch invites: ' + error.message }, 500);
+    }
+});
+
+// Resend invite endpoint
+app.post('/api/admin/invites/:token/resend', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { token } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        
+        // Get the existing invite
+        const invite = await database.getInviteToken(token);
+        if (!invite) {
+            return c.json({ error: 'Invite not found or already used/expired' }, 404);
+        }
+        
+        // Generate new token and extend expiry
+        const newToken = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+        
+        // Update the invite with new token and expiry
+        const updateStmt = database.db.prepare(`
+            UPDATE invite_tokens 
+            SET token = ?, expires_at = ?, created_at = datetime('now')
+            WHERE token = ?
+        `);
+        await updateStmt.bind(newToken, expiresAt, token).run();
+        
+        // Send the invite email using Resend API
+        const inviteLink = `${c.req.header('origin') || 'http://localhost:8787'}/auth?invite=${newToken}&email=${encodeURIComponent(invite.email)}`;
+        
+        // Get the user who is resending (current admin)
+        const user = c.get('user');
+        
+        // Build personal message section if it exists
+        const personalMessageHtml = invite.personal_message ? 
+            `<div style="background: #f8f9ff; padding: 20px; margin: 20px 0; border-left: 4px solid #405de6; border-radius: 4px;">
+                <h3 style="margin: 0 0 10px 0; color: #405de6;">Personal Message:</h3>
+                <p style="margin: 0; font-style: italic;">"${invite.personal_message}"</p>
+            </div>` : '';
+
+        const emailData = {
+            from: `${c.env.SMTP_FROM_NAME || 'AI Caption Studio'} <${c.env.SMTP_FROM_EMAIL || 'no-reply@jonsson.io'}>`,
+            to: [invite.email],
+            subject: 'Reminder: You\'re invited to AI Caption Studio',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2>🔄 Invitation Reminder</h2>
+                    <p>Hi there!</p>
+                    <p>This is a reminder that <strong>${user.email}</strong> has invited you to join AI Caption Studio.</p>
+                    ${personalMessageHtml}
+                    <div style="margin: 30px 0;">
+                        <a href="${inviteLink}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                            🚀 Accept Invitation
+                        </a>
+                    </div>
+                    <p><strong>This invitation expires in 7 days.</strong></p>
+                    <p>If you're not interested, you can safely ignore this email.</p>
+                    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                    <p style="color: #666; font-size: 12px;">
+                        Resent by: ${user.email}<br>
+                        Time: ${new Date().toLocaleString()}
+                    </p>
+                </div>
+            `
+        };
+
+        const emailResponse = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + c.env.SMTP_PASSWORD,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(emailData)
+        });
+
+        if (!emailResponse.ok) {
+            const errorData = await emailResponse.text();
+            console.error('Resend API error:', errorData);
+            // Still return success since the token was updated, just note email issue
+            return c.json({ 
+                success: true, 
+                message: 'Invitation token updated but email sending failed: ' + errorData,
+                newToken: newToken
+            });
+        }
+        
+        return c.json({ 
+            success: true, 
+            message: 'Invitation resent successfully',
+            newToken: newToken
+        });
+    } catch (error) {
+        console.error('Error resending invite:', error);
+        return c.json({ error: 'Failed to resend invitation: ' + error.message }, 500);
+    }
+});
+
+// Delete invite endpoint
+app.delete('/api/admin/invites/:token', authenticateToken, requireAdmin, async (c) => {
+    try {
+        const { token } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        
+        // Check if invite exists (including expired/used ones for deletion)
+        const checkStmt = database.db.prepare(`
+            SELECT * FROM invite_tokens WHERE token = ?
+        `);
+        const invite = await checkStmt.bind(token).first();
+        
+        if (!invite) {
+            return c.json({ error: 'Invite not found' }, 404);
+        }
+        
+        // Delete the invite
+        const deleteStmt = database.db.prepare(`
+            DELETE FROM invite_tokens WHERE token = ?
+        `);
+        const result = await deleteStmt.bind(token).run();
+        
+        const changes = result.meta?.changes || result.changes || 0;
+        if (changes > 0) {
+            return c.json({ 
+                success: true, 
+                message: 'Invitation deleted successfully' 
+            });
+        } else {
+            return c.json({ error: 'Failed to delete invitation' }, 500);
+        }
+    } catch (error) {
+        console.error('Error deleting invite:', error);
+        return c.json({ error: 'Failed to delete invitation: ' + error.message }, 500);
     }
 });
 
@@ -3147,6 +3278,7 @@ app.get('/', (c) => {
                 // Try cookie-based auth first, then localStorage fallback
                 let authHeader = {};
                 const token = localStorage.getItem('auth_token');
+                console.log('checkAuth - Found token:', token ? 'YES' : 'NO');
                 if (token) {
                     authHeader['Authorization'] = 'Bearer ' + token;
                 }
@@ -3807,24 +3939,38 @@ app.get('/auth', async (c) => {
                                 const result = await response.json();
                                 
                                 if (result.success) {
-                                    messageDiv.innerHTML = '<p style="color: green;">✅ Account created successfully! Sending you a magic link to log in...</p>';
+                                    messageDiv.innerHTML = '<p style="color: green;">✅ Account created successfully! Logging you in...</p>';
                                     
-                                    // Now request login for the new user
-                                    const loginResponse = await fetch('/api/auth/request-login', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ email: '${email}' })
-                                    });
-                                    
-                                    const loginResult = await loginResponse.json();
-                                    
-                                    if (loginResult.success) {
-                                        messageDiv.innerHTML = '<p style="color: green;">✅ Magic link sent to your email! Check your inbox to complete login.</p>';
+                                    // Store the JWT token for authentication
+                                    if (result.token) {
+                                        localStorage.setItem('auth_token', result.token);
+                                        localStorage.setItem('user', JSON.stringify(result.user));
+                                        
+                                        console.log('Token stored:', localStorage.getItem('auth_token'));
+                                        console.log('User stored:', localStorage.getItem('user'));
+                                        
+                                        messageDiv.innerHTML = '<p style="color: green;">✅ Welcome! Redirecting to Caption Studio...</p>';
                                         setTimeout(() => {
+                                            console.log('Redirecting to main page...');
                                             window.location.href = '/';
-                                        }, 3000);
+                                        }, 1500);
                                     } else {
-                                        messageDiv.innerHTML = '<p style="color: orange;">⚠️ Account created but failed to send login link. Please go to the main page and request a login link.</p>';
+                                        // Fallback to magic link if no token received
+                                        messageDiv.innerHTML = '<p style="color: orange;">⚠️ Account created but login failed. Sending magic link...</p>';
+                                        
+                                        const loginResponse = await fetch('/api/auth/request-login', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ email: '${email}' })
+                                        });
+                                        
+                                        const loginResult = await loginResponse.json();
+                                        
+                                        if (loginResult.success) {
+                                            messageDiv.innerHTML = '<p style="color: green;">✅ Magic link sent to your email! Check your inbox to complete login.</p>';
+                                        } else {
+                                            messageDiv.innerHTML = '<p style="color: red;">❌ Account created but failed to send login link. Please go to the main page and request a login link.</p>';
+                                        }
                                     }
                                 } else {
                                     messageDiv.innerHTML = '<p style="color: red;">❌ ' + result.error + '</p>';
@@ -5156,6 +5302,33 @@ app.get('/admin/users', (c) => {
                     </tbody>
                 </table>
             </div>
+
+            <!-- Pending Invites Management -->
+            <div class="admin-section">
+                <div class="flex justify-between items-center">
+                    <div class="section-title">📧 Pending Invites</div>
+                    <div class="flex gap-2">
+                        <button class="btn btn-primary" onclick="refreshInvites()">🔄 Refresh</button>
+                        <button class="btn btn-secondary" onclick="showInviteModal()">📧 Send New Invite</button>
+                    </div>
+                </div>
+                
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Invited By</th>
+                            <th>Tier</th>
+                            <th>Created</th>
+                            <th>Expires</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invitesTable">
+                        <tr><td colspan="6">Loading invites...</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -5226,6 +5399,10 @@ app.get('/admin/users', (c) => {
                         document.getElementById('loginRequired').classList.add('hidden');
                         document.getElementById('adminContent').classList.remove('hidden');
                         loadUsers();
+                        // Only load invites if we're on the admin users page
+                        if (document.getElementById('invitesTable')) {
+                            loadInvites();
+                        }
                     }
                 }
             } catch (error) {
@@ -5478,6 +5655,122 @@ app.get('/admin/users', (c) => {
             loadUsers();
         }
 
+        async function loadInvites() {
+            try {
+                // Check if invitesTable element exists first
+                const tbody = document.getElementById('invitesTable');
+                if (!tbody) {
+                    console.log('invitesTable element not found, skipping loadInvites');
+                    return;
+                }
+
+                const response = await fetch('/api/admin/invites', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    const invites = await response.json();
+                    
+                    if (invites.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #666;">No pending invites</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = invites.map(invite => {
+                        const created = new Date(invite.created_at).toLocaleDateString();
+                        const expires = new Date(invite.expires_at).toLocaleDateString();
+                        const invitedBy = invite.invited_by_email || 'System';
+                        const tier = invite.tier_name || 'Default';
+                        
+                        return '<tr>' +
+                            '<td>' + invite.email + '</td>' +
+                            '<td>' + invitedBy + '</td>' +
+                            '<td>' + tier + '</td>' +
+                            '<td>' + created + '</td>' +
+                            '<td>' + expires + '</td>' +
+                            '<td>' +
+                            '<div class="flex gap-2">' +
+                            '<button class="btn btn-primary" onclick="window.resendInvite(&quot;' + invite.token + '&quot;)">🔄 Resend</button>' +
+                            '<button class="btn btn-danger" onclick="window.deleteInvite(&quot;' + invite.token + '&quot;, &quot;' + invite.email + '&quot;)">🗑️ Delete</button>' +
+                            '</div>' +
+                            '</td>' +
+                            '</tr>';
+                    }).join('');
+                } else {
+                    console.error('Failed to load invites:', response.status);
+                    tbody.innerHTML = 
+                        '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Failed to load invites</td></tr>';
+                }
+            } catch (error) {
+                console.error('Error loading invites:', error);
+                // Don't try to access DOM if there's an error and element might not exist
+                const tbody = document.getElementById('invitesTable');
+                if (tbody) {
+                    tbody.innerHTML = 
+                        '<tr><td colspan="6" style="text-align: center; color: #ef4444;">Error loading invites</td></tr>';
+                }
+            }
+        }
+
+        function refreshInvites() {
+            loadInvites();
+        }
+
+        // Make functions globally accessible for onclick handlers
+        window.resendInvite = async function(token) {
+            if (!confirm('Are you sure you want to resend this invitation?')) return;
+            
+            try {
+                const response = await fetch('/api/admin/invites/' + token + '/resend', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    showNotification('✅ ' + result.message, 'success');
+                    loadInvites(); // Refresh the list
+                } else {
+                    showNotification('❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('❌ Failed to resend invitation: ' + error.message, 'error');
+            }
+        };
+
+        window.deleteInvite = async function(token, email) {
+            console.log('deleteInvite called with token:', token, 'email:', email);
+            
+            if (!confirm('Are you sure you want to delete the invitation for "' + email + '"?')) {
+                console.log('User cancelled deletion');
+                return;
+            }
+            
+            console.log('User confirmed deletion, making API call...');
+            
+            try {
+                const response = await fetch('/api/admin/invites/' + token, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                console.log('Delete response status:', response.status);
+                
+                const result = await response.json();
+                console.log('Delete response data:', result);
+                
+                if (result.success) {
+                    showNotification('✅ ' + result.message, 'success');
+                    loadInvites(); // Refresh the list
+                } else {
+                    showNotification('❌ Error: ' + result.error, 'error');
+                }
+            } catch (error) {
+                console.error('Delete error:', error);
+                showNotification('❌ Failed to delete invitation: ' + error.message, 'error');
+            }
+        };
+
         function showInviteModal() {
             const email = prompt('Enter email address to invite:');
             if (email) {
@@ -5498,12 +5791,13 @@ app.get('/admin/users', (c) => {
 
                 const result = await response.json();
                 if (result.success) {
-                    alert('✅ Invitation sent successfully!');
+                    showNotification('✅ Invitation sent successfully!', 'success');
+                    loadInvites(); // Refresh the invites list
                 } else {
-                    alert('❌ Error: ' + result.error);
+                    showNotification('❌ Error: ' + result.error, 'error');
                 }
             } catch (error) {
-                alert('❌ Failed to send invitation: ' + error.message);
+                showNotification('❌ Failed to send invitation: ' + error.message, 'error');
             }
         }
 
