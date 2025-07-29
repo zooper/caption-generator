@@ -5127,7 +5127,7 @@ app.get('/admin/users', (c) => {
                         '<div class="flex gap-2">' +
                         (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
                         '<button class="btn ' + (user.is_active ? 'btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate' : 'btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate') + '</button>' +
-                        '<button class="btn btn-danger" onclick="deleteUser(' + user.id + ', &quot;' + user.email.replace(/"/g, '&quot;') + '&quot;)">🗑️ Delete</button>' +
+                        '<button class="btn btn-danger" onclick="deleteUser(' + user.id + ')" data-email="' + user.email.replace(/"/g, '&quot;') + '">🗑️ Delete</button>' +
                         '</div>' +
                         '</td>' +
                         '</tr>'
@@ -5220,7 +5220,10 @@ app.get('/admin/users', (c) => {
             }
         }
 
-        async function deleteUser(userId, userEmail) {
+        async function deleteUser(userId) {
+            // Get the email from the button's data attribute
+            const userEmail = event.target.getAttribute('data-email');
+            
             // Show confirmation dialog
             const confirmMessage = "WARNING: This will permanently delete the user \"" + userEmail + "\" and ALL their data including:\n\n" +
                 "- User account and profile\n" +
