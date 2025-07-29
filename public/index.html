@@ -157,15 +157,6 @@
             color: var(--card-background);
             transform: translateY(-1px);
         }
-        .theme-selector {
-            padding: 8px 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            background: var(--card-background);
-            color: var(--text-primary);
-            cursor: pointer;
-            font-size: 13px;
-        }
         
         /* Mobile responsive design */
         @media (max-width: 768px) {
@@ -406,12 +397,6 @@
                     <div id="authStatus" class="user-info hidden">
                         <div class="user-welcome">Welcome, <span id="userEmail"></span>!</div>
                         <div class="user-controls">
-                            <select id="themeSelector" onchange="changeTheme()" class="theme-selector">
-                                <option value="default">🎨 Default</option>
-                                <option value="dark">🌙 Dark</option>
-                                <option value="purple-creative">💜 Purple</option>
-                                <option value="ocean-blue">🌊 Ocean</option>
-                            </select>
                             <button id="adminButton" onclick="window.location.href='/admin'" class="control-btn primary" style="display: none;">🛠️ Admin</button>
                             <button onclick="window.location.href='/settings'" class="control-btn secondary">⚙️ Settings</button>
                             <button onclick="logout()" class="control-btn secondary">Logout</button>
@@ -593,34 +578,12 @@
         }
 
         // Theme management functions
-        function changeTheme() {
-            const themeSelector = document.getElementById('themeSelector');
-            const selectedTheme = themeSelector.value;
-            
-            // Remove existing theme classes
-            document.body.removeAttribute('data-theme');
-            
-            // Apply new theme
-            if (selectedTheme !== 'default') {
-                document.body.setAttribute('data-theme', selectedTheme);
-            }
-            
-            // Save theme preference
-            localStorage.setItem('selectedTheme', selectedTheme);
-            
-        }
-        
         function loadSavedTheme() {
             const savedTheme = localStorage.getItem('selectedTheme') || 'default';
-            const themeSelector = document.getElementById('themeSelector');
             
-            if (themeSelector) {
-                themeSelector.value = savedTheme;
-                
-                // Apply the saved theme
-                if (savedTheme !== 'default') {
-                    document.body.setAttribute('data-theme', savedTheme);
-                }
+            // Apply the saved theme (no need for selector since theme is managed in settings)
+            if (savedTheme !== 'default') {
+                document.body.setAttribute('data-theme', savedTheme);
             }
         }
 
