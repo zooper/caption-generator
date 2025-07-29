@@ -5136,7 +5136,9 @@ app.get('/admin/users', (c) => {
                         '<td>' +
                         '<div class="flex gap-2">' +
                         (!user.is_admin ? '<button class="btn btn-secondary" onclick="makeAdmin(' + user.id + ')">🛠️ Make Admin</button>' : '') +
-                        '<button class="btn ' + (user.is_active ? 'btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate' : 'btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate') + '</button>' +
+                        (user.is_active ? 
+                            '<button class="btn btn-danger" onclick="toggleUser(' + user.id + ')">❌ Deactivate</button>' : 
+                            '<button class="btn btn-primary" onclick="toggleUser(' + user.id + ')">✅ Activate</button>') +
                         '<button class="btn btn-danger" onclick="deleteUser(' + user.id + ')" data-email="' + user.email.replace(/"/g, '&quot;') + '">🗑️ Delete</button>' +
                         '</div>' +
                         '</td>' +
