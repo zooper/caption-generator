@@ -952,60 +952,6 @@
         });
 
 
-            async function postToMastodon() {
-            try {
-                const btn = event.target;
-                const originalText = btn.textContent;
-                btn.disabled = true;
-                btn.textContent = '⏳ Posting...';
-
-                // Get the generated content
-                const captionText = document.getElementById('captionText').textContent;
-                const hashtagsText = document.getElementById('hashtagsText').textContent;
-                const altText = document.getElementById('altText').textContent;
-                
-                // Combine caption and hashtags for the post
-                const postContent = captionText + (hashtagsText ? ' ' + hashtagsText : '');
-
-                const response = await fetch('/api/user/post/mastodon', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({
-                        status: postContent,
-                        alt_text: altText,
-                        image_data: uploadedImage // Send the base64 image data
-                    })
-                });
-
-                const result = await response.json();
-                
-                if (result.success) {
-                    btn.textContent = '✅ Posted!';
-                    if (result.url) {
-                        setTimeout(() => {
-                            if (confirm('Post successful! Would you like to view it on Mastodon?')) {
-                                window.open(result.url, '_blank');
-                            }
-                        }, 500);
-                    }
-                } else {
-                    btn.textContent = '❌ Failed';
-                    alert('Failed to post: ' + (result.error || 'Unknown error'));
-                }
-            } catch (error) {
-                event.target.textContent = '❌ Error';
-                alert('Error posting to Mastodon: ' + error.message);
-            } finally {
-                setTimeout(() => {
-                    event.target.disabled = false;
-                    event.target.textContent = '📝 Post to Mastodon';
-                }, 3000);
-            }
-        }
 
             // Authentication functions need to be inside DOMContentLoaded too
             async function requestLogin() {
@@ -1086,6 +1032,61 @@
         }); // End of DOMContentLoaded callback
         
         // Global functions that need to be accessible from onclick handlers
+        async function postToMastodon() {
+            try {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '⏳ Posting...';
+
+                // Get the generated content
+                const captionText = document.getElementById('captionText').textContent;
+                const hashtagsText = document.getElementById('hashtagsText').textContent;
+                const altText = document.getElementById('altText').textContent;
+                
+                // Combine caption and hashtags for the post
+                const postContent = captionText + (hashtagsText ? ' ' + hashtagsText : '');
+
+                const response = await fetch('/api/user/post/mastodon', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        status: postContent,
+                        alt_text: altText,
+                        image_data: uploadedImage // Send the base64 image data
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = '✅ Posted!';
+                    if (result.url) {
+                        setTimeout(() => {
+                            if (confirm('Post successful! Would you like to view it on Mastodon?')) {
+                                window.open(result.url, '_blank');
+                            }
+                        }, 500);
+                    }
+                } else {
+                    btn.textContent = '❌ Failed';
+                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                event.target.textContent = '❌ Error';
+                alert('Error posting to Mastodon: ' + error.message);
+            } finally {
+                setTimeout(() => {
+                    event.target.disabled = false;
+                    event.target.textContent = '📝 Post to Mastodon';
+                }, 3000);
+            }
+        }
+
         function copyToClipboard(elementId, buttonElement) {
             const text = document.getElementById(elementId).textContent;
             const btn = buttonElement || event.target;

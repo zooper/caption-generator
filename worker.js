@@ -2618,28 +2618,38 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
         // Validate timestamp is reasonable (not in the future, not before 2000)
         const now = Date.now();
         const year2000 = new Date('2000-01-01').getTime();
+        let useCurrentWeather = false;
         
         if (photoTimestamp > now || photoTimestamp < year2000) {
-            photoTimestamp = now;
+            // For invalid dates (future or too old), use current weather but keep original timestamp info for display
+            useCurrentWeather = true;
             dateSource = 'current_time_fallback';
         }
         
         // Convert to Unix timestamp (seconds)
         const unixTimestamp = Math.floor(photoTimestamp / 1000);
         
-        // Use current weather for recent photos (within 5 days), historical for older
-        const fiveDaysAgo = Date.now() - (5 * 24 * 60 * 60 * 1000);
+        // Determine weather API to use
         let weatherUrl;
         let apiDescription;
         
-        if (photoTimestamp > fiveDaysAgo) {
-            // Use current weather API for recent photos
+        if (useCurrentWeather) {
+            // Use current weather for invalid dates (future or very old photos)
             weatherUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=' + latitude + '&lon=' + longitude + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
-            apiDescription = 'current';
+            apiDescription = 'current (invalid date detected)';
         } else {
-            // Use historical weather API for older photos
-            weatherUrl = 'https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=' + latitude + '&lon=' + longitude + '&dt=' + unixTimestamp + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
-            apiDescription = 'historical';
+            // Use current weather for recent photos (within 5 days), historical for older
+            const fiveDaysAgo = Date.now() - (5 * 24 * 60 * 60 * 1000);
+            
+            if (photoTimestamp > fiveDaysAgo) {
+                // Use current weather API for recent photos
+                weatherUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=' + latitude + '&lon=' + longitude + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
+                apiDescription = 'current';
+            } else {
+                // Use historical weather API for older photos
+                weatherUrl = 'https://api.openweathermap.org/data/3.0/onecall/timemachine?lat=' + latitude + '&lon=' + longitude + '&dt=' + unixTimestamp + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
+                apiDescription = 'historical';
+            }
         }
         
         
@@ -2699,9 +2709,14 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
         }
         
         if (weatherInfo) {
-            const weatherText = weatherInfo.temperature + '°C, ' + weatherInfo.description +
+            let weatherText = weatherInfo.temperature + '°C, ' + weatherInfo.description +
                                (weatherInfo.humidity ? ', ' + weatherInfo.humidity + '% humidity' : '') +
                                (weatherInfo.windSpeed ? ', ' + weatherInfo.windSpeed + ' km/h wind' : '');
+            
+            // Add note if using current weather due to invalid photo date
+            if (useCurrentWeather) {
+                weatherText += ' (current weather - photo date appears invalid)';
+            }
             
             return weatherText;
         }
