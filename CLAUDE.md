@@ -17,13 +17,15 @@ A comprehensive web application that uses AI to analyze uploaded images and gene
 
 ### Backend (Cloudflare Workers + Hono)
 - **Framework**: Hono.js on Cloudflare Workers
-- **Database**: Cloudflare D1 (SQLite)
+- **Database**: Cloudflare D1 (SQLite) with embedded D1Database class
 - **Authentication**: JWT tokens with secure sessions
 - **Email**: Resend API for magic link authentication
 - **APIs**: OpenAI GPT-4 Vision, OpenWeatherMap
+- **Static Assets**: Served from `/public` directory via Cloudflare Workers Assets
 
 ### Frontend
 - **Technology**: Vanilla HTML, CSS, JavaScript
+- **Static Files**: All HTML files served as static assets from `/public` directory
 - **Responsive Design**: Mobile-first with CSS Grid/Flexbox
 - **Theme System**: CSS custom properties with multiple themes
 - **Interactive Elements**: Loading states, copy-to-clipboard, drag & drop
@@ -137,10 +139,10 @@ ALT_TEXT: [descriptive alt text]
 ## Deployment Configuration
 
 ### Cloudflare Workers Setup
-- **Runtime**: Cloudflare Workers with Node.js compatibility
-- **Database**: D1 database with proper schema migrations
-- **Static Assets**: Served from /public directory
-- **Environment Variables**: Secure secret management
+- **Runtime**: Cloudflare Workers with Node.js compatibility (nodejs_compat_v2)
+- **Database**: D1 database with embedded D1Database class and auto-migration
+- **Static Assets**: Served from `/public` directory via Workers Assets
+- **Environment Variables**: Secure secret management via wrangler secrets
 
 ### Required Environment Variables
 ```
@@ -154,8 +156,9 @@ SMTP_FROM_EMAIL=noreply@yourdomain.com
 
 ### Database Migration
 - **Schema Version**: Version 8 with all required tables
-- **Auto-Migration**: Automatic table creation and updates
-- **Default Data**: Default tiers and settings
+- **Auto-Migration**: Embedded D1Database class handles automatic schema migrations
+- **Default Data**: Default tiers and settings created automatically
+- **Database Class**: Self-contained D1Database class within worker.js
 
 ## Security Implementation
 - **API Key Protection**: Server-side only, never exposed to frontend
@@ -175,11 +178,11 @@ SMTP_FROM_EMAIL=noreply@yourdomain.com
 ## File Structure
 ```
 ai-caption-studio/
-├── worker.js                  # Main Cloudflare Worker
-├── wrangler.toml              # Cloudflare configuration
-├── schema.sql                 # Database schema
+├── worker.js                  # Main Cloudflare Worker with embedded D1Database class
+├── wrangler.toml              # Cloudflare configuration with assets directory
+├── schema.sql                 # Database schema (for reference)
 ├── .dev.vars                  # Local development secrets
-├── public/
+├── public/                    # Static assets directory (served by Workers Assets)
 │   ├── index.html            # Main application
 │   ├── auth.html             # Authentication page
 │   ├── admin.html            # Admin dashboard
@@ -190,6 +193,9 @@ ai-caption-studio/
 │   ├── themes.css            # Theme definitions
 │   ├── script.js             # Main application logic
 │   └── theme-loader.js       # Theme management
+├── server.js                  # Alternative Node.js server (development)
+├── database.js                # Database utilities
+├── thumbnails.js              # Thumbnail generation utilities
 └── CLAUDE.md                 # This file
 ```
 
@@ -227,6 +233,24 @@ wrangler secret put OPENWEATHER_API_KEY
 - **Scheduled Posting**: Integration with scheduling tools
 - **Mobile App**: Native mobile application
 
+## Architecture Notes
+
+### Static Asset Serving
+- All HTML, CSS, and JavaScript files are served as static assets from the `/public` directory
+- Cloudflare Workers Assets automatically serves these files with optimal caching
+- The worker.js file handles all API routes and redirects to static files for UI routes
+- No HTML content is embedded in the worker code - clean separation of concerns
+
+### Database Architecture
+- Complete D1Database class embedded within worker.js for simplified deployment
+- Automatic schema migration on startup ensures database consistency
+- Self-contained database operations without external dependencies
+
+### Development vs Production
+- Alternative Node.js server (server.js) available for local development
+- Docker support for containerized deployment
+- Cloudflare Workers for production deployment with edge distribution
+
 ---
 
-*This application is designed for multi-user deployment with proper authentication, admin controls, and scalable architecture on Cloudflare's edge network.*
+*This application is designed for multi-user deployment with proper authentication, admin controls, and scalable architecture on Cloudflare's edge network. The architecture emphasizes clean separation between static assets and API logic.*
