@@ -311,6 +311,33 @@
                     </div>
                 </div>
 
+                <!-- Pixelfed Integration -->
+                <div id="pixelfedCard" class="integration-card">
+                    <div class="integration-header">
+                        <div class="integration-title">
+                            <span>📸</span>
+                            <span>Pixelfed</span>
+                        </div>
+                        <span id="pixelfedStatus" class="status-badge status-disconnected">Disconnected</span>
+                    </div>
+                    <div id="pixelfedSettings">
+                        <div class="form-group">
+                            <label class="form-label" for="pixelfedInstance">Instance URL</label>
+                            <input type="url" id="pixelfedInstance" class="form-input" placeholder="https://pixelfed.social">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="pixelfedToken">Access Token</label>
+                            <input type="password" id="pixelfedToken" class="form-input" placeholder="Your Pixelfed access token">
+                            <p class="text-sm text-muted mt-3">Generate an access token in your Pixelfed instance settings under Settings → Applications</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-primary" onclick="testPixelfedConnection()">🔌 Test Connection</button>
+                            <button class="btn btn-success" onclick="savePixelfedSettings()">💾 Save</button>
+                            <button class="btn btn-secondary" onclick="disconnectPixelfed()">🔌 Disconnect</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- LinkedIn Integration -->
                 <div id="linkedinCard" class="integration-card">
                     <div class="integration-header">
@@ -460,6 +487,15 @@
                         if (settings.mastodon.token) {
                             document.getElementById('mastodonToken').placeholder = '••••••••••••••••';
                             updateMastodonStatus('connected');
+                        }
+                    }
+                    
+                    // Load Pixelfed settings
+                    if (settings.pixelfed) {
+                        document.getElementById('pixelfedInstance').value = settings.pixelfed.instance || '';
+                        if (settings.pixelfed.token) {
+                            document.getElementById('pixelfedToken').placeholder = '••••••••••••••••';
+                            updatePixelfedStatus('connected');
                         }
                     }
                     
@@ -664,6 +700,112 @@
                     document.getElementById('mastodonToken').value = '';
                     document.getElementById('mastodonToken').placeholder = 'Your Mastodon access token';
                     alert('✅ Mastodon disconnected successfully!');
+                }
+            } catch (error) {
+                alert('❌ Failed to disconnect: ' + error.message);
+            }
+        }
+
+        // Pixelfed Functions
+        function updatePixelfedStatus(status) {
+            const statusEl = document.getElementById('pixelfedStatus');
+            if (status === 'connected') {
+                statusEl.classList.remove('status-disconnected', 'status-error');
+                statusEl.classList.add('status-connected');
+                statusEl.textContent = 'Connected';
+            } else if (status === 'error') {
+                statusEl.classList.remove('status-connected', 'status-disconnected');
+                statusEl.classList.add('status-error');
+                statusEl.textContent = 'Error';
+            } else {
+                statusEl.classList.remove('status-connected', 'status-error');
+                statusEl.classList.add('status-disconnected');
+                statusEl.textContent = 'Disconnected';
+            }
+        }
+
+        async function testPixelfedConnection() {
+            const instance = document.getElementById('pixelfedInstance').value;
+            const token = document.getElementById('pixelfedToken').value;
+            
+            if (!instance || !token) {
+                alert('Please fill in both instance URL and access token');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/user/settings/test-pixelfed', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ instance, token })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    updatePixelfedStatus('connected');
+                    alert('✅ Connection successful! Connected as: ' + result.username);
+                } else {
+                    updatePixelfedStatus('error');
+                    alert('❌ Connection failed: ' + result.error);
+                }
+            } catch (error) {
+                updatePixelfedStatus('error');
+                alert('❌ Connection test failed: ' + error.message);
+            }
+        }
+
+        async function savePixelfedSettings() {
+            const instance = document.getElementById('pixelfedInstance').value;
+            const token = document.getElementById('pixelfedToken').value;
+            
+            if (!instance || !token) {
+                alert('Please fill in both instance URL and access token');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/user/settings/pixelfed', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ instance, token })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    updatePixelfedStatus('connected');
+                    document.getElementById('pixelfedToken').placeholder = '••••••••••••••••';
+                    document.getElementById('pixelfedToken').value = '';
+                    alert('✅ Pixelfed settings saved successfully!');
+                } else {
+                    updatePixelfedStatus('error');
+                    alert('❌ Failed to save settings: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to save settings: ' + error.message);
+            }
+        }
+
+        async function disconnectPixelfed() {
+            if (!confirm('Are you sure you want to disconnect Pixelfed?')) return;
+            
+            try {
+                const response = await fetch('/api/user/settings/pixelfed', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    updatePixelfedStatus('disconnected');
+                    document.getElementById('pixelfedInstance').value = '';
+                    document.getElementById('pixelfedToken').value = '';
+                    document.getElementById('pixelfedToken').placeholder = 'Your Pixelfed access token';
+                    alert('✅ Pixelfed disconnected successfully!');
                 }
             } catch (error) {
                 alert('❌ Failed to disconnect: ' + error.message);

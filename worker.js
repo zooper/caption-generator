@@ -1884,6 +1884,7 @@ app.get('/api/user/settings/social', authenticateToken, async (c) => {
         
         const socialSettings = {
             mastodon: {},
+            pixelfed: {},
             linkedin: {}
         };
         
@@ -1891,6 +1892,8 @@ app.get('/api/user/settings/social', authenticateToken, async (c) => {
             const [platform, key] = setting.setting_key.split('_');
             if (platform === 'mastodon') {
                 socialSettings.mastodon[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
+            } else if (platform === 'pixelfed') {
+                socialSettings.pixelfed[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
             } else if (platform === 'linkedin') {
                 socialSettings.linkedin[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
             }
@@ -2146,6 +2149,195 @@ app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
         
     } catch (error) {
         return c.json({ error: 'Failed to post to Mastodon: ' + error.message }, 500);
+    }
+});
+
+// Pixelfed API endpoints
+app.post('/api/user/settings/test-pixelfed', authenticateToken, async (c) => {
+    try {
+        const { instance, token } = await c.req.json();
+        
+        if (!instance || !token) {
+            return c.json({ error: 'Instance URL and token are required' }, 400);
+        }
+        
+        // Test Pixelfed connection using Mastodon-compatible API
+        const testUrl = `${instance}/api/v1/accounts/verify_credentials`;
+        const response = await fetch(testUrl, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.ok) {
+            const accountData = await response.json();
+            return c.json({ 
+                success: true, 
+                username: accountData.username || accountData.display_name,
+                account_id: accountData.id
+            });
+        } else {
+            const errorText = await response.text();
+            return c.json({ 
+                error: 'Failed to verify credentials: ' + response.status 
+            }, 400);
+        }
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to test connection: ' + error.message }, 500);
+    }
+});
+
+app.post('/api/user/settings/pixelfed', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { instance, token } = await c.req.json();
+        
+        if (!instance || !token) {
+            return c.json({ error: 'Instance URL and token are required' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        
+        // Test the connection first
+        const testUrl = `${instance}/api/v1/accounts/verify_credentials`;
+        const testResponse = await fetch(testUrl, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (!testResponse.ok) {
+            return c.json({ error: 'Failed to verify Pixelfed credentials' }, 400);
+        }
+        
+        // Save settings
+        await database.saveUserSetting(user.id, 'social', 'pixelfed_instance', instance);
+        await database.saveUserSetting(user.id, 'social', 'pixelfed_token', token);
+        
+        return c.json({ success: true });
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to save settings: ' + error.message }, 500);
+    }
+});
+
+app.delete('/api/user/settings/pixelfed', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        await database.deleteUserSetting(user.id, 'social', 'pixelfed_instance');
+        await database.deleteUserSetting(user.id, 'social', 'pixelfed_token');
+        
+        return c.json({ success: true });
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to delete settings: ' + error.message }, 500);
+    }
+});
+
+app.post('/api/user/post/pixelfed', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { status, alt_text, image_data } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        if (!status) {
+            return c.json({ error: 'Status text is required' }, 400);
+        }
+        
+        // Get user's Pixelfed settings
+        const settings = await database.getUserSettings(user.id, 'social');
+        let pixelfedInstance = null;
+        let pixelfedToken = null;
+        
+        settings.forEach(setting => {
+            if (setting.setting_key === 'pixelfed_instance') {
+                pixelfedInstance = setting.setting_value;
+            } else if (setting.setting_key === 'pixelfed_token') {
+                pixelfedToken = setting.setting_value;
+            }
+        });
+        
+        if (!pixelfedInstance || !pixelfedToken) {
+            return c.json({ error: 'Pixelfed account not properly configured' }, 400);
+        }
+        
+        // First upload the image if provided
+        let mediaId = null;
+        if (image_data) {
+            try {
+                // Convert base64 to binary for upload
+                const imageBuffer = Buffer.from(image_data, 'base64');
+                
+                const mediaFormData = new FormData();
+                mediaFormData.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }));
+                if (alt_text) {
+                    mediaFormData.append('description', alt_text);
+                }
+                
+                const mediaResponse = await fetch(`${pixelfedInstance}/api/v1/media`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${pixelfedToken}`
+                    },
+                    body: mediaFormData
+                });
+                
+                if (mediaResponse.ok) {
+                    const mediaResult = await mediaResponse.json();
+                    mediaId = mediaResult.id;
+                } else {
+                    const errorText = await mediaResponse.text();
+                    return c.json({ 
+                        error: 'Failed to upload image to Pixelfed: ' + mediaResponse.status 
+                    }, 500);
+                }
+            } catch (uploadError) {
+                return c.json({ 
+                    error: 'Failed to process image upload: ' + uploadError.message 
+                }, 500);
+            }
+        }
+        
+        // Create the post
+        const postData = {
+            status: status,
+            visibility: 'public'
+        };
+        
+        if (mediaId) {
+            postData.media_ids = [mediaId];
+        }
+        
+        const postResponse = await fetch(`${pixelfedInstance}/api/v1/statuses`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${pixelfedToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(postData)
+        });
+        
+        if (postResponse.ok) {
+            const postResult = await postResponse.json();
+            
+            return c.json({ 
+                success: true, 
+                message: 'Posted to Pixelfed successfully!',
+                url: postResult.url,
+                id: postResult.id
+            });
+        } else {
+            const errorText = await postResponse.text();
+            return c.json({ 
+                error: 'Failed to create post on Pixelfed: ' + postResponse.status 
+            }, 500);
+        }
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to post to Pixelfed: ' + error.message }, 500);
     }
 });
 

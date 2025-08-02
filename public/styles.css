@@ -707,6 +707,46 @@ body {
     color: #1976d2;
 }
 
+/* Pixelfed Styles */
+.pixelfed-card {
+    background: white;
+    border-radius: 15px;
+    padding: 20px;
+    margin-top: 20px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.pixelfed-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.pixelfed-card h3 {
+    color: #ff6b35;
+    margin: 0;
+}
+
+.pixelfed-status {
+    background: #e8f5e8;
+    color: #2d5a2d;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.pixelfed-status.error {
+    background: #ffe8e8;
+    color: #d32f2f;
+}
+
+.pixelfed-status.posting {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
 .mastodon-preview {
     background: #f8f9fa;
     border-radius: 10px;

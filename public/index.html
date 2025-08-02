@@ -301,6 +301,7 @@
         .social-preview-header { padding: 15px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0; font-weight: 600; display: flex; align-items: center; gap: 10px; }
         .social-preview-content { padding: 15px; }
         .mastodon-preview { border-left: 4px solid #6364ff; }
+        .pixelfed-preview { border-left: 4px solid #ff6b35; }
         .linkedin-preview { border-left: 4px solid #0077b5; }
         .preview-text { margin: 10px 0; line-height: 1.5; }
         .preview-hashtags { color: #0077b5; font-size: 0.9em; margin-top: 10px; }
@@ -890,7 +891,7 @@
                 const socialPreviewCard = document.getElementById('socialPreviewCard');
                 const socialPreviewContent = document.getElementById('socialPreviewContent');
                 
-                if (data.connectedAccounts && (data.connectedAccounts.mastodon || data.connectedAccounts.linkedin)) {
+                if (data.connectedAccounts && (data.connectedAccounts.mastodon || data.connectedAccounts.pixelfed || data.connectedAccounts.linkedin)) {
                     
                     const captionText = captionMatch ? captionMatch[1].trim() : '';
                     const hashtagsText = hashtagsMatch ? hashtagsMatch[1].trim() : '';
@@ -912,6 +913,25 @@
                             (altTextContent ? '<div class="preview-alt">Alt text: ' + altTextContent + '</div>' : '') +
                             '<div class="preview-actions">' +
                             '<button class="post-btn" onclick="postToMastodon()">📝 Post to Mastodon</button>' +
+                            '</div>' +
+                            '</div>' +
+                            '</div>';
+                    }
+                    
+                    // Pixelfed preview
+                    if (data.connectedAccounts.pixelfed && data.connectedAccounts.pixelfed.instance) {
+                        const instanceName = data.connectedAccounts.pixelfed.instance.replace('https://', '').replace('http://', '');
+                        socialPreviewHtml += '<div class="social-preview pixelfed-preview">' +
+                            '<div class="social-preview-header">' +
+                            '<span>📸</span>' +
+                            '<span>Pixelfed Preview (' + instanceName + ')</span>' +
+                            '</div>' +
+                            '<div class="social-preview-content">' +
+                            '<div class="preview-text">' + captionText + '</div>' +
+                            (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
+                            (altTextContent ? '<div class="preview-alt">Alt text: ' + altTextContent + '</div>' : '') +
+                            '<div class="preview-actions">' +
+                            '<button class="post-btn" onclick="postToPixelfed()">📝 Post to Pixelfed</button>' +
                             '</div>' +
                             '</div>' +
                             '</div>';
@@ -1083,6 +1103,61 @@
                 setTimeout(() => {
                     event.target.disabled = false;
                     event.target.textContent = '📝 Post to Mastodon';
+                }, 3000);
+            }
+        }
+        
+        async function postToPixelfed() {
+            try {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '⏳ Posting...';
+
+                // Get the generated content
+                const captionText = document.getElementById('captionText').textContent;
+                const hashtagsText = document.getElementById('hashtagsText').textContent;
+                const altText = document.getElementById('altText').textContent;
+                
+                // Combine caption and hashtags for the post
+                const postContent = captionText + (hashtagsText ? ' ' + hashtagsText : '');
+
+                const response = await fetch('/api/user/post/pixelfed', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        status: postContent,
+                        alt_text: altText,
+                        image_data: uploadedImage // Send the base64 image data
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = '✅ Posted!';
+                    if (result.url) {
+                        setTimeout(() => {
+                            if (confirm('Post successful! Would you like to view it on Pixelfed?')) {
+                                window.open(result.url, '_blank');
+                            }
+                        }, 500);
+                    }
+                } else {
+                    btn.textContent = '❌ Failed';
+                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                event.target.textContent = '❌ Error';
+                alert('Error posting to Pixelfed: ' + error.message);
+            } finally {
+                setTimeout(() => {
+                    event.target.disabled = false;
+                    event.target.textContent = '📝 Post to Pixelfed';
                 }, 3000);
             }
         }
