@@ -965,10 +965,16 @@ D1Database.prototype.getUsersUsageStats = async function() {
         SELECT 
             u.id, u.email, u.created_at, u.last_login, u.is_active,
             t.name as tier_name, t.daily_limit,
-            COALESCE(du.usage_count, 0) as usage_today
+            COALESCE(du.usage_count, 0) as usage_today,
+            COALESCE(total_usage.total_count, 0) as total_usage
         FROM users u
         LEFT JOIN user_tiers t ON u.tier_id = t.id
         LEFT JOIN daily_usage du ON u.id = du.user_id AND du.date = date('now')
+        LEFT JOIN (
+            SELECT user_id, SUM(usage_count) as total_count
+            FROM daily_usage
+            GROUP BY user_id
+        ) total_usage ON u.id = total_usage.user_id
         WHERE u.is_active = 1
         ORDER BY u.created_at DESC
     `);

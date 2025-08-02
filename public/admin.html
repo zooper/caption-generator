@@ -269,12 +269,13 @@
                                 <th>Email</th>
                                 <th>Tier</th>
                                 <th>Usage Today</th>
+                                <th>Total Usage</th>
                                 <th>Joined</th>
                                 <th>Status</th>
                             </tr>
                         </thead>
                         <tbody id="recentUsers">
-                        <tr><td colspan="5">Loading...</td></tr>
+                        <tr><td colspan="6">Loading...</td></tr>
                     </tbody>
                 </table>
                 </div>
@@ -306,26 +307,11 @@
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
                     <div>
                         <div class="form-group">
-                            <label class="form-label">👤 Admin Email</label>
-                            <input type="text" id="adminEmailDisplay" class="form-input" readonly style="background: #f8f9fa;">
-                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Set via ADMIN_EMAIL environment variable</p>
-                        </div>
-                        <div class="form-group">
                             <label class="form-label">🔓 Registration Status</label>
                             <select id="registrationOpen" class="form-input">
                                 <option value="true">Open - Anyone can register</option>
                                 <option value="false">Closed - Invite only</option>
                             </select>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="form-group">
-                            <label class="form-label">📊 System Status</label>
-                            <div style="padding: 10px; background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px;">
-                                <p><strong>Version:</strong> 1.0.0</p>
-                                <p><strong>Database:</strong> Cloudflare D1</p>
-                                <p><strong>Runtime:</strong> Cloudflare Workers</p>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -449,15 +435,16 @@
                         '<td>' + user.email + '</td>' +
                         '<td>' + (user.tier_name || 'No tier') + '</td>' +
                         '<td>' + user.usage_today + '/' + (user.daily_limit === -1 ? '∞' : user.daily_limit) + '</td>' +
+                        '<td>' + (user.total_usage || 0) + '</td>' +
                         '<td>' + new Date(user.created_at).toLocaleDateString() + '</td>' +
                         '<td><span style="color: green;">●</span> Active</td>' +
                         '</tr>'
                     ).join('');
                 } else {
-                    document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users (Status: ' + response.status + ')</td></tr>';
+                    document.getElementById('recentUsers').innerHTML = '<tr><td colspan="6">Failed to load users (Status: ' + response.status + ')</td></tr>';
                 }
             } catch (error) {
-                document.getElementById('recentUsers').innerHTML = '<tr><td colspan="5">Failed to load users: ' + error.message + '</td></tr>';
+                document.getElementById('recentUsers').innerHTML = '<tr><td colspan="6">Failed to load users: ' + error.message + '</td></tr>';
             }
         }
 
