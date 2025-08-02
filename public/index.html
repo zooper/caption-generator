@@ -1119,8 +1119,8 @@
                 const hashtagsText = document.getElementById('hashtagsText').textContent;
                 const altText = document.getElementById('altText').textContent;
                 
-                // Combine caption and hashtags for the post
-                const postContent = captionText + (hashtagsText ? ' ' + hashtagsText : '');
+                // Combine caption and hashtags for the post with proper spacing for Pixelfed
+                const postContent = captionText + (hashtagsText ? '\n\n' + hashtagsText : '');
 
                 const response = await fetch('/api/user/post/pixelfed', {
                     method: 'POST',
