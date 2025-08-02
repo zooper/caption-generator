@@ -265,16 +265,6 @@
                             <label class="form-label" for="customPrompt">Custom Prompt Addition</label>
                             <textarea id="customPrompt" class="form-textarea" placeholder="Add any custom instructions that will be included in all your caption requests..."></textarea>
                         </div>
-                        <div class="form-group">
-                            <label class="form-label" for="locationZoom">📍 Location Detail Level</label>
-                            <select id="locationZoom" class="form-select">
-                                <option value="10">City Level - "New York, NY, USA"</option>
-                                <option value="14">District Level - "Manhattan, New York, NY, USA"</option>
-                                <option value="16">Neighborhood Level - "SoHo, Manhattan, New York, NY, USA"</option>
-                                <option value="18" selected>Street Level - "123 Broadway, SoHo, Manhattan, New York, NY, USA"</option>
-                            </select>
-                            <p class="text-sm text-muted">Control how detailed your location information should be when extracted from photos</p>
-                        </div>
                     </div>
                 </div>
                 <button class="btn btn-primary" onclick="savePreferences()">💾 Save Preferences</button>
@@ -425,9 +415,6 @@
                 });
                 if (response.ok) {
                     const settings = await response.json();
-                    if (settings.locationZoom) {
-                        document.getElementById('locationZoom').value = settings.locationZoom;
-                    }
                 }
             } catch (error) {
                 console.error('Error loading location zoom setting:', error);
@@ -439,7 +426,6 @@
             const autoWeather = document.getElementById('autoWeather').checked;
             const hashtagCount = document.getElementById('defaultHashtagCount').value;
             const customPrompt = document.getElementById('customPrompt').value;
-            const locationZoom = document.getElementById('locationZoom').value;
             
             // Save to localStorage
             localStorage.setItem('defaultStyle', style);
@@ -455,9 +441,7 @@
                         'Content-Type': 'application/json',
                         'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
                     },
-                    body: JSON.stringify({
-                        locationZoom: parseInt(locationZoom)
-                    })
+                    body: JSON.stringify({})
                 });
 
                 if (response.ok) {

@@ -204,6 +204,37 @@ body {
     font-style: italic;
 }
 
+/* Form styles matching settings page */
+.form-select {
+    padding: 12px !important;
+    border: 2px solid #e1e5e9 !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    background: #ffffff !important;
+    color: #333 !important;
+    transition: border-color 0.2s !important;
+    cursor: pointer !important;
+}
+
+.form-select:focus {
+    outline: none !important;
+    border-color: #405de6 !important;
+    box-shadow: 0 0 0 3px rgba(64, 93, 230, 0.1) !important;
+}
+
+/* Location Granularity Dropdown */
+.location-input-container {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+}
+
+.location-input-container input {
+    flex: 1;
+    min-width: 0; /* Allows flex item to shrink below content size */
+}
+
 .context-actions {
     display: flex;
     gap: 10px;
