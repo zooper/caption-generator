@@ -725,8 +725,10 @@
         }
 
         async function testPixelfedConnection() {
-            const instance = document.getElementById('pixelfedInstance').value;
-            const token = document.getElementById('pixelfedToken').value;
+            const instance = document.getElementById('pixelfedInstance').value.trim();
+            const token = document.getElementById('pixelfedToken').value.trim();
+            
+            console.log('Instance:', instance, 'Token:', token ? 'present' : 'missing');
             
             if (!instance || !token) {
                 alert('Please fill in both instance URL and access token');
@@ -758,8 +760,8 @@
         }
 
         async function savePixelfedSettings() {
-            const instance = document.getElementById('pixelfedInstance').value;
-            const token = document.getElementById('pixelfedToken').value;
+            const instance = document.getElementById('pixelfedInstance').value.trim();
+            const token = document.getElementById('pixelfedToken').value.trim();
             
             if (!instance || !token) {
                 alert('Please fill in both instance URL and access token');
