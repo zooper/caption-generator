@@ -2925,6 +2925,7 @@ async function getConnectedSocialAccounts(database, userId) {
         const settings = await database.getUserSettings(userId, 'social');
         const connected = {
             mastodon: null,
+            pixelfed: null,
             linkedin: null
         };
         
@@ -2932,6 +2933,8 @@ async function getConnectedSocialAccounts(database, userId) {
             const [platform, key] = setting.setting_key.split('_');
             if (platform === 'mastodon' && key === 'instance') {
                 connected.mastodon = { instance: setting.setting_value };
+            } else if (platform === 'pixelfed' && key === 'instance') {
+                connected.pixelfed = { instance: setting.setting_value };
             } else if (platform === 'linkedin' && key === 'token' && setting.setting_value) {
                 connected.linkedin = { connected: true };
             }
@@ -2939,7 +2942,7 @@ async function getConnectedSocialAccounts(database, userId) {
         
         return connected;
     } catch (error) {
-        return { mastodon: null, linkedin: null };
+        return { mastodon: null, pixelfed: null, linkedin: null };
     }
 }
 
