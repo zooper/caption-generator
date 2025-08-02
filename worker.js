@@ -2212,8 +2212,8 @@ app.post('/api/user/settings/pixelfed', authenticateToken, async (c) => {
         }
         
         // Save settings
-        await database.saveUserSetting(user.id, 'social', 'pixelfed_instance', instance);
-        await database.saveUserSetting(user.id, 'social', 'pixelfed_token', token);
+        await database.setUserSetting(user.id, 'social', 'pixelfed_instance', instance, false);
+        await database.setUserSetting(user.id, 'social', 'pixelfed_token', token, true);
         
         return c.json({ success: true });
         
