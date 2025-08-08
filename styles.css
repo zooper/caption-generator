@@ -756,6 +756,32 @@ body {
     color: white;
 }
 
+/* Location Granularity Dropdown */
+.location-input-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.location-input-container input {
+    flex: 1;
+}
+
+.location-granularity-dropdown {
+    padding: 12px 8px;
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    background: white;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.location-granularity-dropdown:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
 /* Weather toggle styling */
 .weather-toggle-container {
     display: flex;

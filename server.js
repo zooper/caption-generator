@@ -240,6 +240,202 @@ app.use(express.static(path.join(__dirname)));
 // Serve thumbnails
 app.use('/thumbnails', express.static(path.join(process.env.DATA_PATH || './data', 'thumbnails')));
 
+// Lightroom plugin endpoint for batch caption generation
+app.post('/api/lightroom/generate-caption', authenticateApiKey, async (req, res) => {
+    const startTime = Date.now();
+    const queryId = uuidv4();
+    
+    try {
+        let { base64Image, includeWeather, style, filename, title, caption, keywords, rating, colorLabel, metadata } = req.body;
+        
+        if (!process.env.OPENAI_API_KEY) {
+            return res.status(500).json({ 
+                error: 'OpenAI API key not configured in .env file' 
+            });
+        }
+
+        // Validate base64Image
+        if (!base64Image || typeof base64Image !== 'string') {
+            return res.status(400).json({ 
+                error: 'Missing or invalid base64 image data' 
+            });
+        }
+
+        // Check usage limits
+        const usageCheck = await database.checkUsageLimit(req.user.id);
+        if (!usageCheck.allowed) {
+            return res.status(429).json({
+                error: 'Daily usage limit exceeded',
+                usageInfo: {
+                    used: usageCheck.used,
+                    limit: usageCheck.limit,
+                    remaining: usageCheck.remaining,
+                    tierName: usageCheck.tierName
+                }
+            });
+        }
+
+        // Set up logging data with Lightroom-specific info
+        let logData = {
+            id: queryId,
+            source: 'lightroom',
+            imageSize: Math.round(base64Image.length * 0.75),
+            imageType: 'image/jpeg',
+            thumbnailPath: null,
+            previewPath: null,
+            exifData: metadata,
+            cameraMake: metadata?.camera || null,
+            cameraModel: metadata?.camera || null,
+            gpsLatitude: null,
+            gpsLongitude: null,
+            locationName: null,
+            promptLength: null,
+            responseLength: null,
+            processingTimeMs: null,
+            errorMessage: null,
+            ipAddress: req.ip || req.connection.remoteAddress,
+            userAgent: req.get('User-Agent'),
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+            estimatedCostUsd: null,
+            includeWeather: includeWeather,
+            weatherData: null
+        };
+
+        // Generate thumbnail for logging
+        const thumbnailResult = await thumbnailGenerator.generateThumbnail(base64Image, queryId);
+        if (thumbnailResult) {
+            logData.thumbnailPath = thumbnailResult.thumbnailRelativePath;
+            logData.previewPath = thumbnailResult.previewRelativePath;
+        }
+
+        // Build prompt with existing context and Lightroom metadata
+        const result = await buildPromptFromImageWithExtraction(base64Image, includeWeather, style);
+        let prompt = result.prompt;
+        let extractedData = result.extractedData;
+        
+        // Enhance prompt with Lightroom metadata if available
+        if (title || caption || keywords) {
+            const contextParts = [];
+            if (title) contextParts.push(`Title: ${title}`);
+            if (caption) contextParts.push(`Existing caption: ${caption}`);
+            if (keywords) contextParts.push(`Keywords: ${keywords}`);
+            if (rating) contextParts.push(`Rating: ${rating} stars`);
+            if (colorLabel) contextParts.push(`Color label: ${colorLabel}`);
+            
+            const lightroomContext = contextParts.join('\n');
+            prompt += `\n\nLightroom Metadata:\n${lightroomContext}`;
+        }
+
+        // Store extracted data for logging
+        if (extractedData) {
+            logData.exifData = extractedData.exifData;
+            logData.cameraMake = extractedData.cameraMake;
+            logData.cameraModel = extractedData.cameraModel;
+            logData.gpsLatitude = extractedData.gpsLatitude;
+            logData.gpsLongitude = extractedData.gpsLongitude;
+            logData.locationName = extractedData.locationName;
+            logData.weatherData = extractedData.weatherData;
+        }
+
+        logData.promptLength = prompt.length;
+
+        // Check rate limit
+        if (!rateLimiter.canMakeRequest()) {
+            const waitTime = rateLimiter.getWaitTime();
+            logData.errorMessage = `Rate limit exceeded. Please wait ${waitTime} seconds before trying again.`;
+            logData.processingTimeMs = Date.now() - startTime;
+            await database.logQuery(logData);
+            return res.status(429).json({ 
+                error: `Rate limit exceeded. Please wait ${waitTime} seconds before trying again.`,
+                waitTime: waitTime
+            });
+        }
+
+        rateLimiter.recordRequest();
+
+        // Call OpenAI API
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o',
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'text',
+                                text: prompt
+                            },
+                            {
+                                type: 'image_url',
+                                image_url: {
+                                    url: `data:image/jpeg;base64,${base64Image}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 500
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.text();
+            logData.errorMessage = `OpenAI API Error: ${response.status} - ${errorData}`;
+            logData.processingTimeMs = Date.now() - startTime;
+            await database.logQuery(logData);
+            return res.status(response.status).json({ 
+                error: `OpenAI API request failed: ${response.status}` 
+            });
+        }
+
+        const data = await response.json();
+        const responseContent = data.choices[0].message.content;
+        
+        // Log token usage and calculate cost
+        if (data.usage) {
+            logData.inputTokens = data.usage.prompt_tokens || 0;
+            logData.outputTokens = data.usage.completion_tokens || 0;
+            logData.totalTokens = data.usage.total_tokens || 0;
+            const inputCost = (logData.inputTokens / 1000000) * 2.50;
+            const outputCost = (logData.outputTokens / 1000000) * 10.00;
+            logData.estimatedCostUsd = inputCost + outputCost;
+        }
+        
+        logData.responseLength = responseContent.length;
+        logData.processingTimeMs = Date.now() - startTime;
+        await database.logQuery(logData);
+        
+        // Increment usage count
+        await database.incrementDailyUsage(req.user.id);
+        
+        // Return response with extracted data
+        const responseData = { 
+            content: responseContent,
+            filename: filename
+        };
+        if (extractedData && extractedData.weatherData) {
+            responseData.weatherData = extractedData.weatherData;
+            responseData.photoDateTime = extractedData.photoDateTime;
+            responseData.locationName = extractedData.locationName;
+        }
+        
+        res.json(responseData);
+
+    } catch (error) {
+        console.error('Lightroom caption generation error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error. Please try again.' 
+        });
+    }
+});
+
 app.post('/api/generate-caption', authenticateToken, async (req, res) => {
     const startTime = Date.now();
     const queryId = uuidv4();
@@ -1975,6 +2171,94 @@ app.delete('/api/settings/:integrationType', authenticateToken, async (req, res)
         res.status(500).json({ error: 'Failed to delete settings' });
     }
 });
+
+// API Key Management
+
+// Get user's API keys
+app.get('/api/settings/api-keys', authenticateToken, async (req, res) => {
+    try {
+        const apiKeys = await database.getUserApiKeys(req.user.id);
+        
+        // Group by integration type and mask the keys
+        const maskedApiKeys = {};
+        apiKeys.forEach(key => {
+            maskedApiKeys[key.integration_type] = {
+                id: key.id,
+                created_at: key.created_at,
+                last_used: key.last_used,
+                masked_key: key.api_key.substring(0, 8) + '••••••••••••••••••••••••'
+            };
+        });
+        
+        res.json(maskedApiKeys);
+    } catch (error) {
+        console.error('Error fetching API keys:', error);
+        res.status(500).json({ error: 'Failed to fetch API keys' });
+    }
+});
+
+// Generate new API key for Lightroom
+app.post('/api/settings/api-keys/lightroom', authenticateToken, async (req, res) => {
+    try {
+        // Generate a secure API key
+        const apiKey = 'lr_' + crypto.randomBytes(32).toString('hex');
+        
+        // Store in database (this will replace any existing Lightroom key)
+        await database.createOrUpdateApiKey(req.user.id, 'lightroom', apiKey);
+        
+        res.json({ 
+            success: true, 
+            apiKey: apiKey,
+            message: 'Lightroom API key generated successfully'
+        });
+    } catch (error) {
+        console.error('Error generating API key:', error);
+        res.status(500).json({ error: 'Failed to generate API key' });
+    }
+});
+
+// Delete/revoke API key
+app.delete('/api/settings/api-keys/lightroom', authenticateToken, async (req, res) => {
+    try {
+        await database.deleteApiKey(req.user.id, 'lightroom');
+        res.json({ success: true, message: 'API key revoked successfully' });
+    } catch (error) {
+        console.error('Error revoking API key:', error);
+        res.status(500).json({ error: 'Failed to revoke API key' });
+    }
+});
+
+// API key authentication middleware (alternative to JWT for external apps)
+const authenticateApiKey = async (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    let apiKey = authHeader && authHeader.split(' ')[1]; // Bearer API_KEY
+    
+    if (!apiKey) {
+        return res.status(401).json({ error: 'API key required' });
+    }
+    
+    try {
+        const keyData = await database.validateApiKey(apiKey);
+        
+        if (!keyData) {
+            return res.status(401).json({ error: 'Invalid API key' });
+        }
+        
+        // Update last used timestamp
+        await database.updateApiKeyLastUsed(keyData.id);
+        
+        req.user = {
+            id: keyData.user_id,
+            email: keyData.email,
+            isAdmin: keyData.is_admin === 1,
+            apiKeyType: keyData.integration_type
+        };
+        next();
+    } catch (error) {
+        console.error('API key validation error:', error);
+        return res.status(403).json({ error: 'Invalid API key' });
+    }
+};
 
 // Get all user settings
 app.get('/api/settings', authenticateToken, async (req, res) => {

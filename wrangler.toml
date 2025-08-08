@@ -13,6 +13,11 @@ binding = "DB"
 database_name = "ai-caption-studio-db"
 database_id = "853b1e69-4fbd-40a9-b35b-2b0a7cb5f367"
 
+# R2 Storage configuration
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "ai-caption-studio-images"
+
 # Environment variables
 [vars]
 NODE_ENV = "production"

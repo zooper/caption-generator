@@ -41,6 +41,7 @@ class CaptionGenerator {
         this.cameraInput = document.getElementById('cameraInput');
         this.eventInput = document.getElementById('eventInput');
         this.locationInput = document.getElementById('locationInput');
+        this.locationGranularity = document.getElementById('locationGranularity');
         this.moodInput = document.getElementById('moodInput');
         this.subjectInput = document.getElementById('subjectInput');
         this.customInput = document.getElementById('customInput');
@@ -90,6 +91,9 @@ class CaptionGenerator {
         // Mastodon events
         this.testMastodonBtn.addEventListener('click', this.testMastodonConnection.bind(this));
         this.postMastodonBtn.addEventListener('click', this.postToMastodon.bind(this));
+        
+        // Location granularity events
+        this.locationGranularity.addEventListener('change', this.onLocationGranularityChange.bind(this));
         
     }
 
@@ -245,11 +249,18 @@ class CaptionGenerator {
             if (gpsData && gpsData.latitude && gpsData.longitude) {
                 console.log('GPS coordinates found:', gpsData.latitude, gpsData.longitude);
                 
+                // Show the granularity dropdown when GPS is detected
+                this.locationGranularity.style.display = 'block';
+                
+                // Store GPS coordinates for granularity changes
+                this.currentGPS = { latitude: gpsData.latitude, longitude: gpsData.longitude };
+                
                 // Show that we're reverse geocoding
                 this.showNotification('🌍 Looking up location name...', 'info');
                 
-                // Get location name from coordinates
-                const locationName = await this.reverseGeocode(gpsData.latitude, gpsData.longitude);
+                // Get location name from coordinates using selected granularity
+                const granularity = this.locationGranularity.value;
+                const locationName = await this.reverseGeocode(gpsData.latitude, gpsData.longitude, granularity);
                 
                 if (locationName) {
                     this.locationInput.value = locationName;
@@ -259,6 +270,10 @@ class CaptionGenerator {
                     this.locationInput.value = `${gpsData.latitude.toFixed(4)}, ${gpsData.longitude.toFixed(4)}`;
                     hasData = true;
                 }
+            } else {
+                // Hide the granularity dropdown if no GPS data
+                this.locationGranularity.style.display = 'none';
+                this.currentGPS = null;
             }
             
             // Handle Camera data
@@ -304,7 +319,7 @@ class CaptionGenerator {
         }
     }
 
-    async reverseGeocode(latitude, longitude) {
+    async reverseGeocode(latitude, longitude, granularity = 'place') {
         try {
             // Using a free geocoding service (Nominatim from OpenStreetMap)
             const response = await fetch(
@@ -320,14 +335,33 @@ class CaptionGenerator {
                 const data = await response.json();
                 
                 if (data && data.address) {
-                    // Build a readable location string
+                    // Build location string based on granularity
                     const parts = [];
-                    if (data.address.city) parts.push(data.address.city);
-                    else if (data.address.town) parts.push(data.address.town);
-                    else if (data.address.village) parts.push(data.address.village);
                     
-                    if (data.address.state) parts.push(data.address.state);
-                    if (data.address.country) parts.push(data.address.country);
+                    if (granularity === 'place') {
+                        // Most specific: place/neighborhood, city, state/country
+                        if (data.address.neighbourhood) parts.push(data.address.neighbourhood);
+                        else if (data.address.suburb) parts.push(data.address.suburb);
+                        else if (data.address.hamlet) parts.push(data.address.hamlet);
+                        
+                        if (data.address.city) parts.push(data.address.city);
+                        else if (data.address.town) parts.push(data.address.town);
+                        else if (data.address.village) parts.push(data.address.village);
+                        
+                        if (data.address.state) parts.push(data.address.state);
+                        if (data.address.country) parts.push(data.address.country);
+                    } else if (granularity === 'city') {
+                        // City level: city, state/country
+                        if (data.address.city) parts.push(data.address.city);
+                        else if (data.address.town) parts.push(data.address.town);
+                        else if (data.address.village) parts.push(data.address.village);
+                        
+                        if (data.address.state) parts.push(data.address.state);
+                        if (data.address.country) parts.push(data.address.country);
+                    } else if (granularity === 'country') {
+                        // Country level only
+                        if (data.address.country) parts.push(data.address.country);
+                    }
                     
                     return parts.join(', ') || data.display_name;
                 }
@@ -337,6 +371,24 @@ class CaptionGenerator {
         }
         
         return null;
+    }
+
+    async onLocationGranularityChange() {
+        // Re-geocode with new granularity if GPS data is available
+        if (this.currentGPS) {
+            this.showNotification('🌍 Updating location...', 'info');
+            
+            const granularity = this.locationGranularity.value;
+            const locationName = await this.reverseGeocode(
+                this.currentGPS.latitude, 
+                this.currentGPS.longitude, 
+                granularity
+            );
+            
+            if (locationName) {
+                this.locationInput.value = locationName;
+            }
+        }
     }
 
     selectStyle(style) {

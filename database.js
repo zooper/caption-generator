@@ -7,7 +7,7 @@ class Database {
         this.sql = neon(databaseUrl);
         
         // Current schema version
-        this.CURRENT_SCHEMA_VERSION = 8;
+        this.CURRENT_SCHEMA_VERSION = 9;
         
         this.initDatabase();
     }
@@ -108,6 +108,13 @@ class Database {
             console.log('Running migration: Add user tiers and usage tracking (v8)');
             await this.migration_v8();
             await this.setSchemaVersion(8);
+        }
+
+        // Migration from version 8 to 9: Add API keys for external integrations
+        if (fromVersion < 9) {
+            console.log('Running migration: Add API keys for external integrations (v9)');
+            await this.migration_v9();
+            await this.setSchemaVersion(9);
         }
     }
 
@@ -284,6 +291,24 @@ class Database {
         `;
 
         console.log('Migration v8 completed: User tiers and usage tracking added');
+    }
+
+    async migration_v9() {
+        // Create user_api_keys table for external integrations like Lightroom
+        await this.sql`
+            CREATE TABLE IF NOT EXISTS user_api_keys (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                integration_type TEXT NOT NULL,
+                api_key TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used TIMESTAMP NULL,
+                UNIQUE(user_id, integration_type),
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        `;
+
+        console.log('Migration v9 completed: API keys table added');
     }
 
     // Query logging methods
@@ -736,6 +761,57 @@ class Database {
             `;
             return result.length;
         }
+    }
+
+    // API Key Management
+    async getUserApiKeys(userId) {
+        const result = await this.sql`
+            SELECT id, integration_type, api_key, created_at, last_used 
+            FROM user_api_keys 
+            WHERE user_id = ${userId}
+            ORDER BY created_at DESC
+        `;
+        return result;
+    }
+
+    async createOrUpdateApiKey(userId, integrationType, apiKey) {
+        await this.sql`
+            INSERT INTO user_api_keys (user_id, integration_type, api_key, created_at, last_used) 
+            VALUES (${userId}, ${integrationType}, ${apiKey}, CURRENT_TIMESTAMP, NULL)
+            ON CONFLICT (user_id, integration_type) 
+            DO UPDATE SET 
+                api_key = ${apiKey}, 
+                created_at = CURRENT_TIMESTAMP,
+                last_used = NULL
+        `;
+        return true;
+    }
+
+    async validateApiKey(apiKey) {
+        const result = await this.sql`
+            SELECT uak.id, uak.user_id, uak.integration_type, u.email, u.is_admin
+            FROM user_api_keys uak
+            JOIN users u ON uak.user_id = u.id
+            WHERE uak.api_key = ${apiKey} AND u.is_active = true
+        `;
+        return result.length > 0 ? result[0] : null;
+    }
+
+    async updateApiKeyLastUsed(apiKeyId) {
+        await this.sql`
+            UPDATE user_api_keys 
+            SET last_used = CURRENT_TIMESTAMP 
+            WHERE id = ${apiKeyId}
+        `;
+        return true;
+    }
+
+    async deleteApiKey(userId, integrationType) {
+        const result = await this.sql`
+            DELETE FROM user_api_keys 
+            WHERE user_id = ${userId} AND integration_type = ${integrationType}
+        `;
+        return result.length > 0;
     }
 
     // No explicit close method needed for Neon

@@ -9,11 +9,89 @@ import exifr from 'exifr';
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 8;
+        this.CURRENT_SCHEMA_VERSION = 11;
+        this._initialized = false;
+        // Don't run async operations in constructor
+    }
+
+    async ensureInitialized() {
+        if (!this._initialized) {
+            try {
+                await this.ensureSchemaVersion();
+                this._initialized = true;
+            } catch (error) {
+                console.error('Database initialization failed:', error);
+            }
+        }
+    }
+
+    async ensureSchemaVersion() {
+        try {
+            // Create schema_version table if it doesn't exist
+            await this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            `).run();
+
+            // Get current schema version
+            const versionResult = await this.db.prepare(`
+                SELECT version FROM schema_version ORDER BY version DESC LIMIT 1
+            `).first();
+            
+            const currentVersion = versionResult ? versionResult.version : 0;
+
+            // Run migrations if needed
+            if (currentVersion < this.CURRENT_SCHEMA_VERSION) {
+                await this.runMigrations(currentVersion);
+            }
+        } catch (error) {
+            console.error('Schema version check failed:', error);
+        }
+    }
+
+    async runMigrations(fromVersion) {
+        try {
+            // Migration to version 9: Add API keys
+            if (fromVersion < 9) {
+                console.log('Running migration: Add API keys table (v9)');
+                await this.migration_v9();
+                await this.setSchemaVersion(9);
+            }
+            
+            // Migration to version 10: Add uploaded images table
+            if (fromVersion < 10) {
+                console.log('Running migration: Add uploaded images table (v10)');
+                await this.migration_v10();
+                await this.setSchemaVersion(10);
+            }
+            
+            // Migration to version 11: Update uploaded images table for R2 storage
+            if (fromVersion < 11) {
+                console.log('Running migration: Update uploaded images table for R2 (v11)');
+                await this.migration_v11();
+                await this.setSchemaVersion(11);
+            }
+        } catch (error) {
+            console.error('Migration failed:', error);
+        }
+    }
+
+    async setSchemaVersion(version) {
+        try {
+            await this.db.prepare(`
+                INSERT INTO schema_version (version) VALUES (?)
+            `).bind(version).run();
+            console.log(`Schema updated to version ${version}`);
+        } catch (error) {
+            console.error('Failed to set schema version:', error);
+        }
     }
 
     async createUser(email, env = null) {
         try {
+            await this.ensureInitialized();
             // Check if this email should be admin based on ADMIN_EMAIL env var
             const isAdmin = env && env.ADMIN_EMAIL && email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? 1 : 0;
             
@@ -551,6 +629,10 @@ class D1Database {
             const usageStmt = this.db.prepare('DELETE FROM daily_usage WHERE user_id = ?');
             await usageStmt.bind(userId).run();
             
+            // Delete API keys
+            const apiKeysStmt = this.db.prepare('DELETE FROM user_api_keys WHERE user_id = ?');
+            await apiKeysStmt.bind(userId).run();
+            
             // Delete invite tokens related to this user
             // Delete invites sent by this user
             const invitesSentStmt = this.db.prepare('DELETE FROM invite_tokens WHERE invited_by_user_id = ?');
@@ -569,6 +651,363 @@ class D1Database {
         } catch (error) {
             return false;
         }
+    }
+
+    // Database migration for API keys (v9)
+    async migration_v9() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS user_api_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    integration_type TEXT NOT NULL,
+                    api_key TEXT UNIQUE NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_used DATETIME NULL,
+                    UNIQUE(user_id, integration_type),
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.error('Migration v9 failed:', error);
+        }
+    }
+
+    // Database migration for uploaded images (v10) - initial table with image_data
+    async migration_v10() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS uploaded_images (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    filename TEXT NOT NULL,
+                    title TEXT,
+                    caption TEXT,
+                    keywords TEXT,
+                    rating INTEGER DEFAULT 0,
+                    color_label TEXT,
+                    camera_model TEXT,
+                    lens TEXT,
+                    iso TEXT,
+                    aperture TEXT,
+                    shutter_speed TEXT,
+                    focal_length TEXT,
+                    date_time TEXT,
+                    image_data TEXT NOT NULL,
+                    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    generated_caption TEXT,
+                    generated_hashtags TEXT,
+                    generated_alt_text TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.error('Migration v10 failed:', error);
+        }
+    }
+
+    // Database migration for R2 storage (v11) - replace image_data with R2 references
+    async migration_v11() {
+        try {
+            // Drop and recreate the table with new schema
+            await this.db.prepare('DROP TABLE IF EXISTS uploaded_images').run();
+            
+            const stmt = this.db.prepare(`
+                CREATE TABLE uploaded_images (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    filename TEXT NOT NULL,
+                    original_filename TEXT NOT NULL,
+                    file_size INTEGER,
+                    mime_type TEXT DEFAULT 'image/jpeg',
+                    r2_key TEXT NOT NULL,
+                    title TEXT,
+                    caption TEXT,
+                    keywords TEXT,
+                    rating INTEGER DEFAULT 0,
+                    color_label TEXT,
+                    camera_model TEXT,
+                    lens TEXT,
+                    iso TEXT,
+                    aperture TEXT,
+                    shutter_speed TEXT,
+                    focal_length TEXT,
+                    date_time TEXT,
+                    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    generated_caption TEXT,
+                    generated_hashtags TEXT,
+                    generated_alt_text TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.error('Migration v11 failed:', error);
+        }
+    }
+
+    // API Key Management Methods
+    async getUserApiKeys(userId) {
+        try {
+            const stmt = this.db.prepare(`
+                SELECT id, integration_type, api_key, created_at, last_used 
+                FROM user_api_keys 
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            `);
+            const result = await stmt.bind(userId).all();
+            return result.results || [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    async createOrUpdateApiKey(userId, integrationType, apiKey) {
+        try {
+            // Check if API key already exists for this user and integration
+            const existingStmt = this.db.prepare(`
+                SELECT id FROM user_api_keys 
+                WHERE user_id = ? AND integration_type = ?
+            `);
+            const existing = await existingStmt.bind(userId, integrationType).first();
+
+            if (existing) {
+                // Update existing key
+                const updateStmt = this.db.prepare(`
+                    UPDATE user_api_keys 
+                    SET api_key = ?, created_at = datetime('now'), last_used = NULL
+                    WHERE user_id = ? AND integration_type = ?
+                `);
+                await updateStmt.bind(apiKey, userId, integrationType).run();
+            } else {
+                // Insert new key
+                const insertStmt = this.db.prepare(`
+                    INSERT INTO user_api_keys (user_id, integration_type, api_key, created_at, last_used) 
+                    VALUES (?, ?, ?, datetime('now'), NULL)
+                `);
+                await insertStmt.bind(userId, integrationType, apiKey).run();
+            }
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    async validateApiKey(apiKey) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT uak.id, uak.user_id, uak.integration_type, u.email, u.is_admin
+                FROM user_api_keys uak
+                JOIN users u ON uak.user_id = u.id
+                WHERE uak.api_key = ? AND u.is_active = 1
+            `);
+            const result = await stmt.bind(apiKey).first();
+            return result || null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    async updateApiKeyLastUsed(apiKeyId) {
+        try {
+            const stmt = this.db.prepare(`
+                UPDATE user_api_keys 
+                SET last_used = datetime('now') 
+                WHERE id = ?
+            `);
+            await stmt.bind(apiKeyId).run();
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    async deleteApiKey(userId, integrationType) {
+        try {
+            const stmt = this.db.prepare(`
+                DELETE FROM user_api_keys 
+                WHERE user_id = ? AND integration_type = ?
+            `);
+            const result = await stmt.bind(userId, integrationType).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    // Uploaded Images Management Methods
+    async storeUploadedImage(imageData, r2Key, fileSize = null) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                INSERT INTO uploaded_images (
+                    id, user_id, filename, original_filename, file_size, mime_type, r2_key,
+                    title, caption, keywords, rating, color_label,
+                    camera_model, lens, iso, aperture, shutter_speed, focal_length, date_time,
+                    uploaded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            `);
+            
+            const result = await stmt.bind(
+                imageData.id,
+                imageData.userId,
+                imageData.filename,
+                imageData.originalFilename || imageData.filename,
+                fileSize,
+                imageData.mimeType || 'image/jpeg',
+                r2Key,
+                imageData.title || null,
+                imageData.caption || null,
+                imageData.keywords ? JSON.stringify(imageData.keywords) : null,
+                imageData.rating || 0,
+                imageData.colorLabel || null,
+                imageData.metadata?.camera || null,
+                imageData.metadata?.lens || null,
+                imageData.metadata?.iso || null,
+                imageData.metadata?.aperture || null,
+                imageData.metadata?.shutterSpeed || null,
+                imageData.metadata?.focalLength || null,
+                imageData.metadata?.dateTime || null
+            ).run();
+            
+            return result.success;
+        } catch (error) {
+            console.error('Failed to store uploaded image metadata:', error);
+            return false;
+        }
+    }
+
+    async getUserUploadedImages(userId, limit = 50, offset = 0) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT id, filename, original_filename, file_size, mime_type, r2_key,
+                       title, caption, keywords, rating, color_label,
+                       camera_model, lens, iso, aperture, shutter_speed, focal_length, date_time,
+                       uploaded_at, generated_caption, generated_hashtags, generated_alt_text
+                FROM uploaded_images 
+                WHERE user_id = ?
+                ORDER BY uploaded_at DESC
+                LIMIT ? OFFSET ?
+            `);
+            const result = await stmt.bind(userId, limit, offset).all();
+            
+            // Parse keywords JSON for each image
+            const images = (result.results || []).map(img => ({
+                ...img,
+                keywords: img.keywords ? JSON.parse(img.keywords) : []
+            }));
+            
+            return images;
+        } catch (error) {
+            console.error('Failed to get uploaded images:', error);
+            return [];
+        }
+    }
+
+    async getUploadedImageById(imageId, userId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT * FROM uploaded_images 
+                WHERE id = ? AND user_id = ?
+            `);
+            const result = await stmt.bind(imageId, userId).first();
+            
+            if (result && result.keywords) {
+                result.keywords = JSON.parse(result.keywords);
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('Failed to get uploaded image:', error);
+            return null;
+        }
+    }
+
+    async updateImageCaptions(imageId, userId, generatedCaption, generatedHashtags, generatedAltText) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                UPDATE uploaded_images 
+                SET generated_caption = ?, generated_hashtags = ?, generated_alt_text = ?
+                WHERE id = ? AND user_id = ?
+            `);
+            const result = await stmt.bind(generatedCaption, generatedHashtags, generatedAltText, imageId, userId).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            console.error('Failed to update image captions:', error);
+            return false;
+        }
+    }
+
+    async deleteUploadedImage(imageId, userId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                DELETE FROM uploaded_images 
+                WHERE id = ? AND user_id = ?
+            `);
+            const result = await stmt.bind(imageId, userId).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            console.error('Failed to delete uploaded image:', error);
+            return false;
+        }
+    }
+
+    async updateImageCaptions(imageId, captions) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                UPDATE uploaded_images 
+                SET generated_caption = ?, generated_hashtags = ?, generated_alt_text = ?
+                WHERE id = ?
+            `);
+            const result = await stmt.bind(
+                captions.generated_caption,
+                captions.generated_hashtags,
+                captions.generated_alt_text,
+                imageId
+            ).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            console.error('Failed to update image captions:', error);
+            return false;
+        }
+    }
+}
+
+// Helper function to generate UUID-like random strings
+function generateRandomId() {
+    try {
+        // Use Web Crypto API if available
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            const array = new Uint8Array(16);
+            crypto.getRandomValues(array);
+            const hex = Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+            // Format like UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+            return hex.substring(0, 8) + '-' + hex.substring(8, 12) + '-' + hex.substring(12, 16) + '-' + hex.substring(16, 20) + '-' + hex.substring(20, 32);
+        } else {
+            // Fallback to Math.random
+            const timestamp = Date.now().toString(36);
+            const randomPart = Math.random().toString(36).substring(2, 15);
+            const randomPart2 = Math.random().toString(36).substring(2, 15);
+            return timestamp + '-' + randomPart + '-' + randomPart2;
+        }
+    } catch (error) {
+        // Final fallback
+        const timestamp = Date.now().toString(36);
+        const randomPart = Math.random().toString(36).substring(2, 15);
+        const randomPart2 = Math.random().toString(36).substring(2, 15);
+        return timestamp + '-' + randomPart + '-' + randomPart2;
     }
 }
 
@@ -615,6 +1054,40 @@ const authenticateToken = async (c, next) => {
         await next();
     } catch (error) {
         return c.json({ error: 'Invalid token' }, 403);
+    }
+};
+
+// API Key authentication middleware for external integrations
+const authenticateApiKey = async (c, next) => {
+    try {
+        const authHeader = c.req.header('authorization');
+        const apiKey = authHeader && authHeader.split(' ')[1]; // Bearer API_KEY
+
+        if (!apiKey) {
+            return c.json({ error: 'API key required' }, 401);
+        }
+
+        const database = new D1Database(c.env.DB);
+        const keyValidation = await database.validateApiKey(apiKey);
+        
+        if (!keyValidation) {
+            return c.json({ error: 'Invalid API key' }, 401);
+        }
+
+        // Update last used timestamp
+        await database.updateApiKeyLastUsed(keyValidation.id);
+
+        c.set('user', {
+            id: keyValidation.user_id,
+            email: keyValidation.email,
+            isAdmin: keyValidation.is_admin === 1,
+            apiKeyId: keyValidation.id,
+            integrationType: keyValidation.integration_type
+        });
+        
+        await next();
+    } catch (error) {
+        return c.json({ error: 'API authentication failed' }, 403);
     }
 };
 
@@ -1054,7 +1527,7 @@ app.post('/api/auth/request-login', async (c) => {
         }
         
         // Generate secure token
-        const token = crypto.randomUUID();
+        const token = generateRandomId();
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
         
         // Get client info
@@ -1126,7 +1599,7 @@ app.get('/auth/verify', async (c) => {
         }
 
         // Create session
-        const sessionId = crypto.randomUUID();
+        const sessionId = generateRandomId();
         const sessionExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
         const ipAddress = c.req.header('cf-connecting-ip') || 'unknown';
         const userAgent = c.req.header('user-agent') || '';
@@ -1238,7 +1711,7 @@ app.post('/api/auth/accept-invite', async (c) => {
         await database.useInviteToken(inviteToken, user.id);
         
         // Create a login session for the new user
-        const sessionId = crypto.randomUUID();
+        const sessionId = generateRandomId();
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
         
         // Get client info for session
@@ -1599,7 +2072,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
         }
 
         // Generate invite token
-        const token = crypto.randomUUID();
+        const token = generateRandomId();
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
         
         const user = c.get('user');
@@ -1708,7 +2181,7 @@ app.post('/api/admin/invites/:token/resend', authenticateToken, requireAdmin, as
         }
         
         // Generate new token and extend expiry
-        const newToken = crypto.randomUUID();
+        const newToken = generateRandomId();
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
         
         // Update the invite with new token and expiry
@@ -1833,6 +2306,82 @@ app.get('/api/admin/usage-stats', authenticateToken, requireAdmin, async (c) => 
     }
 });
 
+// API Key Management Endpoints
+app.get('/api/settings/api-keys', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        const apiKeys = await database.getUserApiKeys(user.id);
+        
+        // Don't return the actual API keys for security, just metadata
+        const maskedKeys = apiKeys.map(key => ({
+            id: key.id,
+            integration_type: key.integration_type,
+            created_at: key.created_at,
+            last_used: key.last_used,
+            masked_key: key.api_key.substring(0, 8) + '...' + key.api_key.substring(key.api_key.length - 4)
+        }));
+        
+        return c.json(maskedKeys);
+    } catch (error) {
+        return c.json({ error: 'Failed to fetch API keys' }, 500);
+    }
+});
+
+app.post('/api/settings/api-keys/:integrationType', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { integrationType } = c.req.param();
+        
+        // Validate integration type
+        const validTypes = ['lightroom', 'photoshop', 'external'];
+        if (!validTypes.includes(integrationType)) {
+            return c.json({ error: 'Invalid integration type' }, 400);
+        }
+        
+        // Generate a new API key using Web Crypto API
+        const apiKey = 'acs_' + generateRandomId().replace(/-/g, '') + '_' + Date.now().toString(36);
+        
+        const database = new D1Database(c.env.DB);
+        const success = await database.createOrUpdateApiKey(user.id, integrationType, apiKey);
+        
+        if (success) {
+            return c.json({ 
+                success: true,
+                apiKey: apiKey,  // Use camelCase to match frontend expectations
+                api_key: apiKey, // Also include snake_case for compatibility
+                integration_type: integrationType,
+                message: 'API key generated successfully'
+            });
+        } else {
+            return c.json({ error: 'Failed to create API key' }, 500);
+        }
+    } catch (error) {
+        return c.json({ error: 'Failed to generate API key' }, 500);
+    }
+});
+
+app.delete('/api/settings/api-keys/:integrationType', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { integrationType } = c.req.param();
+        
+        const database = new D1Database(c.env.DB);
+        const success = await database.deleteApiKey(user.id, integrationType);
+        
+        if (success) {
+            return c.json({ 
+                success: true,
+                message: 'API key revoked successfully'
+            });
+        } else {
+            return c.json({ error: 'API key not found' }, 404);
+        }
+    } catch (error) {
+        return c.json({ error: 'Failed to revoke API key' }, 500);
+    }
+});
+
 // System settings endpoints
 app.get('/api/admin/settings', authenticateToken, requireAdmin, async (c) => {
     try {
@@ -1876,6 +2425,489 @@ app.post('/api/admin/settings', authenticateToken, requireAdmin, async (c) => {
         });
     } catch (error) {
         return c.json({ error: 'Failed to update system settings' }, 500);
+    }
+});
+
+// Lightroom Plugin Endpoint
+app.post('/api/lightroom/generate-caption', authenticateApiKey, async (c) => {
+    try {
+        const user = c.get('user');
+        const { 
+            base64Image, 
+            includeWeather = false, 
+            style = 'creative',
+            filename,
+            title,
+            caption,
+            keywords,
+            rating,
+            colorLabel,
+            metadata = {}
+        } = await c.req.json();
+        
+        if (!c.env.OPENAI_API_KEY) {
+            return c.json({ error: 'OpenAI API key not configured' }, 500);
+        }
+        
+        if (!base64Image) {
+            return c.json({ error: 'Missing image data' }, 400);
+        }
+
+        // Check usage limits
+        const database = new D1Database(c.env.DB);
+        const usageCheck = await database.checkUsageLimit(user.id);
+        if (!usageCheck.allowed) {
+            return c.json({
+                error: 'Daily usage limit exceeded',
+                usageInfo: usageCheck
+            }, 429);
+        }
+        
+        // Build context from Lightroom metadata
+        const context = [];
+        if (filename) context.push('Filename: ' + filename);
+        if (title) context.push('Title: ' + title);
+        if (caption) context.push('Existing caption: ' + caption);
+        if (keywords && keywords.length > 0) context.push('Keywords: ' + keywords.join(', '));
+        if (rating) context.push('Rating: ' + rating + ' stars');
+        if (colorLabel) context.push('Color label: ' + colorLabel);
+        
+        // Add technical metadata if available
+        if (metadata.camera) context.push('Camera: ' + metadata.camera);
+        if (metadata.lens) context.push('Lens: ' + metadata.lens);
+        if (metadata.iso) context.push('ISO: ' + metadata.iso);
+        if (metadata.aperture) context.push('Aperture: ' + metadata.aperture);
+        if (metadata.shutterSpeed) context.push('Shutter Speed: ' + metadata.shutterSpeed);
+        if (metadata.focalLength) context.push('Focal Length: ' + metadata.focalLength);
+        if (metadata.dateTime) context.push('Date/Time: ' + metadata.dateTime);
+        
+        // Build enhanced prompt with context
+        const contextString = context.length > 0 ? '\\n\\nAdditional Context from Lightroom:\\n' + context.join('\\n') : '';
+        
+        const styleInstructions = {
+            creative: {
+                tone: 'Uses artistic and expressive language with creative metaphors',
+                description: 'creative and artistic'
+            },
+            professional: {
+                tone: 'Uses clean, professional language suitable for business contexts',
+                description: 'professional and business-friendly'
+            },
+            casual: {
+                tone: 'Uses relaxed, conversational language like talking to a friend',
+                description: 'casual and friendly'
+            },
+            trendy: {
+                tone: 'Uses current trends, viral language, and popular internet expressions',
+                description: 'trendy and viral'
+            },
+            inspirational: {
+                tone: 'Uses motivational, uplifting, and encouraging language',
+                description: 'inspirational and motivational'
+            },
+            edgy: {
+                tone: 'Uses short, dry, clever language that is a little dark. Keep it deadpan, sarcastic, or emotionally detached—but still tied to the image. No fluff, minimal emojis',
+                description: 'edgy and unconventional'
+            }
+        };
+        
+        const selectedStyle = styleInstructions[style] || styleInstructions.creative;
+        
+        const prompt = 'Analyze this image for Instagram posting. Generate:\\n\\n' +
+            '1. A ' + selectedStyle.description + ' caption that:\\n' +
+            '   - Captures the main subject/scene\\n' +
+            '   - ' + selectedStyle.tone + '\\n' +
+            '   - Is 1-3 sentences\\n' +
+            '   - Includes relevant emojis\\n' +
+            '   - Feels authentic and natural (NO forced questions or call-to-actions)\\n' +
+            '   - Sounds like something a real person would write\\n' +
+            '   - IMPORTANT: Do NOT include any hashtags in the caption text\\n' +
+            '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
+            (context.length > 0 ? '   - Incorporates the provided Lightroom metadata naturally\\n' : '') +
+            '\\n2. 10-15 hashtags that:\\n' +
+            '   - Mix popular (#photography, #instagood) and niche tags\\n' +
+            '   - Are relevant to image content\\n' +
+            '   - Include location-based tags if applicable\\n' +
+            '   - Avoid banned or shadowbanned hashtags\\n' +
+            '   - Range from broad to specific\\n' +
+            '   - These should be completely separate from the caption above\\n' +
+            (context.length > 0 ? '   - Include relevant hashtags based on the Lightroom metadata provided\\n' : '') +
+            '\\n3. Alt text for accessibility (1-2 sentences):\\n' +
+            '   - Describe what is actually visible in the image\\n' +
+            '   - Include important visual details for screen readers\\n' +
+            '   - Focus on objective description, not interpretation\\n' +
+            '   - Keep it concise but descriptive\\n' +
+            contextString + '\\n\\n' +
+            'Format your response as:\\n' +
+            'CAPTION: [your caption here - NO hashtags allowed]\\n' +
+            'HASHTAGS: [hashtags separated by spaces]\\n' +
+            'ALT_TEXT: [descriptive alt text for accessibility]';
+
+        // Call OpenAI API
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + c.env.OPENAI_API_KEY
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o',
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'text',
+                                text: prompt
+                            },
+                            {
+                                type: 'image_url',
+                                image_url: {
+                                    url: 'data:image/jpeg;base64,' + base64Image
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 500
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.text();
+            return c.json({ error: 'OpenAI API request failed: ' + response.status }, response.status);
+        }
+
+        const data = await response.json();
+        const responseContent = data.choices[0].message.content;
+        
+        // Log the query and increment usage
+        const queryId = generateRandomId();
+        
+        await database.logQuery({
+            id: queryId,
+            source: 'lightroom',
+            userId: user.id,
+            email: user.email,
+            processingTimeMs: Date.now() - Date.now(), // Simplified
+            responseLength: responseContent.length
+        });
+        
+        await database.incrementDailyUsage(user.id);
+        
+        return c.json({ 
+            success: true,
+            content: responseContent,
+            metadata: {
+                filename,
+                title,
+                caption,
+                keywords,
+                rating,
+                colorLabel,
+                technical: metadata
+            }
+        });
+        
+    } catch (error) {
+        return c.json({ error: 'Internal server error' }, 500);
+    }
+});
+
+// Lightroom Upload Endpoint (for Export Service)
+app.post('/api/lightroom/upload-photo', authenticateApiKey, async (c) => {
+    try {
+        const user = c.get('user');
+        const { 
+            base64Image, 
+            filename,
+            title,
+            caption,
+            keywords,
+            rating,
+            colorLabel,
+            metadata = {}
+        } = await c.req.json();
+        
+        if (!base64Image) {
+            return c.json({ error: 'Missing image data' }, 400);
+        }
+
+        // Check usage limits
+        const database = new D1Database(c.env.DB);
+        const usageCheck = await database.checkUsageLimit(user.id);
+        if (!usageCheck.allowed) {
+            return c.json({
+                error: 'Daily usage limit exceeded',
+                usageInfo: usageCheck
+            }, 429);
+        }
+        
+        const photoId = generateRandomId();
+        
+        // For now, store image in R2 if available, otherwise just store metadata
+        let r2Key = null;
+        let fileSize = null;
+        
+        try {
+            if (c.env.R2_BUCKET) {
+                // Calculate file size from base64
+                const imageBuffer = Buffer.from(base64Image, 'base64');
+                fileSize = imageBuffer.length;
+                
+                // Generate R2 key: user_id/year/month/image_id.jpg
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                r2Key = `${user.id}/${year}/${month}/${photoId}.jpg`;
+                
+                // Store in R2
+                await c.env.R2_BUCKET.put(r2Key, imageBuffer, {
+                    httpMetadata: {
+                        contentType: 'image/jpeg'
+                    },
+                    customMetadata: {
+                        originalFilename: filename,
+                        userId: user.id.toString(),
+                        uploadedAt: new Date().toISOString()
+                    }
+                });
+            } else {
+                console.warn('No R2 bucket configured, storing metadata only');
+                // For development without R2, we'll just store metadata
+                r2Key = 'no-r2-bucket/' + photoId;
+            }
+        } catch (r2Error) {
+            console.error('R2 storage failed, continuing with metadata only:', r2Error);
+            r2Key = 'r2-failed/' + photoId;
+        }
+        
+        // Store the image metadata in database
+        const imageData = {
+            id: photoId,
+            userId: user.id,
+            filename: filename,
+            originalFilename: filename,
+            title: title,
+            caption: caption,
+            keywords: keywords,
+            rating: rating,
+            colorLabel: colorLabel,
+            metadata: metadata,
+            mimeType: 'image/jpeg'
+        };
+        
+        const stored = await database.storeUploadedImage(imageData, r2Key, fileSize);
+        
+        if (!stored) {
+            return c.json({ error: 'Failed to store image metadata' }, 500);
+        }
+        
+        // Log the upload
+        await database.logQuery({
+            id: photoId,
+            source: 'lightroom_upload',
+            userId: user.id,
+            email: user.email,
+            processingTimeMs: 0,
+            responseLength: JSON.stringify({filename, title, caption}).length
+        });
+        
+        await database.incrementDailyUsage(user.id);
+        
+        return c.json({ 
+            success: true,
+            id: photoId,
+            message: 'Photo uploaded and stored successfully',
+            filename: filename,
+            uploadedAt: new Date().toISOString(),
+            r2Stored: !!c.env.R2_BUCKET
+        });
+        
+    } catch (error) {
+        console.error('Upload error:', error);
+        return c.json({ error: 'Internal server error' }, 500);
+    }
+});
+
+// API endpoints for uploaded images
+app.get('/api/uploaded-images', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        const page = parseInt(c.req.query('page')) || 1;
+        const limit = parseInt(c.req.query('limit')) || 20;
+        const offset = (page - 1) * limit;
+        
+        const images = await database.getUserUploadedImages(user.id, limit, offset);
+        
+        return c.json({
+            success: true,
+            images: images,
+            page: page,
+            limit: limit
+        });
+    } catch (error) {
+        console.error('Failed to get uploaded images:', error);
+        return c.json({ error: 'Failed to retrieve images' }, 500);
+    }
+});
+
+app.get('/api/uploaded-images/:imageId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { imageId } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        
+        const image = await database.getUploadedImageById(imageId, user.id);
+        
+        if (!image) {
+            return c.json({ error: 'Image not found' }, 404);
+        }
+        
+        return c.json({
+            success: true,
+            image: image
+        });
+    } catch (error) {
+        console.error('Failed to get uploaded image:', error);
+        return c.json({ error: 'Failed to retrieve image' }, 500);
+    }
+});
+
+app.get('/api/uploaded-images/:imageId/data', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { imageId } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        
+        const image = await database.getUploadedImageById(imageId, user.id);
+        
+        if (!image) {
+            return c.json({ error: 'Image not found' }, 404);
+        }
+        
+        // Check if R2 bucket is available and image has r2_key
+        if (image.r2_key && c.env.R2_BUCKET) {
+            console.log('Attempting to fetch from R2:', image.r2_key);
+            try {
+                // Fetch image from R2
+                const r2Object = await c.env.R2_BUCKET.get(image.r2_key);
+                
+                if (r2Object) {
+                    console.log('Successfully fetched from R2');
+                    // Return the image as binary data
+                    const headers = new Headers();
+                    headers.set('Content-Type', image.mime_type || 'image/jpeg');
+                    headers.set('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+                    
+                    return new Response(r2Object.body, {
+                        headers: headers
+                    });
+                } else {
+                    console.log('R2 object not found for key:', image.r2_key);
+                }
+            } catch (r2Error) {
+                console.warn('R2 fetch failed, trying fallback:', r2Error);
+            }
+        } else {
+            console.log('Missing R2 data - r2_key:', !!image.r2_key, 'R2_BUCKET:', !!c.env.R2_BUCKET);
+        }
+        
+        // Fallback: check for base64 image data in database (legacy support)
+        if (image.image_data) {
+            try {
+                // Decode base64 to binary
+                const imageBuffer = Uint8Array.from(atob(image.image_data), c => c.charCodeAt(0));
+                
+                const headers = new Headers();
+                headers.set('Content-Type', image.mime_type || 'image/jpeg');
+                headers.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+                
+                return new Response(imageBuffer, {
+                    headers: headers
+                });
+            } catch (decodeError) {
+                console.error('Failed to decode base64 image:', decodeError);
+            }
+        }
+        
+        // No image data available
+        return c.json({ error: 'Image data not available' }, 404);
+        
+    } catch (error) {
+        console.error('Failed to get image data:', error);
+        return c.json({ error: 'Failed to retrieve image data' }, 500);
+    }
+});
+
+app.delete('/api/uploaded-images/:imageId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { imageId } = c.req.param();
+        const database = new D1Database(c.env.DB);
+        
+        // Get image info first to retrieve R2 key
+        const image = await database.getUploadedImageById(imageId, user.id);
+        
+        if (!image) {
+            return c.json({ error: 'Image not found' }, 404);
+        }
+        
+        // Delete from R2 storage if r2_key exists
+        if (image.r2_key && c.env.R2_BUCKET) {
+            try {
+                await c.env.R2_BUCKET.delete(image.r2_key);
+                console.log('Deleted from R2:', image.r2_key);
+            } catch (r2Error) {
+                console.warn('Failed to delete from R2, continuing with database deletion:', r2Error);
+            }
+        }
+        
+        // Delete from database
+        const deleted = await database.deleteUploadedImage(imageId, user.id);
+        
+        if (!deleted) {
+            return c.json({ error: 'Image could not be deleted from database' }, 500);
+        }
+        
+        return c.json({
+            success: true,
+            message: 'Image deleted successfully'
+        });
+    } catch (error) {
+        console.error('Failed to delete image:', error);
+        return c.json({ error: 'Failed to delete image' }, 500);
+    }
+});
+
+// Download endpoints
+app.get('/api/download/lightroom-plugin', async (c) => {
+    try {
+        if (!c.env.R2_BUCKET) {
+            return c.json({ error: 'Download service not available' }, 503);
+        }
+        
+        // Fetch plugin zip from R2
+        const r2Object = await c.env.R2_BUCKET.get('downloads/lightroom-plugin.zip');
+        
+        if (!r2Object) {
+            return c.json({ error: 'Plugin file not found' }, 404);
+        }
+        
+        // Return the zip file as binary data
+        const headers = new Headers();
+        headers.set('Content-Type', 'application/zip');
+        headers.set('Content-Disposition', 'attachment; filename="AI Caption Studio Export Plugin.zip"');
+        headers.set('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+        
+        return new Response(r2Object.body, {
+            headers: headers
+        });
+    } catch (error) {
+        console.error('Failed to serve plugin download:', error);
+        return c.json({ error: 'Failed to download plugin' }, 500);
     }
 });
 
@@ -3082,7 +4114,7 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     const responseContent = data.choices[0].message.content;
     
     // Log the query and increment usage
-    const queryId = crypto.randomUUID();
+    const queryId = generateRandomId();
     
     const logResult = await database.logQuery({
         id: queryId,

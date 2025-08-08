@@ -54,7 +54,14 @@
                         </div>
                         <div class="context-field">
                             <label for="locationInput">📍 Location</label>
-                            <input type="text" id="locationInput" placeholder="e.g., Paris, Beach sunset, Home studio">
+                            <div class="location-input-container">
+                                <input type="text" id="locationInput" placeholder="e.g., Paris, Beach sunset, Home studio">
+                                <select id="locationGranularity" class="location-granularity-dropdown" style="display: none;">
+                                    <option value="place">Place</option>
+                                    <option value="city">City</option>
+                                    <option value="country">Country</option>
+                                </select>
+                            </div>
                         </div>
                         <div class="context-field">
                             <label for="moodInput">💭 Mood/Vibe</label>

@@ -1,13 +1,18 @@
+console.log('Script loading...');
+
 class CaptionGenerator {
     constructor() {
+        console.log('CaptionGenerator constructor called');
         this.currentFile = null;
         this.currentStyle = 'creative';
         this.currentUser = null;
         this.authToken = null;
         this.isMastodonConfigured = false;
+        this.currentGPS = null;
         this.initializeElements();
         this.bindEvents();
         this.checkAuthentication();
+        console.log('CaptionGenerator constructor finished');
     }
 
     initializeElements() {
@@ -41,6 +46,8 @@ class CaptionGenerator {
         this.cameraInput = document.getElementById('cameraInput');
         this.eventInput = document.getElementById('eventInput');
         this.locationInput = document.getElementById('locationInput');
+        this.locationGranularity = document.getElementById('locationGranularity');
+        console.log('Location granularity element found:', !!this.locationGranularity);
         this.moodInput = document.getElementById('moodInput');
         this.subjectInput = document.getElementById('subjectInput');
         this.customInput = document.getElementById('customInput');
@@ -90,6 +97,27 @@ class CaptionGenerator {
         // Mastodon events
         this.testMastodonBtn.addEventListener('click', this.testMastodonConnection.bind(this));
         this.postMastodonBtn.addEventListener('click', this.postToMastodon.bind(this));
+        
+        // Location granularity events
+        if (this.locationGranularity) {
+            console.log('Adding event listener to location granularity dropdown');
+            this.locationGranularity.addEventListener('change', this.onLocationGranularityChange.bind(this));
+            
+            // For testing: set dummy GPS coordinates so dropdown functionality works
+            this.currentGPS = { latitude: 40.7128, longitude: -74.0060 }; // New York City
+            console.log('Set test GPS coordinates for dropdown testing');
+        } else {
+            console.error('Location granularity dropdown element not found!');
+        }
+        
+        // Test button
+        const testButton = document.getElementById('testDropdown');
+        if (testButton) {
+            testButton.addEventListener('click', () => {
+                console.log('Test button clicked - triggering dropdown change');
+                this.onLocationGranularityChange();
+            });
+        }
         
     }
 
@@ -237,31 +265,21 @@ class CaptionGenerator {
             
             // Handle GPS/Location data
             if (gpsData && gpsData.latitude && gpsData.longitude) {
+                console.log('GPS coordinates found:', gpsData.latitude, gpsData.longitude);
+                
+                // Show the granularity dropdown when GPS is detected
+                this.locationGranularity.style.display = 'block';
+                
+                // Store GPS coordinates for granularity changes
+                this.currentGPS = { latitude: gpsData.latitude, longitude: gpsData.longitude };
                 
                 // Show that we're reverse geocoding
                 this.showNotification('🌍 Looking up location name...', 'info');
                 
-                // Get user's zoom preference
-                let userZoomLevel = 18; // Default to highest precision
-                try {
-                    const authToken = localStorage.getItem('auth_token');
-                    if (authToken) {
-                        const settingsResponse = await fetch('/api/settings', {
-                            headers: {
-                                'Authorization': `Bearer ${authToken}`
-                            }
-                        });
-                        if (settingsResponse.ok) {
-                            const settings = await settingsResponse.json();
-                            userZoomLevel = settings.locationZoom || 18;
-                        }
-                    }
-                } catch (error) {
-                    console.log('Could not load user zoom preference, using default');
-                }
-                
-                // Get location name from coordinates
-                const locationName = await this.reverseGeocode(gpsData.latitude, gpsData.longitude, userZoomLevel);
+                // Get location name from coordinates using selected granularity
+                const granularity = this.locationGranularity.value || 'place';
+                console.log('Using granularity from dropdown:', granularity);
+                const locationName = await this.reverseGeocode(gpsData.latitude, gpsData.longitude, granularity);
                 
                 if (locationName) {
                     this.locationInput.value = locationName;
@@ -271,6 +289,10 @@ class CaptionGenerator {
                     this.locationInput.value = `${gpsData.latitude.toFixed(4)}, ${gpsData.longitude.toFixed(4)}`;
                     hasData = true;
                 }
+            } else {
+                // Hide the granularity dropdown if no GPS data
+                this.locationGranularity.style.display = 'none';
+                this.currentGPS = null;
             }
             
             // Handle Camera data
@@ -313,11 +335,12 @@ class CaptionGenerator {
         }
     }
 
-    async reverseGeocode(latitude, longitude, zoomLevel = 18) {
+    async reverseGeocode(latitude, longitude, granularity = 'place') {
         try {
+            console.log('Reverse geocoding with granularity:', granularity);
             // Using a free geocoding service (Nominatim from OpenStreetMap)
             const response = await fetch(
-                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=${zoomLevel}&addressdetails=1&_=${Date.now()}`,
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
                 {
                     headers: {
                         'User-Agent': 'AI Caption Studio'
@@ -327,43 +350,76 @@ class CaptionGenerator {
             
             if (response.ok) {
                 const data = await response.json();
+                console.log('Geocoding response:', data);
                 
                 if (data && data.address) {
+                    // Build location string based on granularity
                     const parts = [];
+                    console.log('Building location with granularity:', granularity);
                     
-                    // Add building/house number and street
-                    if (data.address.house_number && data.address.road) {
-                        parts.push(data.address.house_number + ' ' + data.address.road);
-                    } else if (data.address.road) {
-                        parts.push(data.address.road);
+                    if (granularity === 'place') {
+                        // Most specific: place/neighborhood, city, state/country
+                        if (data.address.neighbourhood) parts.push(data.address.neighbourhood);
+                        else if (data.address.suburb) parts.push(data.address.suburb);
+                        else if (data.address.hamlet) parts.push(data.address.hamlet);
+                        
+                        if (data.address.city) parts.push(data.address.city);
+                        else if (data.address.town) parts.push(data.address.town);
+                        else if (data.address.village) parts.push(data.address.village);
+                        
+                        if (data.address.state) parts.push(data.address.state);
+                        if (data.address.country) parts.push(data.address.country);
+                    } else if (granularity === 'city') {
+                        // City level: city, state/country
+                        if (data.address.city) parts.push(data.address.city);
+                        else if (data.address.town) parts.push(data.address.town);
+                        else if (data.address.village) parts.push(data.address.village);
+                        
+                        if (data.address.state) parts.push(data.address.state);
+                        if (data.address.country) parts.push(data.address.country);
+                    } else if (granularity === 'country') {
+                        // Country level only
+                        if (data.address.country) parts.push(data.address.country);
                     }
                     
-                    // Add neighbourhood/suburb/district
-                    if (data.address.neighbourhood) parts.push(data.address.neighbourhood);
-                    else if (data.address.suburb) parts.push(data.address.suburb);
-                    else if (data.address.quarter) parts.push(data.address.quarter);
-                    else if (data.address.district) parts.push(data.address.district);
-                    
-                    // Add city/town/village
-                    if (data.address.city) parts.push(data.address.city);
-                    else if (data.address.town) parts.push(data.address.town);
-                    else if (data.address.village) parts.push(data.address.village);
-                    else if (data.address.municipality) parts.push(data.address.municipality);
-                    
-                    // Add state/province
-                    if (data.address.state) parts.push(data.address.state);
-                    else if (data.address.province) parts.push(data.address.province);
-                    
-                    // Add country
-                    if (data.address.country) parts.push(data.address.country);
-                    
-                    return parts.join(', ') || data.display_name;
+                    const result = parts.join(', ') || data.display_name;
+                    console.log('Geocoding result for', granularity + ':', result);
+                    return result;
                 }
             }
         } catch (error) {
+            console.log('Reverse geocoding failed:', error.message);
         }
         
         return null;
+    }
+
+    async onLocationGranularityChange() {
+        console.log('Granularity dropdown changed!');
+        console.log('Current GPS:', this.currentGPS);
+        
+        // Re-geocode with new granularity if GPS data is available
+        if (this.currentGPS) {
+            this.showNotification('🌍 Updating location...', 'info');
+            
+            const granularity = this.locationGranularity.value;
+            console.log('New granularity:', granularity);
+            
+            const locationName = await this.reverseGeocode(
+                this.currentGPS.latitude, 
+                this.currentGPS.longitude, 
+                granularity
+            );
+            
+            console.log('New location name:', locationName);
+            
+            if (locationName) {
+                this.locationInput.value = locationName;
+                console.log('Location updated in input field');
+            }
+        } else {
+            console.log('No GPS data available for re-geocoding');
+        }
     }
 
     selectStyle(style) {
