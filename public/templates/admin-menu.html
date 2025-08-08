@@ -1,0 +1,62 @@
+<div class="admin-menu" style="position: relative; order: 1;">
+    <button id="adminMenuBtn" style="
+        background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%); 
+        color: #333; 
+        border: none; 
+        padding: 6px 12px; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        font-weight: 600;
+        font-size: 12px;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    ">
+        👑 Admin
+    </button>
+    <div id="adminDropdown" style="
+        display: none; 
+        position: absolute; 
+        top: calc(100% + 8px); 
+        right: 0; 
+        background: white; 
+        border-radius: 8px; 
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15); 
+        min-width: 160px; 
+        z-index: 1000;
+        overflow: hidden;
+        border: 1px solid #e1e5e9;
+    ">
+        <a href="/admin" style="
+            display: block; 
+            padding: 10px 14px; 
+            color: #333; 
+            text-decoration: none; 
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+            transition: background-color 0.2s;
+        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+            📊 Analytics
+        </a>
+        <a href="/admin/users" style="
+            display: block; 
+            padding: 10px 14px; 
+            color: #333; 
+            text-decoration: none; 
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 13px;
+            transition: background-color 0.2s;
+        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+            👥 User Management
+        </a>
+        <a href="/admin/tiers" style="
+            display: block; 
+            padding: 10px 14px; 
+            color: #333; 
+            text-decoration: none;
+            font-size: 13px;
+            transition: background-color 0.2s;
+        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
+            🏷️ Tier Management
+        </a>
+    </div>
+</div>

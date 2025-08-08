@@ -9,10 +9,43 @@ class CaptionGenerator {
         this.authToken = null;
         this.isMastodonConfigured = false;
         this.currentGPS = null;
+        this.templateCache = new Map();
         this.initializeElements();
         this.bindEvents();
         this.checkAuthentication();
         console.log('CaptionGenerator constructor finished');
+    }
+
+    async loadTemplate(templateName) {
+        if (this.templateCache.has(templateName)) {
+            return this.templateCache.get(templateName);
+        }
+
+        try {
+            const response = await fetch(`/templates/${templateName}.html`);
+            if (!response.ok) {
+                throw new Error(`Failed to load template: ${templateName}`);
+            }
+            const template = await response.text();
+            this.templateCache.set(templateName, template);
+            return template;
+        } catch (error) {
+            console.error(`Error loading template ${templateName}:`, error);
+            return `<!-- Template ${templateName} not found -->`;
+        }
+    }
+
+    async renderTemplate(templateName, data = {}) {
+        const template = await this.loadTemplate(templateName);
+        let result = template;
+        
+        // Replace all template variables
+        for (const [key, value] of Object.entries(data)) {
+            const placeholder = `{{${key}}}`;
+            result = result.replaceAll(placeholder, value || '');
+        }
+        
+        return result;
     }
 
     initializeElements() {
@@ -707,7 +740,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
 
             if (response.ok) {
                 this.currentUser = await response.json();
-                this.onAuthenticationSuccess();
+                await this.onAuthenticationSuccess();
             } else {
                 // Token invalid, clear and redirect
                 localStorage.removeItem('auth_token');
@@ -719,21 +752,21 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         }
     }
 
-    onAuthenticationSuccess() {
+    async onAuthenticationSuccess() {
         // Initialize the app components after successful auth
         this.checkServerHealth();
         this.loadTemplateList();
         this.loadMastodonConfig();
-        this.updateUserInterface();
+        await this.updateUserInterface();
     }
 
-    updateUserInterface() {
+    async updateUserInterface() {
         // Show user info in the interface
         if (this.currentUser) {
             // You can add a user info display here
             
             // Add logout button to the interface if needed
-            this.addUserControls();
+            await this.addUserControls();
         }
     }
 
@@ -758,7 +791,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         return `<div style="color: ${color};">💎 ${this.currentUser.tierName}: ${used}/${limit}</div>`;
     }
 
-    addUserControls() {
+    async addUserControls() {
         // Add user controls to header if not already present
         const header = document.querySelector('.header');
         if (header && !document.getElementById('userControls')) {
@@ -778,105 +811,13 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             `;
             
             // Build admin menu if user is admin
-            const adminMenu = this.currentUser.isAdmin ? `
-                <div class="admin-menu" style="position: relative; order: 1;">
-                    <button id="adminMenuBtn" style="
-                        background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%); 
-                        color: #333; 
-                        border: none; 
-                        padding: 6px 12px; 
-                        border-radius: 6px; 
-                        cursor: pointer; 
-                        font-weight: 600;
-                        font-size: 12px;
-                        transition: all 0.2s ease;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    ">
-                        👑 Admin
-                    </button>
-                    <div id="adminDropdown" style="
-                        display: none; 
-                        position: absolute; 
-                        top: calc(100% + 8px); 
-                        right: 0; 
-                        background: white; 
-                        border-radius: 8px; 
-                        box-shadow: 0 8px 24px rgba(0,0,0,0.15); 
-                        min-width: 160px; 
-                        z-index: 1000;
-                        overflow: hidden;
-                        border: 1px solid #e1e5e9;
-                    ">
-                        <a href="/admin" style="
-                            display: block; 
-                            padding: 10px 14px; 
-                            color: #333; 
-                            text-decoration: none; 
-                            border-bottom: 1px solid #f0f0f0;
-                            font-size: 13px;
-                            transition: background-color 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
-                            📊 Analytics
-                        </a>
-                        <a href="/admin/users" style="
-                            display: block; 
-                            padding: 10px 14px; 
-                            color: #333; 
-                            text-decoration: none; 
-                            border-bottom: 1px solid #f0f0f0;
-                            font-size: 13px;
-                            transition: background-color 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
-                            👥 User Management
-                        </a>
-                        <a href="/admin/tiers" style="
-                            display: block; 
-                            padding: 10px 14px; 
-                            color: #333; 
-                            text-decoration: none;
-                            font-size: 13px;
-                            transition: background-color 0.2s;
-                        " onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
-                            🏷️ Tier Management
-                        </a>
-                    </div>
-                </div>
-            ` : '';
+            const adminMenu = this.currentUser.isAdmin ? await this.loadTemplate('admin-menu') : '';
             
-            userControls.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-                    ${adminMenu}
-                    <a href="/settings" style="
-                        background: rgba(255,255,255,0.2); 
-                        color: white; 
-                        border: none; 
-                        padding: 4px 8px; 
-                        border-radius: 4px; 
-                        cursor: pointer;
-                        font-size: 11px;
-                        text-decoration: none;
-                        transition: background-color 0.2s;
-                    " onmouseover="this.style.backgroundColor='rgba(255,255,255,0.3)'" onmouseout="this.style.backgroundColor='rgba(255,255,255,0.2)'">
-                        ⚙️ Settings
-                    </a>
-                    <button id="logoutBtn" style="
-                        background: rgba(255,255,255,0.2); 
-                        color: white; 
-                        border: none; 
-                        padding: 4px 8px; 
-                        border-radius: 4px; 
-                        cursor: pointer;
-                        font-size: 11px;
-                        transition: background-color 0.2s;
-                    " onmouseover="this.style.backgroundColor='rgba(255,255,255,0.3)'" onmouseout="this.style.backgroundColor='rgba(255,255,255,0.2)'">
-                        Logout
-                    </button>
-                </div>
-                <div style="font-size: 11px; opacity: 0.9; text-align: right;">
-                    <div>👋 ${this.currentUser.email}</div>
-                    ${this.getUserUsageDisplay()}
-                </div>
-            `;
+            userControls.innerHTML = await this.renderTemplate('user-controls', {
+                ADMIN_MENU: adminMenu,
+                USER_EMAIL: this.currentUser.email,
+                USER_USAGE_DISPLAY: this.getUserUsageDisplay()
+            });
             
             header.style.position = 'relative';
             header.appendChild(userControls);

@@ -232,6 +232,37 @@ const ensureDatabase = async (d1Binding = null) => {
     return database;
 };
 
+// API key authentication middleware (alternative to JWT for external apps)
+const authenticateApiKey = async (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    let apiKey = authHeader && authHeader.split(' ')[1]; // Bearer API_KEY
+    
+    if (!apiKey) {
+        return res.status(401).json({ error: 'API key required' });
+    }
+    
+    try {
+        const keyData = await database.validateApiKey(apiKey);
+        
+        if (!keyData) {
+            return res.status(401).json({ error: 'Invalid API key' });
+        }
+        
+        // Update last used timestamp
+        await database.updateApiKeyLastUsed(keyData.id);
+        
+        req.user = {
+            id: keyData.user_id,
+            email: keyData.user_email || 'api-user'
+        };
+        
+        next();
+    } catch (error) {
+        console.error('API key validation error:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
 app.use(cors());
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
@@ -2232,37 +2263,6 @@ app.delete('/api/settings/api-keys/lightroom', authenticateToken, async (req, re
     }
 });
 
-// API key authentication middleware (alternative to JWT for external apps)
-const authenticateApiKey = async (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    let apiKey = authHeader && authHeader.split(' ')[1]; // Bearer API_KEY
-    
-    if (!apiKey) {
-        return res.status(401).json({ error: 'API key required' });
-    }
-    
-    try {
-        const keyData = await database.validateApiKey(apiKey);
-        
-        if (!keyData) {
-            return res.status(401).json({ error: 'Invalid API key' });
-        }
-        
-        // Update last used timestamp
-        await database.updateApiKeyLastUsed(keyData.id);
-        
-        req.user = {
-            id: keyData.user_id,
-            email: keyData.email,
-            isAdmin: keyData.is_admin === 1,
-            apiKeyType: keyData.integration_type
-        };
-        next();
-    } catch (error) {
-        console.error('API key validation error:', error);
-        return res.status(403).json({ error: 'Invalid API key' });
-    }
-};
 
 // Get all user settings
 app.get('/api/settings', authenticateToken, async (req, res) => {

@@ -5,6 +5,74 @@ import { getCookie, setCookie } from 'hono/cookie';
 import jwt from 'jsonwebtoken';
 import exifr from 'exifr';
 
+// Template rendering utility
+async function renderTemplate(templateName, data = {}) {
+    try {
+        const response = await fetch(`/templates/${templateName}.html`);
+        if (!response.ok) {
+            throw new Error(`Failed to load template: ${templateName}`);
+        }
+        let template = await response.text();
+        
+        // Replace all template variables
+        for (const [key, value] of Object.entries(data)) {
+            const placeholder = `{{${key}}}`;
+            template = template.replaceAll(placeholder, value || '');
+        }
+        
+        return template;
+    } catch (error) {
+        console.error(`Error rendering template ${templateName}:`, error);
+        // Fallback to inline templates if external templates fail
+        return getFallbackTemplate(templateName, data);
+    }
+}
+
+// Fallback templates for when external templates are unavailable
+function getFallbackTemplate(templateName, data) {
+    const templates = {
+        'login-email': `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2>🔐 Login to AI Caption Studio</h2>
+                <p>Click the link below to securely login to your account:</p>
+                <div style="margin: 30px 0;">
+                    <a href="${data.LOGIN_URL}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                        🚀 Login to AI Caption Studio
+                    </a>
+                </div>
+                <p><strong>This link expires in 15 minutes</strong> for security.</p>
+                <p>If you didn't request this login, you can safely ignore this email.</p>
+                <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                <p style="color: #666; font-size: 12px;">
+                    Time: ${data.TIMESTAMP}
+                </p>
+            </div>
+        `,
+        'login-error': `<h1>❌ ${data.ERROR_TITLE}</h1><p>${data.ERROR_MESSAGE}</p><a href="/">← Back</a>`,
+        'login-success': `
+            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                <h2>✅ Login Successful!</h2>
+                <p>Welcome, ${data.USER_EMAIL}!</p>
+                <p>Redirecting to Caption Generator...</p>
+                <script>
+                    localStorage.setItem('auth_token', '${data.JWT_TOKEN}');
+                    localStorage.setItem('user_email', '${data.USER_EMAIL}');
+                    setTimeout(() => window.location.href = '/', 2000);
+                </script>
+            </div>
+        `,
+        'invitation-error': `
+            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                <h2>❌ ${data.ERROR_TITLE}</h2>
+                <p>${data.ERROR_MESSAGE}</p>
+                <a href="/" style="color: #405de6;">← Back to Caption Studio</a>
+            </div>
+        `
+    };
+    
+    return templates[templateName] || `<p>Template ${templateName} not found</p>`;
+}
+
 // Import D1 Database class
 class D1Database {
     constructor(db) {
@@ -962,27 +1030,6 @@ class D1Database {
         }
     }
 
-    async updateImageCaptions(imageId, captions) {
-        try {
-            await this.ensureInitialized();
-            const stmt = this.db.prepare(`
-                UPDATE uploaded_images 
-                SET generated_caption = ?, generated_hashtags = ?, generated_alt_text = ?
-                WHERE id = ?
-            `);
-            const result = await stmt.bind(
-                captions.generated_caption,
-                captions.generated_hashtags,
-                captions.generated_alt_text,
-                imageId
-            ).run();
-            const changes = result.meta && result.meta.changes || result.changes || 0;
-            return changes > 0;
-        } catch (error) {
-            console.error('Failed to update image captions:', error);
-            return false;
-        }
-    }
 }
 
 // Helper function to generate UUID-like random strings
@@ -1461,27 +1508,16 @@ async function sendMagicLinkEmail(email, loginUrl, env) {
         throw new Error('SMTP_PASSWORD (Resend API key) not configured');
     }
 
+    const html = await renderTemplate('login-email', {
+        LOGIN_URL: loginUrl,
+        TIMESTAMP: new Date().toLocaleString()
+    });
+
     const emailData = {
         from: env.SMTP_FROM_EMAIL || 'AI Caption Studio <noreply@resend.dev>',
         to: email,
         subject: 'Your Login Link - AI Caption Studio',
-        html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2>🔐 Login to AI Caption Studio</h2>
-                <p>Click the link below to securely login to your account:</p>
-                <div style="margin: 30px 0;">
-                    <a href="${loginUrl}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
-                        🚀 Login to AI Caption Studio
-                    </a>
-                </div>
-                <p><strong>This link expires in 15 minutes</strong> for security.</p>
-                <p>If you didn't request this login, you can safely ignore this email.</p>
-                <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-                <p style="color: #666; font-size: 12px;">
-                    Time: ${new Date().toLocaleString()}
-                </p>
-            </div>
-        `
+        html: html
     };
 
     const response = await fetch('https://api.resend.com/emails', {
@@ -1570,14 +1606,22 @@ app.get('/auth/verify', async (c) => {
         const token = c.req.query('token');
 
         if (!token) {
-            return c.html('<h1>❌ Invalid Login Link</h1><p>This login link is invalid.</p><a href="/">← Back</a>');
+            const html = await renderTemplate('login-error', {
+                ERROR_TITLE: 'Invalid Login Link',
+                ERROR_MESSAGE: 'This login link is invalid.'
+            });
+            return c.html(html);
         }
 
         const database = new D1Database(c.env.DB);
         const loginToken = await database.getLoginToken(token);
         
         if (!loginToken) {
-            return c.html('<h1>❌ Invalid or Expired Link</h1><p>This login link is invalid or has expired.</p><a href="/">← Back</a>');
+            const html = await renderTemplate('login-error', {
+                ERROR_TITLE: 'Invalid or Expired Link',
+                ERROR_MESSAGE: 'This login link is invalid or has expired.'
+            });
+            return c.html(html);
         }
 
         // Mark token as used
@@ -1617,21 +1661,18 @@ app.get('/auth/verify', async (c) => {
             sameSite: 'Lax'
         });
 
-        return c.html(`
-            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
-                <h2>✅ Login Successful!</h2>
-                <p>Welcome, ${user.email}!</p>
-                <p>Redirecting to Caption Generator...</p>
-                <script>
-                    localStorage.setItem('auth_token', '${jwtToken}');
-                    localStorage.setItem('user_email', '${user.email}');
-                    setTimeout(() => window.location.href = '/', 2000);
-                </script>
-            </div>
-        `);
+        const html = await renderTemplate('login-success', {
+            USER_EMAIL: user.email,
+            JWT_TOKEN: jwtToken
+        });
+        return c.html(html);
 
     } catch (error) {
-        return c.html('<h1>❌ Login Failed</h1><p>Login verification failed.</p><a href="/">← Back</a>');
+        const html = await renderTemplate('login-error', {
+            ERROR_TITLE: 'Login Failed',
+            ERROR_MESSAGE: 'Login verification failed.'
+        });
+        return c.html(html);
     }
 });
 

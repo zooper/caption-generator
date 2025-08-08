@@ -1,0 +1,32 @@
+<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+    {{ADMIN_MENU}}
+    <a href="/settings" style="
+        background: rgba(255,255,255,0.2); 
+        color: white; 
+        border: none; 
+        padding: 4px 8px; 
+        border-radius: 4px; 
+        cursor: pointer;
+        font-size: 11px;
+        text-decoration: none;
+        transition: background-color 0.2s;
+    " onmouseover="this.style.backgroundColor='rgba(255,255,255,0.3)'" onmouseout="this.style.backgroundColor='rgba(255,255,255,0.2)'">
+        ⚙️ Settings
+    </a>
+    <button id="logoutBtn" style="
+        background: rgba(255,255,255,0.2); 
+        color: white; 
+        border: none; 
+        padding: 4px 8px; 
+        border-radius: 4px; 
+        cursor: pointer;
+        font-size: 11px;
+        transition: background-color 0.2s;
+    " onmouseover="this.style.backgroundColor='rgba(255,255,255,0.3)'" onmouseout="this.style.backgroundColor='rgba(255,255,255,0.2)'">
+        Logout
+    </button>
+</div>
+<div style="font-size: 11px; opacity: 0.9; text-align: right;">
+    <div>👋 {{USER_EMAIL}}</div>
+    {{USER_USAGE_DISPLAY}}
+</div>

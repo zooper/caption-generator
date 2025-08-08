@@ -1,0 +1,18 @@
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <h2>🔄 Invitation Reminder</h2>
+    <p>Hi there!</p>
+    <p>This is a reminder that <strong>{{INVITER_EMAIL}}</strong> has invited you to join AI Caption Studio.</p>
+    {{PERSONAL_MESSAGE_HTML}}
+    <div style="margin: 30px 0;">
+        <a href="{{INVITE_URL}}" style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+            🚀 Accept Invitation
+        </a>
+    </div>
+    <p><strong>This invitation expires in 7 days.</strong></p>
+    <p>If you're not interested, you can safely ignore this email.</p>
+    <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+    <p style="color: #666; font-size: 12px;">
+        Resent by: {{INVITER_EMAIL}}<br>
+        Time: {{TIMESTAMP}}
+    </p>
+</div>

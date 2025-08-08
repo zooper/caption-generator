@@ -1,0 +1,10 @@
+<div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+    <h2>✅ Login Successful!</h2>
+    <p>Welcome, {{USER_EMAIL}}!</p>
+    <p>Redirecting to Caption Generator...</p>
+    <script>
+        localStorage.setItem('auth_token', '{{JWT_TOKEN}}');
+        localStorage.setItem('user_email', '{{USER_EMAIL}}');
+        setTimeout(() => window.location.href = '/', 2000);
+    </script>
+</div>

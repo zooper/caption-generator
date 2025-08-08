@@ -239,7 +239,78 @@ wrangler secret put OPENWEATHER_API_KEY
 - All HTML, CSS, and JavaScript files are served as static assets from the `/public` directory
 - Cloudflare Workers Assets automatically serves these files with optimal caching
 - The worker.js file handles all API routes and redirects to static files for UI routes
-- No HTML content is embedded in the worker code - clean separation of concerns
+- Clean separation of concerns with dedicated template system
+
+### Template Architecture
+- **Template Location**: All HTML templates stored in `/public/templates/` directory
+- **Template Types**: 
+  - Email templates (login, invitation, reminder emails)
+  - UI components (admin menu, user controls)
+  - Page templates (success/error pages)
+- **Template System**: 
+  - Variable substitution using `{{VARIABLE_NAME}}` syntax
+  - Template caching in both frontend and backend
+  - Fallback inline templates for reliability
+  - Fetch-based loading from static assets
+- **Benefits**:
+  - No embedded HTML in JavaScript code
+  - Reusable across frontend and backend
+  - Easy to modify without code changes
+  - Cloudflare Pages compatible
+  - Better maintainability and separation of concerns
+
+### Template Files
+```
+public/templates/
+├── admin-menu.html           # Admin dropdown menu component
+├── user-controls.html        # User interface controls
+├── login-email.html          # Magic link email template
+├── invitation-email.html     # User invitation email
+├── invitation-reminder-email.html  # Invitation reminder
+├── login-success.html        # Successful login page
+├── login-error.html          # Login error page
+├── invitation-accept.html    # Invitation acceptance page
+└── invitation-error.html     # Invitation error page
+```
+
+### Template Usage Patterns
+
+**Frontend (script.js)**:
+```javascript
+// Load and cache templates
+async loadTemplate(templateName) {
+    const response = await fetch(`/templates/${templateName}.html`);
+    return await response.text();
+}
+
+// Render with variable substitution
+async renderTemplate(templateName, data = {}) {
+    const template = await this.loadTemplate(templateName);
+    return template.replaceAll(`{{${key}}}`, value);
+}
+```
+
+**Backend (worker.js)**:
+```javascript
+// Render email template
+const html = await renderTemplate('login-email', {
+    LOGIN_URL: loginUrl,
+    TIMESTAMP: new Date().toLocaleString()
+});
+
+// Return rendered page
+const html = await renderTemplate('login-success', {
+    USER_EMAIL: user.email,
+    JWT_TOKEN: jwtToken
+});
+return c.html(html);
+```
+
+**Template Variables**:
+- Use descriptive ALL_CAPS naming: `{{USER_EMAIL}}`, `{{LOGIN_URL}}`
+- Provide fallback values in code: `value || ''`
+- Include conditional sections: `{{ADMIN_MENU}}` (empty string if not admin)
+- Support nested templates: admin menu template within user controls
 
 ### Database Architecture
 - Complete D1Database class embedded within worker.js for simplified deployment
@@ -251,6 +322,35 @@ wrangler secret put OPENWEATHER_API_KEY
 - Docker support for containerized deployment
 - Cloudflare Workers for production deployment with edge distribution
 
+## Development Best Practices
+
+### Code Organization
+- **Separation of Concerns**: Keep HTML templates separate from JavaScript logic
+- **Template System**: Use external templates instead of embedded HTML strings
+- **Fallback Strategy**: Always provide inline fallbacks for external template dependencies
+- **Async Patterns**: Make template-loading functions async and await them properly
+
+### Template System Lessons Learned
+- **Static Asset Approach**: Store templates in `/public/templates/` for Cloudflare Pages compatibility
+- **Variable Naming**: Use consistent `{{VARIABLE_NAME}}` syntax with descriptive ALL_CAPS names
+- **Caching Strategy**: Implement template caching to avoid repeated fetch requests
+- **Error Handling**: Provide graceful fallbacks when template loading fails
+- **Function Signatures**: When adding async template loading, update calling functions to be async too
+
+### Common Pitfalls to Avoid
+- **Embedded HTML**: Never embed large HTML blocks directly in JavaScript strings
+- **Duplicate Methods**: Check for existing method definitions before adding new ones
+- **Import Issues**: Be careful with Node.js-specific imports in Cloudflare Workers environment
+- **Template URLs**: Use relative URLs (`/templates/`) rather than hardcoded domains
+- **Async Chain**: When making functions async, ensure all callers await them properly
+
+### Development Workflow
+1. Extract embedded HTML to template files in `/public/templates/`
+2. Create template loading/rendering functions with caching
+3. Update JavaScript to use template functions instead of inline HTML
+4. Test with `wrangler dev --local` to verify Cloudflare Workers compatibility
+5. Verify templates are accessible via static asset serving
+
 ---
 
-*This application is designed for multi-user deployment with proper authentication, admin controls, and scalable architecture on Cloudflare's edge network. The architecture emphasizes clean separation between static assets and API logic.*
+*This application is designed for multi-user deployment with proper authentication, admin controls, and scalable architecture on Cloudflare's edge network. The architecture emphasizes clean separation between static assets and API logic, with a robust template system for maintainable HTML content management.*

@@ -1,0 +1,85 @@
+<div style="font-family: Arial, sans-serif; max-width: 500px; margin: 50px auto; padding: 30px; text-align: center; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+    <h2 style="background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 20px;">🎉 Welcome to AI Caption Studio!</h2>
+    
+    <div style="background: #f0f9ff; padding: 20px; margin: 20px 0; border-radius: 8px; border: 1px solid #e0f2fe;">
+        <p><strong>Invited by:</strong> {{INVITED_BY_EMAIL}}</p>
+        <p><strong>Your Account Tier:</strong> {{TIER_NAME}}</p>
+    </div>
+    
+    <p>To complete your account setup, enter your email below and click "Get Started":</p>
+    
+    <div style="margin: 20px 0;">
+        <input type="email" id="inviteEmail" value="{{EMAIL}}" readonly 
+               style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; background: #f9f9f9;" />
+        <button onclick="acceptInvite()" 
+                style="width: 100%; padding: 15px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold;">
+            🚀 Get Started
+        </button>
+    </div>
+    
+    <div id="message" style="margin-top: 20px;"></div>
+    
+    <script>
+        async function acceptInvite() {
+            const button = document.querySelector('button');
+            const messageDiv = document.getElementById('message');
+            
+            button.disabled = true;
+            button.textContent = '⏳ Setting up your account...';
+            
+            try {
+                const response = await fetch('/api/auth/accept-invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        inviteToken: '{{INVITE_TOKEN}}',
+                        email: '{{EMAIL}}'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    messageDiv.innerHTML = '<p style="color: green;">✅ Account created successfully! Logging you in...</p>';
+                    
+                    // Store the JWT token for authentication
+                    if (result.token) {
+                        localStorage.setItem('auth_token', result.token);
+                        localStorage.setItem('user', JSON.stringify(result.user));
+                        
+                        
+                        messageDiv.innerHTML = '<p style="color: green;">✅ Welcome! Redirecting to Caption Studio...</p>';
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 1500);
+                    } else {
+                        // Fallback to magic link if no token received
+                        messageDiv.innerHTML = '<p style="color: orange;">⚠️ Account created but login failed. Sending magic link...</p>';
+                        
+                        const loginResponse = await fetch('/api/auth/request-login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email: '{{EMAIL}}' })
+                        });
+                        
+                        const loginResult = await loginResponse.json();
+                        
+                        if (loginResult.success) {
+                            messageDiv.innerHTML = '<p style="color: green;">✅ Magic link sent to your email! Check your inbox to complete login.</p>';
+                        } else {
+                            messageDiv.innerHTML = '<p style="color: red;">❌ Account created but failed to send login link. Please go to the main page and request a login link.</p>';
+                        }
+                    }
+                } else {
+                    messageDiv.innerHTML = '<p style="color: red;">❌ ' + result.error + '</p>';
+                    button.disabled = false;
+                    button.textContent = '🚀 Get Started';
+                }
+            } catch (error) {
+                messageDiv.innerHTML = '<p style="color: red;">❌ Failed to accept invitation. Please try again.</p>';
+                button.disabled = false;
+                button.textContent = '🚀 Get Started';
+            }
+        }
+    </script>
+</div>
