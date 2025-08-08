@@ -976,6 +976,10 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
             tone: 'Uses motivational, uplifting, and encouraging language',
             description: 'inspirational and motivational'
         },
+        humorous: {
+            tone: 'Uses funny, witty language with clever wordplay, puns, or amusing observations. Keep it light-hearted and entertaining while being appropriate for social media. Think like a comedian describing the scene',
+            description: 'funny and witty'
+        },
         edgy: {
             tone: 'Uses short, dry, clever language that is a little dark. Keep it deadpan, sarcastic, or emotionally detached—but still tied to the image. No fluff, minimal emojis',
             description: 'edgy and unconventional'
