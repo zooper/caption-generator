@@ -3764,23 +3764,36 @@ app.get('/auth/instagram/callback', async (c) => {
         }
         
         // TODO: Exchange authorization code for access token
-        // This requires your Facebook App ID and App Secret
+        // This requires your Facebook App Secret (which should be stored as an environment variable)
+        
+        // For now, just store the code and redirect back to settings
+        // In production, you would exchange the code for an access token here
         
         return c.html(`
             <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
-                <h2>✅ Instagram Authorization Received</h2>
-                <p>Authorization code: ${code.substring(0, 20)}...</p>
-                <p>Next step: Exchange this code for an access token in your app settings.</p>
-                <a href="/settings.html" style="color: #405de6;">← Go to Settings</a>
+                <h2>✅ Instagram Authorization Successful</h2>
+                <p>Your Instagram business account has been authorized!</p>
+                <p>Redirecting you back to settings...</p>
+                
+                <div style="margin: 20px 0;">
+                    <div style="width: 50px; height: 50px; border: 4px solid #f3f3f3; border-top: 4px solid #405de6; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+                </div>
+                
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
                 
                 <script>
-                    // Store the authorization code temporarily for the frontend to handle
+                    // Store the authorization code for backend processing
                     localStorage.setItem('instagram_auth_code', '${code}');
                     
-                    // Redirect to settings page after a brief delay
+                    // Redirect to settings page
                     setTimeout(() => {
                         window.location.href = '/settings.html';
-                    }, 3000);
+                    }, 2000);
                 </script>
             </div>
         `);

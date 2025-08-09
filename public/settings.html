@@ -932,13 +932,27 @@
         }
 
         async function connectInstagram() {
-            // Instagram OAuth flow will need Facebook App ID
-            // For now, we'll show a placeholder until we have the actual Facebook app configured
-            alert('📱 Instagram integration requires Facebook Developer App setup.\n\nTo enable Instagram posting:\n1. Create a Facebook Developer App\n2. Configure Instagram Basic Display\n3. Add your Facebook App ID to the system\n\nThis feature is coming soon!');
-            
-            // TODO: Implement actual Facebook OAuth flow
-            // const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FB_APP_ID}&redirect_uri=${REDIRECT_URI}&scope=instagram_basic,instagram_content_publish&response_type=code&state=${STATE}`;
-            // window.open(authUrl, 'facebook-auth', 'width=500,height=600');
+            try {
+                // Generate a random state for CSRF protection
+                const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                localStorage.setItem('instagram_oauth_state', state);
+                
+                // Instagram OAuth URL with all required scopes for business account
+                const authUrl = 'https://www.instagram.com/oauth/authorize?' +
+                    'force_reauth=true&' +
+                    'client_id=1430176351425887&' +
+                    'redirect_uri=https://ai-caption-studio.jonsson.workers.dev/auth/instagram/callback&' +
+                    'response_type=code&' +
+                    'scope=instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights&' +
+                    'state=' + state;
+                
+                // Redirect to Instagram OAuth (opens in same window for better UX)
+                window.location.href = authUrl;
+                
+            } catch (error) {
+                console.error('Failed to initiate Instagram OAuth:', error);
+                alert('❌ Failed to start Instagram connection. Please try again.');
+            }
         }
 
         async function testInstagramConnection() {
@@ -1174,9 +1188,26 @@
             updateThemeSelection(savedTheme);
         }
 
+        // Handle Instagram OAuth return
+        function handleInstagramOAuthReturn() {
+            // Check if we have an authorization code from the OAuth callback
+            const authCode = localStorage.getItem('instagram_auth_code');
+            if (authCode) {
+                // Clear the stored code
+                localStorage.removeItem('instagram_auth_code');
+                
+                // Show success message and prompt for next steps
+                alert('✅ Instagram authorization received!\n\nNext steps:\n1. The authorization code has been received\n2. You need to exchange this code for an access token\n3. Contact your administrator to complete the Instagram setup\n\nThis requires your Facebook App Secret which should not be stored in the frontend.');
+                
+                // Update UI to show that Instagram is in process of being connected
+                updateInstagramStatus({});
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             checkAuth();
             loadSavedTheme();
+            handleInstagramOAuthReturn();
         });
     </script>
 </body>
