@@ -77,7 +77,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 11;
+        this.CURRENT_SCHEMA_VERSION = 12;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -140,6 +140,13 @@ class D1Database {
                 console.log('Running migration: Update uploaded images table for R2 (v11)');
                 await this.migration_v11();
                 await this.setSchemaVersion(11);
+            }
+            
+            // Migration to version 12: Add custom prompts table
+            if (fromVersion < 12) {
+                console.log('Running migration: Add custom prompts table (v12)');
+                await this.migration_v12();
+                await this.setSchemaVersion(12);
             }
         } catch (error) {
             console.error('Migration failed:', error);
@@ -816,6 +823,29 @@ class D1Database {
         }
     }
 
+    // Database migration for custom prompts (v12)
+    async migration_v12() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS user_prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    prompt_text TEXT NOT NULL,
+                    icon TEXT DEFAULT '✨',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.error('Migration v12 failed:', error);
+        }
+    }
+
     // API Key Management Methods
     async getUserApiKeys(userId) {
         try {
@@ -1027,6 +1057,89 @@ class D1Database {
         } catch (error) {
             console.error('Failed to delete uploaded image:', error);
             return false;
+        }
+    }
+
+    // Custom Prompts Management Methods
+    async getUserCustomPrompts(userId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT id, name, description, prompt_text, icon, is_active, created_at, updated_at
+                FROM user_prompts 
+                WHERE user_id = ? AND is_active = 1
+                ORDER BY created_at DESC
+            `);
+            const result = await stmt.bind(userId).all();
+            return result.results || [];
+        } catch (error) {
+            console.error('Failed to get user custom prompts:', error);
+            return [];
+        }
+    }
+
+    async createCustomPrompt(userId, name, description, promptText, icon = '✨') {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                INSERT INTO user_prompts (user_id, name, description, prompt_text, icon, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            `);
+            const result = await stmt.bind(userId, name, description, promptText, icon).run();
+            return result.meta && result.meta.last_row_id || result.last_row_id;
+        } catch (error) {
+            console.error('Failed to create custom prompt:', error);
+            return null;
+        }
+    }
+
+    async updateCustomPrompt(promptId, userId, name, description, promptText, icon) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                UPDATE user_prompts 
+                SET name = ?, description = ?, prompt_text = ?, icon = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+            `);
+            const result = await stmt.bind(name, description, promptText, icon, promptId, userId).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            console.error('Failed to update custom prompt:', error);
+            return false;
+        }
+    }
+
+    async deleteCustomPrompt(promptId, userId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                UPDATE user_prompts 
+                SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+            `);
+            const result = await stmt.bind(promptId, userId).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            console.error('Failed to delete custom prompt:', error);
+            return false;
+        }
+    }
+
+    async getCustomPromptById(promptId, userId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT id, name, description, prompt_text, icon, is_active, created_at, updated_at
+                FROM user_prompts 
+                WHERE id = ? AND user_id = ? AND is_active = 1
+            `);
+            const result = await stmt.bind(promptId, userId).first();
+            return result;
+        } catch (error) {
+            console.error('Failed to get custom prompt by id:', error);
+            return null;
         }
     }
 
@@ -3137,6 +3250,117 @@ app.get('/api/settings', authenticateToken, async (c) => {
     }
 });
 
+// Custom Prompts API Endpoints
+app.get('/api/custom-prompts', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        const prompts = await database.getUserCustomPrompts(user.id);
+        return c.json(prompts);
+    } catch (error) {
+        console.error('Failed to get custom prompts:', error);
+        return c.json({ error: 'Failed to load custom prompts' }, 500);
+    }
+});
+
+app.post('/api/custom-prompts', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { name, description, promptText, icon } = await c.req.json();
+        
+        if (!name || !promptText) {
+            return c.json({ error: 'Name and prompt text are required' }, 400);
+        }
+        
+        if (name.length > 50) {
+            return c.json({ error: 'Name must be 50 characters or less' }, 400);
+        }
+        
+        if (promptText.length > 2000) {
+            return c.json({ error: 'Prompt text must be 2000 characters or less' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        const promptId = await database.createCustomPrompt(
+            user.id, 
+            name, 
+            description || '', 
+            promptText, 
+            icon || '✨'
+        );
+        
+        if (promptId) {
+            const newPrompt = await database.getCustomPromptById(promptId, user.id);
+            return c.json(newPrompt);
+        } else {
+            return c.json({ error: 'Failed to create custom prompt' }, 500);
+        }
+    } catch (error) {
+        console.error('Failed to create custom prompt:', error);
+        return c.json({ error: 'Failed to create custom prompt' }, 500);
+    }
+});
+
+app.put('/api/custom-prompts/:promptId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const promptId = parseInt(c.req.param('promptId'));
+        const { name, description, promptText, icon } = await c.req.json();
+        
+        if (!name || !promptText) {
+            return c.json({ error: 'Name and prompt text are required' }, 400);
+        }
+        
+        if (name.length > 50) {
+            return c.json({ error: 'Name must be 50 characters or less' }, 400);
+        }
+        
+        if (promptText.length > 2000) {
+            return c.json({ error: 'Prompt text must be 2000 characters or less' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        const success = await database.updateCustomPrompt(
+            promptId, 
+            user.id, 
+            name, 
+            description || '', 
+            promptText, 
+            icon || '✨'
+        );
+        
+        if (success) {
+            const updatedPrompt = await database.getCustomPromptById(promptId, user.id);
+            return c.json(updatedPrompt);
+        } else {
+            return c.json({ error: 'Custom prompt not found or permission denied' }, 404);
+        }
+    } catch (error) {
+        console.error('Failed to update custom prompt:', error);
+        return c.json({ error: 'Failed to update custom prompt' }, 500);
+    }
+});
+
+app.delete('/api/custom-prompts/:promptId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const promptId = parseInt(c.req.param('promptId'));
+        const database = new D1Database(c.env.DB);
+        
+        const success = await database.deleteCustomPrompt(promptId, user.id);
+        
+        if (success) {
+            return c.json({ message: 'Custom prompt deleted successfully' });
+        } else {
+            return c.json({ error: 'Custom prompt not found or permission denied' }, 404);
+        }
+    } catch (error) {
+        console.error('Failed to delete custom prompt:', error);
+        return c.json({ error: 'Failed to delete custom prompt' }, 500);
+    }
+});
+
 app.post('/api/user/post/mastodon', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
@@ -3493,7 +3717,7 @@ app.delete('/api/user/settings/linkedin', authenticateToken, async (c) => {
 });
 
 // Advanced prompt building with EXIF extraction and weather data
-async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null, zoomLevel = 18) {
+async function buildPromptFromImageWithExtraction(base64Image, includeWeather = false, style = 'creative', env = null, zoomLevel = 18, hashtagCount = 15) {
     
     if (!base64Image) {
         throw new Error('No image data provided');
@@ -3671,12 +3895,16 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         '   - IMPORTANT: Do NOT include any hashtags in the caption text\\n' +
         '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
-        '\\n2. 10-15 hashtags that:\\n' +
+        '\\n2. MANDATORY: Generate EXACTLY ' + hashtagCount + ' hashtags - COUNT TO ' + hashtagCount + ':\\n' +
+        '   - YOU MUST PROVIDE EXACTLY ' + hashtagCount + ' HASHTAGS - NO EXCEPTIONS\\n' +
+        '   - COUNT: 1, 2, 3... up to ' + hashtagCount + ' - DO NOT STOP BEFORE ' + hashtagCount + '\\n' +
+        '   - VERIFY: Your hashtag count must equal ' + hashtagCount + ' exactly\\n' +
         '   - Mix popular (#photography, #instagood) and niche tags\\n' +
         '   - Are relevant to image content\\n' +
         '   - Include location-based tags if applicable\\n' +
         '   - Avoid banned or shadowbanned hashtags\\n' +
         '   - Range from broad to specific\\n' +
+        '   - Format as #hashtag (with # symbol)\\n' +
         '   - These should be completely separate from the caption above\\n' +
         (context.length > 0 ? '   - Include relevant hashtags based on the context provided\\n' : '') +
         '\\n3. Alt text for accessibility (1-2 sentences):\\n' +
@@ -3687,14 +3915,14 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         contextString + '\\n\\n' +
         'Format your response as:\\n' +
         'CAPTION: [your caption here - NO hashtags allowed]\\n' +
-        'HASHTAGS: [hashtags separated by spaces]\\n' +
+        'HASHTAGS: [hashtags separated by spaces - each starting with #]\\n' +
         'ALT_TEXT: [descriptive alt text for accessibility]';
     
     return { prompt, extractedData };
 }
 
 // Enhanced prompt building with user context
-async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, style, extractedData, userContext, env) {
+async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, style, extractedData, userContext, env, userId = null, hashtagCount = 15) {
     const context = [];
     
     // Add extracted technical data
@@ -3723,7 +3951,69 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
     
     const contextString = context.length > 0 ? '\\n\\nAdditional Context:\\n' + context.join('\\n') : '';
     
-    // Define style-specific caption instructions
+    // Check if this is a custom prompt
+    if (style && style.startsWith('custom_')) {
+        const promptId = parseInt(style.replace('custom_', ''));
+        
+        if (userId && env && env.DB) {
+            try {
+                // Get the custom prompt from the database
+                const db = new D1Database(env.DB);
+                const customPrompt = await db.getCustomPromptById(promptId, userId);
+                
+                if (customPrompt && customPrompt.is_active) {
+                    // Start with the user's custom prompt text
+                    let promptText = customPrompt.prompt_text;
+                    
+                    // Optional variable substitution for users who want to use variables
+                    const variables = {
+                        image_description: 'the uploaded image',
+                        context: context.join('\\n') || 'No additional context provided',
+                        camera: (extractedData.cameraMake || '') + ' ' + (extractedData.cameraModel || '') || 'No camera information available',
+                        location: extractedData.locationName || 'No location information available',
+                        weather: extractedData.weatherData || 'No weather data available',
+                        style: customPrompt.name.toLowerCase()
+                    };
+                    
+                    // Only do variable substitution if the prompt contains variables
+                    Object.entries(variables).forEach(([key, value]) => {
+                        const regex = new RegExp(`\\\\{${key}\\\\}`, 'g');
+                        promptText = promptText.replace(regex, value);
+                    });
+                    
+                    // Automatically append available context (same as built-in styles)
+                    promptText += contextString;
+                    
+                    // Ensure the output format is maintained
+                    if (!promptText.includes('CAPTION:') || !promptText.includes('HASHTAGS:') || !promptText.includes('ALT_TEXT:')) {
+                        promptText += '\\n\\nIMPORTANT: Format your response EXACTLY as shown below (use these English labels even if writing in another language):\\n' +
+                            'CAPTION: [your caption here - NO hashtags allowed]\\n' +
+                            'HASHTAGS: [hashtags separated by spaces]\\n' +
+                            'ALT_TEXT: [descriptive alt text for accessibility]';
+                    }
+                    
+                    // ALWAYS add hashtag requirements - even if user mentions hashtags
+                    promptText += '\\n\\nMANDATORY SYSTEM REQUIREMENT - Hashtag Count:\\n' +
+                        '- YOU MUST GENERATE EXACTLY ' + hashtagCount + ' HASHTAGS - NO EXCEPTIONS\\n' +
+                        '- COUNT TO ' + hashtagCount + ' - DO NOT STOP UNTIL YOU REACH ' + hashtagCount + ' HASHTAGS\\n' +
+                        '- THIS IS CRITICAL: EXACTLY ' + hashtagCount + ' hashtags, not ' + (hashtagCount-1) + ', not ' + (hashtagCount+1) + ', but EXACTLY ' + hashtagCount + '\\n' +
+                        '- Format as #hashtag (with # symbol)\\n' +
+                        '- Separate hashtags with spaces\\n' +
+                        '- Place ALL hashtags in the HASHTAGS section only\\n' +
+                        '- CRITICAL: Each hashtag MUST start with # symbol\\n' +
+                        '- VERIFY: Count your hashtags before responding - you need EXACTLY ' + hashtagCount + '\\n' +
+                        '- This requirement overrides any other hashtag instructions in the user prompt above';
+                    
+                    return { prompt: promptText };
+                }
+            } catch (error) {
+                console.error('Error loading custom prompt:', error);
+                // Fall through to default styles
+            }
+        }
+    }
+    
+    // Define style-specific caption instructions for built-in styles
     const styleInstructions = {
         creative: {
             tone: 'Uses artistic and expressive language with creative metaphors',
@@ -3768,12 +4058,16 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
         '   - IMPORTANT: Do NOT include any hashtags in the caption text\\n' +
         '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
-        '\\n2. 10-15 hashtags that:\\n' +
+        '\\n2. MANDATORY: Generate EXACTLY ' + hashtagCount + ' hashtags - COUNT TO ' + hashtagCount + ':\\n' +
+        '   - YOU MUST PROVIDE EXACTLY ' + hashtagCount + ' HASHTAGS - NO EXCEPTIONS\\n' +
+        '   - COUNT: 1, 2, 3... up to ' + hashtagCount + ' - DO NOT STOP BEFORE ' + hashtagCount + '\\n' +
+        '   - VERIFY: Your hashtag count must equal ' + hashtagCount + ' exactly\\n' +
         '   - Mix popular (#photography, #instagood) and niche tags\\n' +
         '   - Are relevant to image content\\n' +
         '   - Include location-based tags if applicable\\n' +
         '   - Avoid banned or shadowbanned hashtags\\n' +
         '   - Range from broad to specific\\n' +
+        '   - Format as #hashtag (with # symbol)\\n' +
         '   - These should be completely separate from the caption above\\n' +
         (context.length > 0 ? '   - Include relevant hashtags based on the context provided\\n' : '') +
         '\\n3. Alt text for accessibility (1-2 sentences):\\n' +
@@ -3784,7 +4078,7 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
         contextString + '\\n\\n' +
         'Format your response as:\\n' +
         'CAPTION: [your caption here - NO hashtags allowed]\\n' +
-        'HASHTAGS: [hashtags separated by spaces]\\n' +
+        'HASHTAGS: [hashtags separated by spaces - each starting with #]\\n' +
         'ALT_TEXT: [descriptive alt text for accessibility]';
     
     return { prompt };
@@ -4069,8 +4363,10 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         // Use weather from context or default to true
         const shouldIncludeWeather = context.includeWeather !== undefined ? context.includeWeather : true;
         
-        // Get user's location zoom preference
+        // Get user's preferences
         const locationSettings = await database.getUserSettings(user.id, 'location');
+        const generalSettings = await database.getUserSettings(user.id, 'general');
+        
         let userZoomLevel = 18; // Default to highest precision
         locationSettings.forEach(setting => {
             if (setting.setting_key === 'zoom_level') {
@@ -4078,8 +4374,15 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
             }
         });
         
+        let hashtagCount = 15; // Default hashtag count
+        generalSettings.forEach(setting => {
+            if (setting.setting_key === 'hashtag_count') {
+                hashtagCount = parseInt(setting.setting_value) || 15;
+            }
+        });
+        
         // Always extract EXIF data and build enhanced prompt
-        const result = await buildPromptFromImageWithExtraction(base64Image, shouldIncludeWeather, style, c.env, userZoomLevel);
+        const result = await buildPromptFromImageWithExtraction(base64Image, shouldIncludeWeather, style, c.env, userZoomLevel, hashtagCount);
         finalPrompt = result.prompt;
         extractedData = result.extractedData;
         
@@ -4096,15 +4399,17 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
         if (context.custom) userContext.push('Additional notes: ' + context.custom);
         if (context.customPrompt) userContext.push('Custom instructions: ' + context.customPrompt);
         
-        // If user provided context, rebuild the prompt to include it
-        if (userContext.length > 0 || context.camera || context.location) {
+        // If user provided context or using custom prompt, rebuild the prompt to include it
+        if (userContext.length > 0 || context.camera || context.location || (style && style.startsWith('custom_'))) {
             const enhancedResult = await buildEnhancedPromptWithUserContext(
                 base64Image, 
                 shouldIncludeWeather, 
                 style, 
                 extractedData, 
                 userContext, 
-                c.env
+                c.env,
+                user.id,
+                hashtagCount
             );
             finalPrompt = enhancedResult.prompt;
         }

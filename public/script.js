@@ -10,6 +10,8 @@ class CaptionGenerator {
         this.isMastodonConfigured = false;
         this.currentGPS = null;
         this.templateCache = new Map();
+        this.customPrompts = [];
+        this.editingPromptId = null;
         this.initializeElements();
         this.bindEvents();
         this.checkAuthentication();
@@ -102,6 +104,16 @@ class CaptionGenerator {
         this.postPreview = document.getElementById('postPreview');
         this.mastodonCard = document.querySelector('.mastodon-card');
         
+        // Custom Prompts Modal
+        this.managePromptsBtn = document.getElementById('managePromptsBtn');
+        this.customPromptsModal = document.getElementById('customPromptsModal');
+        this.customPromptsList = document.getElementById('customPromptsList');
+        this.createPromptBtn = document.getElementById('createPromptBtn');
+        this.promptForm = document.getElementById('promptForm');
+        this.customPromptForm = document.getElementById('customPromptForm');
+        this.cancelPromptBtn = document.getElementById('cancelPromptBtn');
+        this.styleButtons = document.getElementById('styleButtons');
+        
     }
 
     bindEvents() {
@@ -152,6 +164,273 @@ class CaptionGenerator {
             });
         }
         
+        // Custom Prompts Modal events
+        if (this.managePromptsBtn) {
+            this.managePromptsBtn.addEventListener('click', this.openCustomPromptsModal.bind(this));
+        }
+        
+        if (this.customPromptsModal) {
+            // Close modal when clicking overlay or close button
+            this.customPromptsModal.addEventListener('click', (e) => {
+                if (e.target === this.customPromptsModal || e.target.classList.contains('modal-close')) {
+                    this.closeCustomPromptsModal();
+                }
+            });
+            
+            // Prevent modal from closing when clicking inside content
+            const modalContent = this.customPromptsModal.querySelector('.modal-content');
+            if (modalContent) {
+                modalContent.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+            }
+        }
+        
+        if (this.createPromptBtn) {
+            this.createPromptBtn.addEventListener('click', this.showPromptForm.bind(this));
+        }
+        
+        if (this.cancelPromptBtn) {
+            this.cancelPromptBtn.addEventListener('click', this.hidePromptForm.bind(this));
+        }
+        
+        if (this.customPromptForm) {
+            this.customPromptForm.addEventListener('submit', this.saveCustomPrompt.bind(this));
+        }
+        
+        // Icon picker events
+        const iconPicker = document.querySelector('.icon-suggestions');
+        if (iconPicker) {
+            iconPicker.addEventListener('click', (e) => {
+                if (e.target.classList.contains('icon-btn')) {
+                    const iconInput = document.getElementById('promptIcon');
+                    if (iconInput) {
+                        iconInput.value = e.target.textContent;
+                    }
+                }
+            });
+        }
+        
+    }
+
+    // Custom Prompts Modal Management
+    async openCustomPromptsModal() {
+        this.customPromptsModal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        await this.loadCustomPrompts();
+        this.hidePromptForm();
+    }
+
+    closeCustomPromptsModal() {
+        this.customPromptsModal.classList.add('hidden');
+        document.body.style.overflow = '';
+        this.hidePromptForm();
+        this.editingPromptId = null;
+    }
+
+    async loadCustomPrompts() {
+        try {
+            const response = await fetch('/api/custom-prompts', {
+                headers: this.getAuthHeaders()
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.customPrompts = data.prompts || [];
+                this.renderCustomPromptsList();
+            } else {
+                this.showNotification('Failed to load custom prompts', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading custom prompts:', error);
+            this.showNotification('Error loading custom prompts', 'error');
+        }
+    }
+
+    renderCustomPromptsList() {
+        const list = this.customPromptsList;
+        
+        if (this.customPrompts.length === 0) {
+            list.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">✨</div>
+                    <p>No custom prompts created yet.</p>
+                    <p style="font-size: 14px;">Create your first custom prompt to get started!</p>
+                </div>
+            `;
+            return;
+        }
+
+        list.innerHTML = this.customPrompts.map(prompt => `
+            <div class="prompt-item" data-prompt-id="${prompt.id}">
+                <div class="prompt-item-header">
+                    <div class="prompt-item-title">
+                        <span>${prompt.icon}</span>
+                        <span>${prompt.name}</span>
+                    </div>
+                    <div class="prompt-item-actions">
+                        <button onclick="app.editCustomPrompt(${prompt.id})" title="Edit">✏️</button>
+                        <button onclick="app.deleteCustomPrompt(${prompt.id})" title="Delete">🗑️</button>
+                    </div>
+                </div>
+                ${prompt.description ? `<div class="prompt-item-description">${prompt.description}</div>` : ''}
+                <div class="prompt-item-text">${prompt.prompt_text}</div>
+            </div>
+        `).join('');
+    }
+
+    showPromptForm(promptData = null) {
+        this.promptForm.classList.remove('hidden');
+        
+        if (promptData) {
+            // Editing existing prompt
+            document.getElementById('formTitle').textContent = 'Edit Prompt';
+            document.getElementById('promptId').value = promptData.id;
+            document.getElementById('promptName').value = promptData.name;
+            document.getElementById('promptIcon').value = promptData.icon || '✨';
+            document.getElementById('promptDescription').value = promptData.description || '';
+            document.getElementById('promptText').value = promptData.prompt_text;
+            this.editingPromptId = promptData.id;
+        } else {
+            // Creating new prompt
+            document.getElementById('formTitle').textContent = 'Create New Prompt';
+            document.getElementById('promptId').value = '';
+            document.getElementById('promptName').value = '';
+            document.getElementById('promptIcon').value = '✨';
+            document.getElementById('promptDescription').value = '';
+            document.getElementById('promptText').value = '';
+            this.editingPromptId = null;
+        }
+    }
+
+    hidePromptForm() {
+        this.promptForm.classList.add('hidden');
+        this.editingPromptId = null;
+        
+        // Clear form
+        document.getElementById('promptId').value = '';
+        document.getElementById('promptName').value = '';
+        document.getElementById('promptIcon').value = '✨';
+        document.getElementById('promptDescription').value = '';
+        document.getElementById('promptText').value = '';
+    }
+
+    async saveCustomPrompt(event) {
+        event.preventDefault();
+        
+        const formData = {
+            name: document.getElementById('promptName').value.trim(),
+            icon: document.getElementById('promptIcon').value.trim() || '✨',
+            description: document.getElementById('promptDescription').value.trim(),
+            prompt_text: document.getElementById('promptText').value.trim()
+        };
+
+        if (!formData.name || !formData.prompt_text) {
+            this.showNotification('Name and prompt text are required', 'error');
+            return;
+        }
+
+        try {
+            const url = this.editingPromptId 
+                ? `/api/custom-prompts/${this.editingPromptId}`
+                : '/api/custom-prompts';
+            
+            const method = this.editingPromptId ? 'PUT' : 'POST';
+
+            const response = await fetch(url, {
+                method: method,
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify(formData)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                this.showNotification(
+                    this.editingPromptId ? 'Prompt updated successfully!' : 'Prompt created successfully!', 
+                    'success'
+                );
+                await this.loadCustomPrompts();
+                this.hidePromptForm();
+                await this.updateStyleButtonsWithCustomPrompts();
+            } else {
+                const errorData = await response.json();
+                this.showNotification(errorData.error || 'Failed to save prompt', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving custom prompt:', error);
+            this.showNotification('Error saving prompt', 'error');
+        }
+    }
+
+    async editCustomPrompt(promptId) {
+        const prompt = this.customPrompts.find(p => p.id === promptId);
+        if (prompt) {
+            this.showPromptForm(prompt);
+        }
+    }
+
+    async deleteCustomPrompt(promptId) {
+        const prompt = this.customPrompts.find(p => p.id === promptId);
+        if (!prompt) return;
+
+        if (!confirm(`Are you sure you want to delete "${prompt.name}"? This action cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/custom-prompts/${promptId}`, {
+                method: 'DELETE',
+                headers: this.getAuthHeaders()
+            });
+
+            if (response.ok) {
+                this.showNotification('Prompt deleted successfully!', 'success');
+                await this.loadCustomPrompts();
+                await this.updateStyleButtonsWithCustomPrompts();
+            } else {
+                const errorData = await response.json();
+                this.showNotification(errorData.error || 'Failed to delete prompt', 'error');
+            }
+        } catch (error) {
+            console.error('Error deleting custom prompt:', error);
+            this.showNotification('Error deleting prompt', 'error');
+        }
+    }
+
+    async updateStyleButtonsWithCustomPrompts() {
+        // Load custom prompts and add them to the style buttons
+        try {
+            if (!this.customPrompts.length) {
+                await this.loadCustomPrompts();
+            }
+
+            const styleButtonsContainer = this.styleButtons;
+            if (!styleButtonsContainer) return;
+
+            // Remove existing custom prompt buttons
+            const existingCustomButtons = styleButtonsContainer.querySelectorAll('[data-custom-prompt]');
+            existingCustomButtons.forEach(btn => btn.remove());
+
+            // Add custom prompt buttons
+            this.customPrompts.forEach(prompt => {
+                if (prompt.is_active) {
+                    const button = document.createElement('button');
+                    button.className = 'style-btn';
+                    button.dataset.style = `custom_${prompt.id}`;
+                    button.dataset.customPrompt = prompt.id;
+                    button.innerHTML = `${prompt.icon} ${prompt.name}`;
+                    button.title = prompt.description || prompt.name;
+                    
+                    button.addEventListener('click', () => {
+                        this.selectStyle(`custom_${prompt.id}`);
+                    });
+                    
+                    styleButtonsContainer.appendChild(button);
+                }
+            });
+        } catch (error) {
+            console.error('Error updating style buttons with custom prompts:', error);
+        }
     }
 
     async checkServerHealth() {
@@ -493,12 +772,24 @@ class CaptionGenerator {
     }
 
     buildPrompt(style) {
+        // Check if this is a custom prompt
+        if (style.startsWith('custom_')) {
+            const promptId = parseInt(style.replace('custom_', ''));
+            const customPrompt = this.customPrompts.find(p => p.id === promptId);
+            
+            if (customPrompt) {
+                return this.buildCustomPrompt(customPrompt);
+            }
+        }
+
+        // Default built-in styles
         const styleDescriptions = {
             creative: 'artistic and expressive language with creative metaphors',
             professional: 'business-appropriate and polished tone',
             casual: 'friendly, conversational, and relatable',
             trendy: 'current slang, viral language, and trending expressions',
             inspirational: 'motivational, uplifting, and encouraging',
+            humorous: 'funny, witty, and entertaining while keeping it appropriate',
             edgy: 'short, dry, clever, and a little dark. Keep it deadpan, sarcastic, or emotionally detached—but still tied to the image. No fluff, no emojis, just vibes'
         };
 
@@ -535,6 +826,39 @@ Format your response as:
 CAPTION: [your caption here]
 HASHTAGS: [hashtags separated by spaces]
 ALT_TEXT: [descriptive alt text for accessibility]`;
+    }
+
+    buildCustomPrompt(customPrompt) {
+        const context = this.getContextInfo();
+        const contextString = context.length > 0 ? context.join('\n') : '';
+        const weatherData = this.weatherToggle?.checked ? 'Weather data will be included if available' : '';
+        
+        // Create variables object for substitution
+        const variables = {
+            image_description: 'the uploaded image',
+            context: contextString || 'No additional context provided',
+            camera: this.cameraInput?.value || 'No camera information available',
+            location: this.locationInput?.value || 'No location information available',
+            weather: weatherData || 'No weather data requested',
+            style: customPrompt.name.toLowerCase()
+        };
+
+        // Replace variables in the custom prompt text
+        let promptText = customPrompt.prompt_text;
+        Object.entries(variables).forEach(([key, value]) => {
+            const regex = new RegExp(`\\{${key}\\}`, 'g');
+            promptText = promptText.replace(regex, value);
+        });
+
+        // Ensure the output format is maintained
+        if (!promptText.includes('CAPTION:') || !promptText.includes('HASHTAGS:') || !promptText.includes('ALT_TEXT:')) {
+            promptText += `\n\nFormat your response as:
+CAPTION: [your caption here]
+HASHTAGS: [hashtags separated by spaces]
+ALT_TEXT: [descriptive alt text for accessibility]`;
+        }
+
+        return promptText;
     }
 
     getContextInfo() {
@@ -758,6 +1082,7 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         this.loadTemplateList();
         this.loadMastodonConfig();
         await this.updateUserInterface();
+        await this.updateStyleButtonsWithCustomPrompts();
     }
 
     async updateUserInterface() {
@@ -1250,5 +1575,5 @@ window.testSpinner = function() {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-    const app = new CaptionGenerator();
+    window.app = new CaptionGenerator();
 });
