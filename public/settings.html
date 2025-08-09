@@ -402,6 +402,41 @@
                     </div>
                 </div>
 
+                <!-- Instagram Integration -->
+                <div id="instagramCard" class="integration-card">
+                    <div class="integration-header">
+                        <div class="integration-title">
+                            <span>📷</span>
+                            <span>Instagram</span>
+                        </div>
+                        <span id="instagramStatus" class="status-badge status-disconnected">Disconnected</span>
+                    </div>
+                    <div id="instagramSettings">
+                        <div class="form-group">
+                            <label class="form-label">Facebook App Integration</label>
+                            <p class="text-sm text-muted mb-3">Instagram posting requires Facebook Developer app integration. You need a Creator or Business Instagram account.</p>
+                            <button class="btn btn-primary" onclick="connectInstagram()">🔗 Connect Instagram Account</button>
+                        </div>
+                        <div id="instagramConnectedInfo" style="display: none;">
+                            <div class="form-group">
+                                <label class="form-label">Connected Account</label>
+                                <p id="instagramAccountInfo" class="text-sm"></p>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" id="instagramAutoPost"> Enable Auto-posting
+                                </label>
+                                <p class="text-sm text-muted">Automatically post generated content to your Instagram account</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-2" id="instagramActions" style="display: none;">
+                            <button class="btn btn-primary" onclick="testInstagramConnection()">🔌 Test Connection</button>
+                            <button class="btn btn-success" onclick="saveInstagramSettings()">💾 Save</button>
+                            <button class="btn btn-secondary" onclick="disconnectInstagram()">🔌 Disconnect</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="mt-3">
                     <p class="text-sm text-muted">
                         <strong>Privacy Note:</strong> Your social media tokens are encrypted and stored securely. 
@@ -533,6 +568,18 @@
                             updateLinkedInStatus('connected');
                         }
                         document.getElementById('linkedinAutoPost').checked = settings.linkedin.autoPost || false;
+                    }
+                    
+                    // Load Instagram settings
+                    if (settings.instagram) {
+                        if (settings.instagram.access_token) {
+                            updateInstagramStatus('connected');
+                            document.getElementById('instagramAccountInfo').textContent = 
+                                `@${settings.instagram.username || 'Unknown'} (${settings.instagram.account_type || 'Unknown'})`;
+                            document.getElementById('instagramConnectedInfo').style.display = 'block';
+                            document.getElementById('instagramActions').style.display = 'flex';
+                        }
+                        document.getElementById('instagramAutoPost').checked = settings.instagram.autoPost || false;
                     }
                 }
             } catch (error) {
@@ -855,6 +902,110 @@
                     document.getElementById('linkedinToken').placeholder = 'Your LinkedIn access token';
                     document.getElementById('linkedinAutoPost').checked = false;
                     alert('✅ LinkedIn disconnected successfully!');
+                }
+            } catch (error) {
+                alert('❌ Failed to disconnect: ' + error.message);
+            }
+        }
+
+        // Instagram Functions
+        function updateInstagramStatus(status) {
+            const statusEl = document.getElementById('instagramStatus');
+            const cardEl = document.getElementById('instagramCard');
+            
+            cardEl.className = 'integration-card';
+            if (status === 'connected') {
+                statusEl.classList.remove('status-disconnected', 'status-error');
+                statusEl.classList.add('status-connected');
+                statusEl.textContent = 'Connected';
+                cardEl.classList.add('connected');
+            } else if (status === 'error') {
+                statusEl.classList.remove('status-disconnected', 'status-connected');
+                statusEl.classList.add('status-error');
+                statusEl.textContent = 'Error';
+                cardEl.classList.add('error');
+            } else {
+                statusEl.classList.remove('status-connected', 'status-error');
+                statusEl.classList.add('status-disconnected');
+                statusEl.textContent = 'Disconnected';
+            }
+        }
+
+        async function connectInstagram() {
+            // Instagram OAuth flow will need Facebook App ID
+            // For now, we'll show a placeholder until we have the actual Facebook app configured
+            alert('📱 Instagram integration requires Facebook Developer App setup.\n\nTo enable Instagram posting:\n1. Create a Facebook Developer App\n2. Configure Instagram Basic Display\n3. Add your Facebook App ID to the system\n\nThis feature is coming soon!');
+            
+            // TODO: Implement actual Facebook OAuth flow
+            // const authUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FB_APP_ID}&redirect_uri=${REDIRECT_URI}&scope=instagram_basic,instagram_content_publish&response_type=code&state=${STATE}`;
+            // window.open(authUrl, 'facebook-auth', 'width=500,height=600');
+        }
+
+        async function testInstagramConnection() {
+            try {
+                const response = await fetch('/api/user/settings/test-instagram', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ Instagram connection test successful!');
+                } else {
+                    alert('❌ Connection test failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Connection test failed: ' + error.message);
+            }
+        }
+
+        async function saveInstagramSettings() {
+            const autoPost = document.getElementById('instagramAutoPost').checked;
+            
+            try {
+                const response = await fetch('/api/user/settings/instagram', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({ autoPost })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ Instagram settings saved successfully!');
+                } else {
+                    alert('❌ Failed to save settings: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to save settings: ' + error.message);
+            }
+        }
+
+        async function disconnectInstagram() {
+            if (!confirm('Are you sure you want to disconnect Instagram?')) return;
+            
+            try {
+                const response = await fetch('/api/user/settings/instagram', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+                
+                if (response.ok) {
+                    updateInstagramStatus('disconnected');
+                    document.getElementById('instagramConnectedInfo').style.display = 'none';
+                    document.getElementById('instagramActions').style.display = 'none';
+                    document.getElementById('instagramAutoPost').checked = false;
+                    document.getElementById('instagramAccountInfo').textContent = '';
+                    alert('✅ Instagram disconnected successfully!');
+                } else {
+                    alert('❌ Failed to disconnect Instagram');
                 }
             } catch (error) {
                 alert('❌ Failed to disconnect: ' + error.message);
