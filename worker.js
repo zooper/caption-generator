@@ -3696,7 +3696,7 @@ app.post('/api/user/settings/test-instagram', authenticateToken, async (c) => {
 app.post('/api/user/settings/instagram', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
-        const { access_token, username, account_type, autoPost } = await c.req.json();
+        const { access_token, user_id, username, account_type, autoPost } = await c.req.json();
         
         if (!access_token) {
             return c.json({ error: 'Access token is required' }, 400);
@@ -3706,11 +3706,12 @@ app.post('/api/user/settings/instagram', authenticateToken, async (c) => {
         
         // Save Instagram settings
         await database.setUserSetting(user.id, 'social', 'instagram_access_token', access_token, true);
+        await database.setUserSetting(user.id, 'social', 'instagram_user_id', user_id || '', false);
         await database.setUserSetting(user.id, 'social', 'instagram_username', username || '', false);
-        await database.setUserSetting(user.id, 'social', 'instagram_account_type', account_type || '', false);
+        await database.setUserSetting(user.id, 'social', 'instagram_account_type', account_type || 'business', false);
         await database.setUserSetting(user.id, 'social', 'instagram_autopost', autoPost ? 'true' : 'false', false);
         
-        return c.json({ success: true });
+        return c.json({ success: true, message: 'Instagram settings saved successfully' });
         
     } catch (error) {
         return c.json({ error: 'Failed to save Instagram settings: ' + error.message }, 500);
@@ -3763,11 +3764,64 @@ app.get('/auth/instagram/callback', async (c) => {
             `);
         }
         
-        // TODO: Exchange authorization code for access token
-        // This requires your Facebook App Secret (which should be stored as an environment variable)
-        
-        // For now, just store the code and redirect back to settings
-        // In production, you would exchange the code for an access token here
+        // Exchange authorization code for access token
+        if (c.env.FACEBOOK_APP_SECRET) {
+            try {
+                // Exchange code for access token
+                const tokenResponse = await fetch('https://graph.facebook.com/v18.0/oauth/access_token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        client_id: '1430176351425887',
+                        client_secret: c.env.FACEBOOK_APP_SECRET,
+                        redirect_uri: 'https://ai-caption-studio.jonsson.workers.dev/auth/instagram/callback',
+                        code: code
+                    })
+                });
+
+                if (tokenResponse.ok) {
+                    const tokenData = await tokenResponse.json();
+                    const accessToken = tokenData.access_token;
+                    
+                    // Get user info to determine user ID for database storage
+                    const userResponse = await fetch(`https://graph.facebook.com/me?access_token=${accessToken}`);
+                    if (userResponse.ok) {
+                        const userData = await userResponse.json();
+                        
+                        // Here you would typically:
+                        // 1. Associate this access token with the authenticated user
+                        // 2. Store it securely in the database
+                        // For now, just pass it to the frontend for manual setup
+                        
+                        return c.html(`
+                            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                                <h2>✅ Instagram Connected Successfully!</h2>
+                                <p>Your Instagram business account is now connected.</p>
+                                <p>Redirecting you back to settings...</p>
+                                
+                                <script>
+                                    // Store the access token for the settings page to save
+                                    localStorage.setItem('instagram_access_token', '${accessToken}');
+                                    localStorage.setItem('instagram_user_id', '${userData.id}');
+                                    localStorage.setItem('instagram_setup_complete', 'true');
+                                    
+                                    setTimeout(() => {
+                                        window.location.href = '/settings.html';
+                                    }, 2000);
+                                </script>
+                            </div>
+                        `);
+                    }
+                } else {
+                    const errorData = await tokenResponse.text();
+                    console.error('Token exchange failed:', errorData);
+                }
+            } catch (error) {
+                console.error('Token exchange error:', error);
+            }
+        }
         
         return c.html(`
             <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
