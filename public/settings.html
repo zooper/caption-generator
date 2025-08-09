@@ -1190,17 +1190,63 @@
 
         // Handle Instagram OAuth return
         function handleInstagramOAuthReturn() {
-            // Check if we have an authorization code from the OAuth callback
+            // Check if Instagram setup is complete
+            const setupComplete = localStorage.getItem('instagram_setup_complete');
+            const accessToken = localStorage.getItem('instagram_access_token');
+            const userId = localStorage.getItem('instagram_user_id');
+            
+            if (setupComplete && accessToken && userId) {
+                // Clear temporary storage
+                localStorage.removeItem('instagram_setup_complete');
+                localStorage.removeItem('instagram_access_token');
+                localStorage.removeItem('instagram_user_id');
+                
+                // Save Instagram settings to the backend
+                saveInstagramTokenToBackend(accessToken, userId);
+                
+                return;
+            }
+            
+            // Check if we have an authorization code from the OAuth callback (fallback)
             const authCode = localStorage.getItem('instagram_auth_code');
             if (authCode) {
                 // Clear the stored code
                 localStorage.removeItem('instagram_auth_code');
                 
-                // Show success message and prompt for next steps
-                alert('✅ Instagram authorization received!\n\nNext steps:\n1. The authorization code has been received\n2. You need to exchange this code for an access token\n3. Contact your administrator to complete the Instagram setup\n\nThis requires your Facebook App Secret which should not be stored in the frontend.');
+                // Show message that token exchange is needed
+                alert('✅ Instagram authorization received!\n\nTo complete setup, you need to add your Facebook App Secret as an environment variable:\n\nFACEBOOK_APP_SECRET=your_app_secret\n\nThen the token exchange will happen automatically.');
                 
                 // Update UI to show that Instagram is in process of being connected
                 updateInstagramStatus({});
+            }
+        }
+
+        async function saveInstagramTokenToBackend(accessToken, userId) {
+            try {
+                const response = await fetch('/api/user/settings/instagram', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    body: JSON.stringify({
+                        access_token: accessToken,
+                        user_id: userId,
+                        account_type: 'business',
+                        autoPost: false
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('✅ Instagram connected successfully! You can now post to Instagram.');
+                    // Refresh the page to update UI
+                    window.location.reload();
+                } else {
+                    const error = await response.json();
+                    alert('❌ Failed to save Instagram settings: ' + error.error);
+                }
+            } catch (error) {
+                alert('❌ Failed to save Instagram settings: ' + error.message);
             }
         }
 
