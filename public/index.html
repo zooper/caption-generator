@@ -1291,7 +1291,7 @@
                 const socialPreviewCard = document.getElementById('socialPreviewCard');
                 const socialPreviewContent = document.getElementById('socialPreviewContent');
                 
-                if (data.connectedAccounts && (data.connectedAccounts.mastodon || data.connectedAccounts.pixelfed || data.connectedAccounts.linkedin)) {
+                if (data.connectedAccounts && (data.connectedAccounts.mastodon || data.connectedAccounts.pixelfed || data.connectedAccounts.linkedin || data.connectedAccounts.instagram)) {
                     
                     const captionText = captionMatch ? captionMatch[1].trim() : '';
                     const hashtagsText = hashtagsMatch ? hashtagsMatch[1].trim() : '';
@@ -1347,6 +1347,24 @@
                             '<div class="social-preview-content">' +
                             '<div class="preview-text">' + captionText + '</div>' +
                             (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
+                            '</div>' +
+                            '</div>';
+                    }
+                    
+                    // Instagram preview
+                    if (data.connectedAccounts.instagram && data.connectedAccounts.instagram.connected) {
+                        socialPreviewHtml += '<div class="social-preview instagram-preview">' +
+                            '<div class="social-preview-header">' +
+                            '<span>📷</span>' +
+                            '<span>Instagram Preview</span>' +
+                            '</div>' +
+                            '<div class="social-preview-content">' +
+                            '<div class="preview-text">' + captionText + '</div>' +
+                            (hashtagsText ? '<div class="preview-hashtags">' + hashtagsText + '</div>' : '') +
+                            (altTextContent ? '<div class="preview-alt">Alt text: ' + altTextContent + '</div>' : '') +
+                            '<div class="preview-actions">' +
+                            '<button class="post-btn" onclick="postToInstagram()">📝 Post to Instagram</button>' +
+                            '</div>' +
                             '</div>' +
                             '</div>';
                     }
@@ -1633,6 +1651,59 @@
                 setTimeout(() => {
                     event.target.disabled = false;
                     event.target.textContent = '📝 Post to Pixelfed';
+                }, 3000);
+            }
+        }
+
+        async function postToInstagram() {
+            try {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '⏳ Posting...';
+                
+                // Get the generated content
+                const captionText = document.getElementById('captionText').textContent;
+                const hashtagsText = document.getElementById('hashtagsText').textContent;
+                
+                // Combine caption and hashtags for Instagram post
+                const postContent = captionText + (hashtagsText ? '\n\n' + hashtagsText : '');
+                
+                const response = await fetch('/api/user/post/instagram', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        caption: postContent,
+                        image_data: uploadedImage // Send the base64 image data
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = '✅ Posted!';
+                    if (result.url) {
+                        setTimeout(() => {
+                            if (confirm('Post successful! Would you like to view it on Instagram?')) {
+                                window.open(result.url, '_blank');
+                            }
+                        }, 500);
+                    }
+                } else {
+                    btn.textContent = '❌ Failed';
+                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                event.target.textContent = '❌ Error';
+                alert('Error posting to Instagram: ' + error.message);
+            } finally {
+                setTimeout(() => {
+                    event.target.disabled = false;
+                    event.target.textContent = '📝 Post to Instagram';
                 }, 3000);
             }
         }

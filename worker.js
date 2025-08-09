@@ -3081,7 +3081,8 @@ app.get('/api/user/settings/social', authenticateToken, async (c) => {
         const socialSettings = {
             mastodon: {},
             pixelfed: {},
-            linkedin: {}
+            linkedin: {},
+            instagram: {}
         };
         
         settings.forEach(setting => {
@@ -3092,6 +3093,8 @@ app.get('/api/user/settings/social', authenticateToken, async (c) => {
                 socialSettings.pixelfed[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
             } else if (platform === 'linkedin') {
                 socialSettings.linkedin[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
+            } else if (platform === 'instagram') {
+                socialSettings.instagram[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
             }
         });
         
@@ -3645,6 +3648,251 @@ app.post('/api/user/post/pixelfed', authenticateToken, async (c) => {
         
     } catch (error) {
         return c.json({ error: 'Failed to post to Pixelfed: ' + error.message }, 500);
+    }
+});
+
+// Instagram API endpoints
+app.post('/api/user/settings/test-instagram', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Get user's Instagram settings
+        const settings = await database.getUserSettings(user.id, 'social');
+        let instagramAccessToken = null;
+        
+        settings.forEach(setting => {
+            if (setting.setting_key === 'instagram_access_token') {
+                instagramAccessToken = setting.setting_value;
+            }
+        });
+        
+        if (!instagramAccessToken) {
+            return c.json({ error: 'Instagram not connected' }, 400);
+        }
+        
+        // Test Instagram connection by getting account info
+        const testUrl = `https://graph.facebook.com/me/accounts?access_token=${instagramAccessToken}`;
+        const response = await fetch(testUrl);
+        
+        if (response.ok) {
+            const data = await response.json();
+            return c.json({ 
+                success: true, 
+                message: 'Instagram connection test successful',
+                accounts: data.data?.length || 0
+            });
+        } else {
+            return c.json({ 
+                error: 'Failed to verify Instagram credentials: ' + response.status 
+            }, 400);
+        }
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to test Instagram connection: ' + error.message }, 500);
+    }
+});
+
+app.post('/api/user/settings/instagram', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { access_token, username, account_type, autoPost } = await c.req.json();
+        
+        if (!access_token) {
+            return c.json({ error: 'Access token is required' }, 400);
+        }
+        
+        const database = new D1Database(c.env.DB);
+        
+        // Save Instagram settings
+        await database.setUserSetting(user.id, 'social', 'instagram_access_token', access_token, true);
+        await database.setUserSetting(user.id, 'social', 'instagram_username', username || '', false);
+        await database.setUserSetting(user.id, 'social', 'instagram_account_type', account_type || '', false);
+        await database.setUserSetting(user.id, 'social', 'instagram_autopost', autoPost ? 'true' : 'false', false);
+        
+        return c.json({ success: true });
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to save Instagram settings: ' + error.message }, 500);
+    }
+});
+
+app.delete('/api/user/settings/instagram', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Delete Instagram settings
+        await database.deleteUserSetting(user.id, 'social', 'instagram_access_token');
+        await database.deleteUserSetting(user.id, 'social', 'instagram_username');
+        await database.deleteUserSetting(user.id, 'social', 'instagram_account_type');
+        await database.deleteUserSetting(user.id, 'social', 'instagram_autopost');
+        
+        return c.json({ success: true });
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to delete Instagram settings: ' + error.message }, 500);
+    }
+});
+
+// Instagram OAuth callback handler
+app.get('/auth/instagram/callback', async (c) => {
+    try {
+        const code = c.req.query('code');
+        const error = c.req.query('error');
+        const state = c.req.query('state'); // Optional: for CSRF protection
+        
+        if (error) {
+            return c.html(`
+                <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                    <h2>❌ Instagram Authorization Failed</h2>
+                    <p>Error: ${error}</p>
+                    <p>Description: ${c.req.query('error_description') || 'Unknown error'}</p>
+                    <a href="/settings.html" style="color: #405de6;">← Back to Settings</a>
+                </div>
+            `);
+        }
+        
+        if (!code) {
+            return c.html(`
+                <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                    <h2>❌ Missing Authorization Code</h2>
+                    <p>No authorization code received from Instagram.</p>
+                    <a href="/settings.html" style="color: #405de6;">← Back to Settings</a>
+                </div>
+            `);
+        }
+        
+        // TODO: Exchange authorization code for access token
+        // This requires your Facebook App ID and App Secret
+        
+        return c.html(`
+            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                <h2>✅ Instagram Authorization Received</h2>
+                <p>Authorization code: ${code.substring(0, 20)}...</p>
+                <p>Next step: Exchange this code for an access token in your app settings.</p>
+                <a href="/settings.html" style="color: #405de6;">← Go to Settings</a>
+                
+                <script>
+                    // Store the authorization code temporarily for the frontend to handle
+                    localStorage.setItem('instagram_auth_code', '${code}');
+                    
+                    // Redirect to settings page after a brief delay
+                    setTimeout(() => {
+                        window.location.href = '/settings.html';
+                    }, 3000);
+                </script>
+            </div>
+        `);
+        
+    } catch (error) {
+        return c.html(`
+            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                <h2>❌ OAuth Callback Error</h2>
+                <p>An error occurred while processing the Instagram authorization.</p>
+                <a href="/settings.html" style="color: #405de6;">← Back to Settings</a>
+            </div>
+        `);
+    }
+});
+
+app.post('/api/user/post/instagram', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { caption, image_data } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        if (!caption) {
+            return c.json({ error: 'Caption is required' }, 400);
+        }
+        
+        if (!image_data) {
+            return c.json({ error: 'Image data is required for Instagram posts' }, 400);
+        }
+        
+        // Get user's Instagram settings
+        const settings = await database.getUserSettings(user.id, 'social');
+        let instagramAccessToken = null;
+        let instagramAccountId = null;
+        
+        settings.forEach(setting => {
+            if (setting.setting_key === 'instagram_access_token') {
+                instagramAccessToken = setting.setting_value;
+            } else if (setting.setting_key === 'instagram_account_id') {
+                instagramAccountId = setting.setting_value;
+            }
+        });
+        
+        if (!instagramAccessToken) {
+            return c.json({ error: 'Instagram account not properly configured' }, 400);
+        }
+        
+        // Note: This is a simplified implementation
+        // In a real implementation, you would need to:
+        // 1. Upload the image to a public URL (using R2 or similar)
+        // 2. Use the Instagram Graph API two-step process:
+        //    - Create media container
+        //    - Publish the container
+        
+        return c.json({ 
+            success: false,
+            error: 'Instagram posting requires additional setup. Please configure your Facebook Developer App and Instagram Business account integration.'
+        });
+        
+        // TODO: Implement actual Instagram posting when Facebook app is configured
+        /*
+        // Step 1: Create media container
+        const containerResponse = await fetch(`https://graph.facebook.com/v18.0/${instagramAccountId}/media`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                image_url: publicImageUrl,
+                caption: caption,
+                access_token: instagramAccessToken
+            })
+        });
+        
+        if (!containerResponse.ok) {
+            const errorData = await containerResponse.json();
+            return c.json({ 
+                error: 'Failed to create Instagram media container: ' + (errorData.error?.message || containerResponse.status)
+            }, 500);
+        }
+        
+        const containerData = await containerResponse.json();
+        const containerId = containerData.id;
+        
+        // Step 2: Publish the container
+        const publishResponse = await fetch(`https://graph.facebook.com/v18.0/${instagramAccountId}/media_publish`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                creation_id: containerId,
+                access_token: instagramAccessToken
+            })
+        });
+        
+        if (publishResponse.ok) {
+            const publishData = await publishResponse.json();
+            return c.json({ 
+                success: true, 
+                message: 'Posted to Instagram successfully!',
+                id: publishData.id
+            });
+        } else {
+            const errorData = await publishResponse.json();
+            return c.json({ 
+                error: 'Failed to publish Instagram post: ' + (errorData.error?.message || publishResponse.status)
+            }, 500);
+        }
+        */
+        
+    } catch (error) {
+        return c.json({ error: 'Failed to post to Instagram: ' + error.message }, 500);
     }
 });
 
@@ -4311,7 +4559,8 @@ async function getConnectedSocialAccounts(database, userId) {
         const connected = {
             mastodon: null,
             pixelfed: null,
-            linkedin: null
+            linkedin: null,
+            instagram: null
         };
         
         settings.forEach(setting => {
@@ -4322,12 +4571,14 @@ async function getConnectedSocialAccounts(database, userId) {
                 connected.pixelfed = { instance: setting.setting_value };
             } else if (platform === 'linkedin' && key === 'token' && setting.setting_value) {
                 connected.linkedin = { connected: true };
+            } else if (platform === 'instagram' && key === 'access' && setting.setting_value) {
+                connected.instagram = { connected: true };
             }
         });
         
         return connected;
     } catch (error) {
-        return { mastodon: null, pixelfed: null, linkedin: null };
+        return { mastodon: null, pixelfed: null, linkedin: null, instagram: null };
     }
 }
 
@@ -4727,6 +4978,7 @@ app.get('/admin/tiers', async (c) => {
   // Serve the admin-tiers.html file
   return c.redirect('/admin-tiers.html');
 });
+
 
 export default app;
 
