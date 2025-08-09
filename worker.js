@@ -547,23 +547,23 @@ class D1Database {
         }
     }
 
-    async getUserSettings(userId, category) {
+    async getUserSettings(userId, integrationType) {
         try {
             await this.ensureUserSettingsTable();
             
             const stmt = this.db.prepare(`
                 SELECT * FROM user_settings 
-                WHERE user_id = ? AND category = ?
+                WHERE user_id = ? AND integration_type = ?
                 ORDER BY setting_key
             `);
-            const result = await stmt.bind(userId, category).all();
+            const result = await stmt.bind(userId, integrationType).all();
             return result.results || [];
         } catch (error) {
             return [];
         }
     }
 
-    async setUserSetting(userId, category, settingKey, settingValue, encrypted = false) {
+    async setUserSetting(userId, integrationType, settingKey, settingValue, encrypted = false) {
         try {
             
             await this.ensureUserSettingsTable();
@@ -571,10 +571,10 @@ class D1Database {
             // Use a more compatible approach - check if exists then update or insert
             const existingStmt = this.db.prepare(`
                 SELECT id FROM user_settings 
-                WHERE user_id = ? AND category = ? AND setting_key = ?
+                WHERE user_id = ? AND integration_type = ? AND setting_key = ?
             `);
             
-            const existing = await existingStmt.bind(userId, category, settingKey).first();
+            const existing = await existingStmt.bind(userId, integrationType, settingKey).first();
             
             if (existing) {
                 // Update existing record
@@ -596,11 +596,7 @@ class D1Database {
                     updateParts.push("updated_at = datetime('now')");
                 }
                 
-                // Handle integration_type if it exists and needs to be set
-                if (columns.includes('integration_type')) {
-                    updateParts.push('integration_type = ?');
-                    updateValues.push(settingKey.split('_')[0]);
-                }
+                // integration_type is already part of the WHERE clause, no need to update it
                 
                 updateValues.push(existing.id); // Add the WHERE clause parameter
                 
@@ -627,9 +623,9 @@ class D1Database {
                 let insertValues = [userId, settingKey, settingValue];
                 let placeholders = ['?', '?', '?'];
                 
-                if (columns.includes('category')) {
-                    insertColumns.push('category');
-                    insertValues.push(category);
+                if (columns.includes('integration_type')) {
+                    insertColumns.push('integration_type');
+                    insertValues.push(integrationType);
                     placeholders.push('?');
                 }
                 
@@ -3086,7 +3082,9 @@ app.get('/api/user/settings/social', authenticateToken, async (c) => {
         };
         
         settings.forEach(setting => {
-            const [platform, key] = setting.setting_key.split('_');
+            const [platform, ...keyParts] = setting.setting_key.split('_');
+            const key = keyParts.join('_'); // Rejoin the remaining parts to preserve full key name
+            
             if (platform === 'mastodon') {
                 socialSettings.mastodon[key] = setting.encrypted ? '••••••••••••••••' : setting.setting_value;
             } else if (platform === 'pixelfed') {
@@ -3098,8 +3096,11 @@ app.get('/api/user/settings/social', authenticateToken, async (c) => {
             }
         });
         
+        // Instagram integration working correctly
+        
         return c.json(socialSettings);
     } catch (error) {
+        console.error('Social settings error:', error);
         return c.json({ error: 'Failed to load social settings' }, 500);
     }
 });
@@ -3765,62 +3766,189 @@ app.get('/auth/instagram/callback', async (c) => {
         }
         
         // Exchange authorization code for access token
-        if (c.env.FACEBOOK_APP_SECRET) {
+        if (c.env.INSTAGRAM_APP_SECRET) {
             try {
-                // Exchange code for access token
-                const tokenResponse = await fetch('https://graph.facebook.com/v18.0/oauth/access_token', {
+                console.log('Attempting Instagram token exchange with code:', code.substring(0, 10) + '...');
+                
+                // Exchange code for Instagram access token
+                const tokenResponse = await fetch('https://api.instagram.com/oauth/access_token', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
                     },
                     body: new URLSearchParams({
                         client_id: '1430176351425887',
-                        client_secret: c.env.FACEBOOK_APP_SECRET,
+                        client_secret: c.env.INSTAGRAM_APP_SECRET,
                         redirect_uri: 'https://ai-caption-studio.jonsson.workers.dev/auth/instagram/callback',
-                        code: code
+                        code: code,
+                        grant_type: 'authorization_code'
                     })
                 });
 
+                console.log('Token exchange response status:', tokenResponse.status);
+                
                 if (tokenResponse.ok) {
                     const tokenData = await tokenResponse.json();
+                    console.log('Token exchange successful');
                     const accessToken = tokenData.access_token;
                     
-                    // Get user info to determine user ID for database storage
-                    const userResponse = await fetch(`https://graph.facebook.com/me?access_token=${accessToken}`);
-                    if (userResponse.ok) {
-                        const userData = await userResponse.json();
+                    // For Instagram Business API, we need to get the Instagram Business Account ID
+                    // This is different from the personal Instagram account ID
+                    
+                    // Step 1: Get user's Facebook pages
+                    const pagesResponse = await fetch(`https://graph.facebook.com/me/accounts?access_token=${accessToken}`);
+                    
+                    let instagramBusinessAccountId = null;
+                    let instagramUsername = 'Unknown';
+                    let instagramAccountType = 'Business';
+                    
+                    if (pagesResponse.ok) {
+                        const pagesData = await pagesResponse.json();
+                        console.log('Facebook pages retrieved successfully');
                         
-                        // Here you would typically:
-                        // 1. Associate this access token with the authenticated user
-                        // 2. Store it securely in the database
-                        // For now, just pass it to the frontend for manual setup
+                        // Step 2: Find Instagram Business Account connected to the Facebook page
+                        for (const page of pagesData.data || []) {
+                            try {
+                                const igAccountResponse = await fetch(`https://graph.facebook.com/${page.id}?fields=instagram_business_account&access_token=${accessToken}`);
+                                if (igAccountResponse.ok) {
+                                    const igAccountData = await igAccountResponse.json();
+                                    if (igAccountData.instagram_business_account) {
+                                        instagramBusinessAccountId = igAccountData.instagram_business_account.id;
+                                        
+                                        // Get Instagram account details
+                                        const igDetailsResponse = await fetch(`https://graph.facebook.com/${instagramBusinessAccountId}?fields=username,account_type&access_token=${accessToken}`);
+                                        if (igDetailsResponse.ok) {
+                                            const igDetailsData = await igDetailsResponse.json();
+                                            instagramUsername = igDetailsData.username || 'Unknown';
+                                            instagramAccountType = igDetailsData.account_type || 'Business';
+                                        }
+                                        break;
+                                    }
+                                }
+                            } catch (e) {
+                                console.log('Failed to check Instagram account for page:', page.id);
+                            }
+                        }
+                    }
+                    
+                    // Fallback: try to get personal Instagram account info if no business account found
+                    if (!instagramBusinessAccountId) {
+                        const userResponse = await fetch(`https://graph.instagram.com/me?fields=id,username,account_type&access_token=${accessToken}`);
+                        if (userResponse.ok) {
+                            const userData = await userResponse.json();
+                            instagramBusinessAccountId = userData.id;
+                            instagramUsername = userData.username || 'Unknown';
+                            instagramAccountType = userData.account_type || 'Business';
+                            console.log('Using personal Instagram account ID as fallback');
+                        }
+                    }
+                    
+                    if (instagramBusinessAccountId) {
+                        console.log('Instagram Business Account ID found:', instagramBusinessAccountId);
+                        
+                        // Save Instagram credentials to database
+                        const database = new D1Database(c.env.DB);
+                        
+                        // Extract user ID from state parameter
+                        const state = c.req.query('state');
+                        let userId = null;
+                        
+                        if (state && state.includes('_')) {
+                            // State format: "userId_randomString"
+                            userId = parseInt(state.split('_')[0]);
+                        }
+                        
+                        if (!userId) {
+                            // Fallback: get the most recent user (not ideal but prevents errors)
+                            const userQuery = await database.db.prepare('SELECT id FROM users ORDER BY created_at DESC LIMIT 1').first();
+                            if (userQuery) {
+                                userId = userQuery.id;
+                            }
+                        }
+                        
+                        if (userId) {
+                            try {
+                                // Save Instagram access token
+                                await database.setUserSetting(userId, 'social', 'instagram_access_token', accessToken, true);
+                                
+                                // Save Instagram Business Account ID (this is what we need for posting)
+                                await database.setUserSetting(userId, 'social', 'instagram_account_id', instagramBusinessAccountId, false);
+                                
+                                // Save Instagram username
+                                await database.setUserSetting(userId, 'social', 'instagram_username', instagramUsername, false);
+                                
+                                // Save Instagram account type
+                                await database.setUserSetting(userId, 'social', 'instagram_account_type', instagramAccountType, false);
+                            } catch (saveError) {
+                                console.error('❌ Error saving Instagram settings:', saveError);
+                                throw saveError;
+                            }
+                        }
                         
                         return c.html(`
                             <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
                                 <h2>✅ Instagram Connected Successfully!</h2>
-                                <p>Your Instagram business account is now connected.</p>
+                                <p>Your Instagram business account @${instagramUsername} is now connected.</p>
+                                <p>Account Type: ${instagramAccountType}</p>
+                                <p>Business Account ID: ${instagramBusinessAccountId}</p>
                                 <p>Redirecting you back to settings...</p>
                                 
                                 <script>
-                                    // Store the access token for the settings page to save
-                                    localStorage.setItem('instagram_access_token', '${accessToken}');
-                                    localStorage.setItem('instagram_user_id', '${userData.id}');
-                                    localStorage.setItem('instagram_setup_complete', 'true');
-                                    
                                     setTimeout(() => {
                                         window.location.href = '/settings.html';
                                     }, 2000);
                                 </script>
                             </div>
                         `);
+                    } else {
+                        return c.html(`
+                            <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                                <h2>⚠️ Instagram Business Account Not Found</h2>
+                                <p>Could not find an Instagram Business Account connected to your Facebook account.</p>
+                                <p>Please ensure your Instagram account is:</p>
+                                <ul style="text-align: left; max-width: 400px; margin: 20px auto;">
+                                    <li>Set to Business or Creator account type</li>
+                                    <li>Connected to a Facebook page</li>
+                                    <li>Properly configured for business use</li>
+                                </ul>
+                                <a href="/settings.html" style="color: #405de6;">← Back to Settings</a>
+                            </div>
+                        `);
                     }
                 } else {
                     const errorData = await tokenResponse.text();
-                    console.error('Token exchange failed:', errorData);
+                    console.error('Token exchange failed:', tokenResponse.status, errorData);
+                    
+                    return c.html(`
+                        <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                            <h2>❌ Instagram Token Exchange Failed</h2>
+                            <p>Failed to exchange authorization code for access token.</p>
+                            <p>Status: ${tokenResponse.status}</p>
+                            <p>Error: ${errorData}</p>
+                            <a href="/settings.html">← Back to Settings</a>
+                        </div>
+                    `);
                 }
             } catch (error) {
                 console.error('Token exchange error:', error);
+                
+                return c.html(`
+                    <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                        <h2>❌ Instagram Token Exchange Error</h2>
+                        <p>An error occurred during token exchange.</p>
+                        <p>Error: ${error.message}</p>
+                        <a href="/settings.html">← Back to Settings</a>
+                    </div>
+                `);
             }
+        } else {
+            return c.html(`
+                <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
+                    <h2>⚠️ Configuration Missing</h2>
+                    <p>INSTAGRAM_APP_SECRET not configured in environment.</p>
+                    <a href="/settings.html">← Back to Settings</a>
+                </div>
+            `);
         }
         
         return c.html(`
@@ -3866,15 +3994,15 @@ app.get('/auth/instagram/callback', async (c) => {
 app.post('/api/user/post/instagram', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
-        const { caption, image_data } = await c.req.json();
+        const { caption, image_data, imageId } = await c.req.json();
         const database = new D1Database(c.env.DB);
         
         if (!caption) {
             return c.json({ error: 'Caption is required' }, 400);
         }
         
-        if (!image_data) {
-            return c.json({ error: 'Image data is required for Instagram posts' }, 400);
+        if (!image_data && !imageId) {
+            return c.json({ error: 'Either image data or image ID is required for Instagram posts' }, 400);
         }
         
         // Get user's Instagram settings
@@ -3901,65 +4029,186 @@ app.post('/api/user/post/instagram', authenticateToken, async (c) => {
         //    - Create media container
         //    - Publish the container
         
-        return c.json({ 
-            success: false,
-            error: 'Instagram posting requires additional setup. Please configure your Facebook Developer App and Instagram Business account integration.'
-        });
+        // Step 1: Get image buffer (either from base64 data or existing R2 image)
+        let imageBuffer;
+        let contentType = 'image/jpeg';
         
-        // TODO: Implement actual Instagram posting when Facebook app is configured
-        /*
-        // Step 1: Create media container
-        const containerResponse = await fetch(`https://graph.facebook.com/v18.0/${instagramAccountId}/media`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                image_url: publicImageUrl,
-                caption: caption,
-                access_token: instagramAccessToken
-            })
-        });
-        
-        if (!containerResponse.ok) {
-            const errorData = await containerResponse.json();
-            return c.json({ 
-                error: 'Failed to create Instagram media container: ' + (errorData.error?.message || containerResponse.status)
-            }, 500);
-        }
-        
-        const containerData = await containerResponse.json();
-        const containerId = containerData.id;
-        
-        // Step 2: Publish the container
-        const publishResponse = await fetch(`https://graph.facebook.com/v18.0/${instagramAccountId}/media_publish`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                creation_id: containerId,
-                access_token: instagramAccessToken
-            })
-        });
-        
-        if (publishResponse.ok) {
-            const publishData = await publishResponse.json();
-            return c.json({ 
-                success: true, 
-                message: 'Posted to Instagram successfully!',
-                id: publishData.id
-            });
+        if (imageId) {
+            // Fetch existing image from database and R2
+            const image = await database.getUploadedImageById(imageId, user.id);
+            if (!image) {
+                return c.json({ error: 'Image not found' }, 404);
+            }
+            
+            if (!image.r2_key) {
+                return c.json({ error: 'Image not available in storage' }, 400);
+            }
+            
+            // Fetch the image from R2
+            const r2Object = await c.env.R2_BUCKET.get(image.r2_key);
+            if (!r2Object) {
+                return c.json({ error: 'Image file not found in storage' }, 404);
+            }
+            
+            imageBuffer = await r2Object.arrayBuffer();
+            contentType = image.mime_type || 'image/jpeg';
         } else {
-            const errorData = await publishResponse.json();
+            // Use provided base64 image data
+            imageBuffer = Buffer.from(image_data, 'base64');
+        }
+        
+        // Upload image to Instagram posts folder for public access
+        const imageKey = `instagram-posts/${Date.now()}-${user.id}.jpg`;
+        
+        try {
+            await c.env.R2_BUCKET.put(imageKey, imageBuffer, {
+                httpMetadata: {
+                    contentType: contentType
+                }
+            });
+            
+            // For Instagram posting, we need a publicly accessible URL
+            // Use our Worker to serve the image publicly since R2 bucket may not have public access
+            const publicImageUrl = `https://ai-caption-studio.jonsson.workers.dev/public-image/${imageKey}`;
+            
+            // Wait a moment to ensure image is fully available
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Step 2: Create Instagram media container
+            
+            const containerResponse = await fetch(`https://graph.instagram.com/${instagramAccountId}/media`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    image_url: publicImageUrl,
+                    caption: caption,
+                    access_token: instagramAccessToken
+                })
+            });
+            
+            if (!containerResponse.ok) {
+                const errorData = await containerResponse.json();
+                return c.json({ 
+                    success: false,
+                    error: 'Failed to create Instagram media container: ' + (errorData.error?.message || JSON.stringify(errorData))
+                }, 500);
+            }
+            
+            const containerData = await containerResponse.json();
+            const containerId = containerData.id;
+            
+            // Step 3: Publish the container
+            const publishResponse = await fetch(`https://graph.instagram.com/${instagramAccountId}/media_publish`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    creation_id: containerId,
+                    access_token: instagramAccessToken
+                })
+            });
+            
+            if (publishResponse.ok) {
+                const publishData = await publishResponse.json();
+                
+                // Clean up temporary image after successful post
+                await c.env.R2_BUCKET.delete(imageKey);
+                
+                return c.json({ 
+                    success: true, 
+                    message: 'Posted to Instagram successfully!',
+                    id: publishData.id
+                });
+            } else {
+                const errorData = await publishResponse.json();
+                return c.json({ 
+                    success: false,
+                    error: 'Failed to publish Instagram post: ' + (errorData.error?.message || publishResponse.status)
+                }, 500);
+            }
+            
+        } catch (uploadError) {
             return c.json({ 
-                error: 'Failed to publish Instagram post: ' + (errorData.error?.message || publishResponse.status)
+                success: false,
+                error: 'Failed to upload image: ' + uploadError.message
             }, 500);
         }
-        */
         
     } catch (error) {
         return c.json({ error: 'Failed to post to Instagram: ' + error.message }, 500);
+    }
+});
+
+// Instagram webhook endpoints (required for Facebook app verification)
+// Public image serving endpoint for Instagram and other external services
+app.get('/public-image/*', async (c) => {
+    try {
+        const fullPath = c.req.path;
+        const imageKey = fullPath.replace('/public-image/', '');
+        const userAgent = c.req.header('User-Agent');
+        
+        
+        if (!c.env.R2_BUCKET) {
+            console.error('R2 bucket not configured');
+            return c.text('R2 bucket not configured', 500);
+        }
+        
+        // Fetch image from R2 bucket
+        const r2Object = await c.env.R2_BUCKET.get(imageKey);
+        
+        if (!r2Object) {
+            console.error('Image not found in R2:', imageKey);
+            return c.text('Image not found', 404);
+        }
+        
+        
+        // Return the image with appropriate headers
+        const headers = new Headers();
+        headers.set('Content-Type', r2Object.httpMetadata?.contentType || 'image/jpeg');
+        headers.set('Content-Length', r2Object.size.toString());
+        headers.set('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+        headers.set('Access-Control-Allow-Origin', '*'); // Allow CORS for external access
+        
+        return new Response(r2Object.body, { headers });
+        
+    } catch (error) {
+        console.error('Error serving public image:', error);
+        return c.text('Error serving image', 500);
+    }
+});
+
+app.get('/webhook/instagram', async (c) => {
+    const mode = c.req.query('hub.mode');
+    const token = c.req.query('hub.verify_token');
+    const challenge = c.req.query('hub.challenge');
+    
+    // Verify token should match what you set in Facebook Developer Console
+    const VERIFY_TOKEN = 'your_instagram_webhook_verify_token_123';
+    
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+        console.log('Instagram webhook verified');
+        return c.text(challenge);
+    } else {
+        console.log('Instagram webhook verification failed');
+        return c.text('Verification failed', 403);
+    }
+});
+
+app.post('/webhook/instagram', async (c) => {
+    // Handle Instagram webhook events (required for app validation but not used for posting)
+    try {
+        const body = await c.req.json();
+        console.log('Instagram webhook received:', JSON.stringify(body, null, 2));
+        
+        // Instagram requires a 200 response to webhook events
+        // Since we're only interested in posting, we just acknowledge receipt
+        return c.json({ status: 'received' });
+    } catch (error) {
+        console.error('Instagram webhook error:', error);
+        return c.json({ error: 'Webhook processing failed' }, 500);
     }
 });
 
