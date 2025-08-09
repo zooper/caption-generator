@@ -606,8 +606,13 @@
                 </div>
 
                 <div class="style-options">
-                    <h3>Choose Caption Style</h3>
-                    <div class="style-buttons">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0;">Choose Caption Style</h3>
+                        <button id="managePromptsBtn" class="control-btn secondary" style="font-size: 12px; padding: 6px 12px;">
+                            ⚙️ Manage Custom Prompts
+                        </button>
+                    </div>
+                    <div class="style-buttons" id="styleButtons">
                         <button class="style-btn active" data-style="creative">✨ Creative</button>
                         <button class="style-btn" data-style="professional">💼 Professional</button>
                         <button class="style-btn" data-style="casual">😄 Casual</button>
@@ -706,7 +711,10 @@
         <div id="uploadedImagesSection" class="container uploaded-images-section">
             <div class="uploaded-images-header">
                 <h3>📁 Lightroom Images</h3>
-                <button onclick="refreshUploadedImages()" class="control-btn secondary">🔄 Refresh</button>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="toggleUploadedImages()" class="control-btn primary">🏠 Back to Main</button>
+                    <button onclick="refreshUploadedImages()" class="control-btn secondary">🔄 Refresh</button>
+                </div>
             </div>
             
             <div id="uploadedImagesContent">
@@ -761,6 +769,9 @@
             if (user.isAdmin && adminButton) {
                 adminButton.style.display = 'inline-block';
             }
+            
+            // Load custom prompts after authentication
+            loadCustomPromptsAndUpdateButtons();
         }
 
         function showLoginForm() {
@@ -1169,12 +1180,81 @@
 
                 // Parse the response content
                 const content = data.content;
-                const captionMatch = content.match(/CAPTION:\s*(.+?)(?=\\n|HASHTAGS:|ALT_TEXT:|$)/s);
-                const hashtagsMatch = content.match(/HASHTAGS:\s*(.+?)(?=\\n|ALT_TEXT:|$)/s);
-                const altTextMatch = content.match(/ALT_TEXT:\s*(.+?)$/s);
+                // Try English format first
+                let captionMatch = content.match(/CAPTION:\s*(.+?)(?=\\n|HASHTAGS:|ALT_TEXT:|$)/s);
+                let hashtagsMatch = content.match(/HASHTAGS:\s*(.+?)(?=\\n|ALT_TEXT:|$)/s);
+                let altTextMatch = content.match(/ALT_TEXT:\s*(.+?)$/s);
+                
+                // If English format fails, try more flexible parsing for other languages
+                if (!captionMatch || !hashtagsMatch || !altTextMatch) {
+                    
+                    // Split by lines and look for content after colons
+                    const lines = content.split('\\n');
+                    let caption = '', hashtags = '', altText = '';
+                    
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        
+                        // Look for caption-like patterns
+                        if (!caption && (line.toLowerCase().includes('caption') || line.toLowerCase().includes('bildtext') || line.includes(':'))) {
+                            if (line.includes(':')) {
+                                const parts = line.split(':');
+                                if (parts.length > 1) {
+                                    caption = parts.slice(1).join(':').trim();
+                                }
+                            }
+                        }
+                        
+                        // Look for hashtag-like patterns
+                        if (!hashtags && (line.toLowerCase().includes('hashtag') || line.toLowerCase().includes('tag') || line.includes('#'))) {
+                            if (line.includes(':')) {
+                                const parts = line.split(':');
+                                if (parts.length > 1) {
+                                    hashtags = parts.slice(1).join(':').trim();
+                                }
+                            } else if (line.includes('#')) {
+                                hashtags = line.trim();
+                            }
+                        }
+                        
+                        // Look for alt text patterns
+                        if (!altText && (line.toLowerCase().includes('alt') || line.toLowerCase().includes('beskrivning'))) {
+                            if (line.includes(':')) {
+                                const parts = line.split(':');
+                                if (parts.length > 1) {
+                                    altText = parts.slice(1).join(':').trim();
+                                }
+                            }
+                        }
+                    }
+                    
+                    // If we found content via flexible parsing, use it
+                    if (caption) captionMatch = [null, caption];
+                    if (hashtags) hashtagsMatch = [null, hashtags];
+                    if (altText) altTextMatch = [null, altText];
+                    
+                }
+
 
                 document.getElementById('captionText').textContent = captionMatch ? captionMatch[1].trim() : 'No caption generated';
-                document.getElementById('hashtagsText').textContent = hashtagsMatch ? hashtagsMatch[1].trim() : 'No hashtags generated';
+                
+                // Process hashtags to ensure they have # symbols
+                let hashtagsText = hashtagsMatch ? hashtagsMatch[1].trim() : 'No hashtags generated';
+                if (hashtagsText && hashtagsText !== 'No hashtags generated') {
+                    // Split hashtags and ensure each starts with #
+                    const hashtags = hashtagsText.split(/\s+/).map(tag => {
+                        tag = tag.trim();
+                        if (tag && !tag.startsWith('#')) {
+                            return '#' + tag;
+                        }
+                        return tag;
+                    }).filter(tag => tag.length > 1); // Remove empty or single-char tags
+                    
+                    
+                    hashtagsText = hashtags.join(' ');
+                }
+                document.getElementById('hashtagsText').textContent = hashtagsText;
+                
                 document.getElementById('altText').textContent = altTextMatch ? altTextMatch[1].trim() : 'No alt text generated';
 
                 // Display extracted metadata if available
@@ -1369,6 +1449,81 @@
                 });
             }
             
+            // Custom Prompts Management
+            const managePromptsBtn = document.getElementById('managePromptsBtn');
+            const customPromptsModal = document.getElementById('customPromptsModal');
+            
+            
+            if (managePromptsBtn && customPromptsModal) {
+                managePromptsBtn.addEventListener('click', () => {
+                    customPromptsModal.classList.remove('hidden');
+                    document.body.style.overflow = 'hidden';
+                    loadCustomPrompts();
+                });
+                
+                // Close modal events
+                customPromptsModal.addEventListener('click', (e) => {
+                    if (e.target === customPromptsModal || e.target.classList.contains('modal-close')) {
+                        closeCustomPromptsModal();
+                    }
+                });
+                
+                // Prevent closing when clicking inside modal content
+                const modalContent = customPromptsModal.querySelector('.modal-content');
+                if (modalContent) {
+                    modalContent.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                    });
+                }
+                
+                // Create prompt button
+                const createPromptBtn = document.getElementById('createPromptBtn');
+                if (createPromptBtn) {
+                    createPromptBtn.addEventListener('click', () => {
+                        showPromptForm();
+                    });
+                }
+                
+                // Cancel prompt button
+                const cancelPromptBtn = document.getElementById('cancelPromptBtn');
+                if (cancelPromptBtn) {
+                    cancelPromptBtn.addEventListener('click', () => {
+                        hidePromptForm();
+                    });
+                }
+                
+                // Form submission
+                const customPromptForm = document.getElementById('customPromptForm');
+                if (customPromptForm) {
+                    customPromptForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        saveCustomPrompt();
+                    });
+                }
+                
+                // Icon picker
+                const iconPicker = document.querySelector('.icon-suggestions');
+                if (iconPicker) {
+                    iconPicker.addEventListener('click', (e) => {
+                        if (e.target.classList.contains('icon-btn')) {
+                            const iconInput = document.getElementById('promptIcon');
+                            if (iconInput) {
+                                iconInput.value = e.target.textContent;
+                            }
+                        }
+                    });
+                }
+                
+                // Add direct click handler to close button as fallback
+                const closeButton = customPromptsModal.querySelector('.modal-close');
+                if (closeButton) {
+                    closeButton.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        closeCustomPromptsModal();
+                    });
+                }
+            }
+            
         }); // End of DOMContentLoaded callback
         
         // Global functions that need to be accessible from onclick handlers
@@ -1543,6 +1698,248 @@
             }
         }
         
+        // Custom Prompts Functions
+        let customPrompts = [];
+        let editingPromptId = null;
+        
+        function closeCustomPromptsModal() {
+            const modal = document.getElementById('customPromptsModal');
+            modal.classList.add('hidden');
+            document.body.style.overflow = '';
+            hidePromptForm();
+            editingPromptId = null;
+        }
+        
+        async function loadCustomPrompts() {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/custom-prompts', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    customPrompts = data || [];
+                    renderCustomPromptsList();
+                } else {
+                }
+            } catch (error) {
+            }
+        }
+        
+        function renderCustomPromptsList() {
+            const list = document.getElementById('customPromptsList');
+            
+            if (customPrompts.length === 0) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">✨</div>
+                        <p>No custom prompts created yet.</p>
+                        <p style="font-size: 14px;">Create your first custom prompt to get started!</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            list.innerHTML = customPrompts.map(prompt => `
+                <div class="prompt-item" data-prompt-id="${prompt.id}">
+                    <div class="prompt-item-header">
+                        <div class="prompt-item-title">
+                            <span>${prompt.icon}</span>
+                            <span>${prompt.name}</span>
+                        </div>
+                        <div class="prompt-item-actions">
+                            <button onclick="editCustomPrompt(${prompt.id})" title="Edit">✏️</button>
+                            <button onclick="deleteCustomPrompt(${prompt.id})" title="Delete">🗑️</button>
+                        </div>
+                    </div>
+                    ${prompt.description ? `<div class="prompt-item-description">${prompt.description}</div>` : ''}
+                    <div class="prompt-item-text">${prompt.prompt_text}</div>
+                </div>
+            `).join('');
+        }
+        
+        function showPromptForm(promptData = null) {
+            const form = document.getElementById('promptForm');
+            form.classList.remove('hidden');
+            
+            if (promptData) {
+                // Editing existing prompt
+                document.getElementById('formTitle').textContent = 'Edit Prompt';
+                document.getElementById('promptId').value = promptData.id;
+                document.getElementById('promptName').value = promptData.name;
+                document.getElementById('promptIcon').value = promptData.icon || '✨';
+                document.getElementById('promptDescription').value = promptData.description || '';
+                document.getElementById('promptText').value = promptData.prompt_text;
+                editingPromptId = promptData.id;
+            } else {
+                // Creating new prompt
+                document.getElementById('formTitle').textContent = 'Create New Prompt';
+                document.getElementById('promptId').value = '';
+                document.getElementById('promptName').value = '';
+                document.getElementById('promptIcon').value = '✨';
+                document.getElementById('promptDescription').value = '';
+                document.getElementById('promptText').value = '';
+                editingPromptId = null;
+            }
+        }
+        
+        function hidePromptForm() {
+            const form = document.getElementById('promptForm');
+            form.classList.add('hidden');
+            editingPromptId = null;
+            
+            // Clear form
+            document.getElementById('promptId').value = '';
+            document.getElementById('promptName').value = '';
+            document.getElementById('promptIcon').value = '✨';
+            document.getElementById('promptDescription').value = '';
+            document.getElementById('promptText').value = '';
+        }
+        
+        async function saveCustomPrompt() {
+            const formData = {
+                name: document.getElementById('promptName').value.trim(),
+                icon: document.getElementById('promptIcon').value.trim() || '✨',
+                description: document.getElementById('promptDescription').value.trim(),
+                promptText: document.getElementById('promptText').value.trim()
+            };
+            
+            if (!formData.name || !formData.promptText) {
+                alert('Name and prompt text are required');
+                return;
+            }
+            
+            try {
+                const token = localStorage.getItem('auth_token');
+                const url = editingPromptId 
+                    ? `/api/custom-prompts/${editingPromptId}`
+                    : '/api/custom-prompts';
+                
+                const method = editingPromptId ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify(formData)
+                });
+                
+                if (response.ok) {
+                    alert(editingPromptId ? 'Prompt updated successfully!' : 'Prompt created successfully!');
+                    await loadCustomPrompts();
+                    hidePromptForm();
+                    await updateStyleButtonsWithCustomPrompts();
+                } else {
+                    const errorData = await response.json();
+                    alert(errorData.error || 'Failed to save prompt');
+                }
+            } catch (error) {
+                alert('Error saving prompt');
+            }
+        }
+        
+        function editCustomPrompt(promptId) {
+            const prompt = customPrompts.find(p => p.id === promptId);
+            if (prompt) {
+                showPromptForm(prompt);
+            }
+        }
+        
+        async function deleteCustomPrompt(promptId) {
+            const prompt = customPrompts.find(p => p.id === promptId);
+            if (!prompt) return;
+            
+            if (!confirm(`Are you sure you want to delete "${prompt.name}"? This action cannot be undone.`)) {
+                return;
+            }
+            
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/custom-prompts/${promptId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    alert('Prompt deleted successfully!');
+                    await loadCustomPrompts();
+                    await updateStyleButtonsWithCustomPrompts();
+                } else {
+                    const errorData = await response.json();
+                    alert(errorData.error || 'Failed to delete prompt');
+                }
+            } catch (error) {
+                alert('Error deleting prompt');
+            }
+        }
+        
+        async function loadCustomPromptsAndUpdateButtons() {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/custom-prompts', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    customPrompts = data || [];
+                    await updateStyleButtonsWithCustomPrompts();
+                } else {
+                }
+            } catch (error) {
+            }
+        }
+        
+        async function updateStyleButtonsWithCustomPrompts() {
+            try {
+                const styleButtonsContainer = document.getElementById('styleButtons');
+                if (!styleButtonsContainer) return;
+                
+                // Remove existing custom prompt buttons
+                const existingCustomButtons = styleButtonsContainer.querySelectorAll('[data-custom-prompt]');
+                existingCustomButtons.forEach(btn => btn.remove());
+                
+                // Add custom prompt buttons
+                customPrompts.forEach(prompt => {
+                    if (prompt.is_active) {
+                        const button = document.createElement('button');
+                        button.className = 'style-btn';
+                        button.dataset.style = `custom_${prompt.id}`;
+                        button.dataset.customPrompt = prompt.id;
+                        button.innerHTML = `${prompt.icon} ${prompt.name}`;
+                        button.title = prompt.description || prompt.name;
+                        
+                        button.addEventListener('click', () => {
+                            // Update selected style
+                            document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
+                            button.classList.add('active');
+                            selectedStyle = `custom_${prompt.id}`;
+                        });
+                        
+                        styleButtonsContainer.appendChild(button);
+                    } else {
+                    }
+                });
+            } catch (error) {
+            }
+        }
+        
         // Uploaded Images Functions
         function toggleUploadedImages() {
             const section = document.getElementById('uploadedImagesSection');
@@ -1575,7 +1972,6 @@
                     displayUploadedImages([]);
                 }
             } catch (error) {
-                console.error('Error loading uploaded images:', error);
                 displayUploadedImages([]);
             }
         }
@@ -1730,7 +2126,6 @@
                 }, 2000);
                 
             } catch (error) {
-                console.error('Error loading image for caption generation:', error);
                 
                 // Show error state
                 btn.textContent = '❌ Failed';
@@ -1822,7 +2217,6 @@
                     alert('Failed to load image details: ' + (errorData.error || 'Unknown error'));
                 }
             } catch (error) {
-                console.error('Error loading image details:', error);
                 alert('Failed to load image details: ' + error.message);
             }
         }
@@ -1995,7 +2389,6 @@
                     alert('Failed to delete image: ' + (errorData.error || 'Unknown error'));
                 }
             } catch (error) {
-                console.error('Error deleting image:', error);
                 alert('Failed to delete image: ' + error.message);
             }
         }
@@ -2033,7 +2426,6 @@
                     previewElement.innerHTML = '<div style="font-size: 14px; padding: 20px;">📷 Preview unavailable<br><small style="color: #999;">Upload a new image to see previews</small></div>';
                 }
             } catch (error) {
-                console.error('Error loading image preview:', error);
                 const previewElement = document.getElementById(`preview-${imageId}`);
                 if (previewElement) {
                     previewElement.innerHTML = '<div style="font-size: 14px; padding: 20px;">📷 Preview unavailable<br><small style="color: #999;">Upload a new image to see previews</small></div>';
@@ -2041,5 +2433,335 @@
             }
         }
     </script>
+
+    <!-- Custom Prompts Management Modal -->
+    <div id="customPromptsModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Custom Prompts</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="prompts-header">
+                    <p>Create custom prompt styles for your specific needs. The system automatically provides camera, location, weather, and other context - just focus on the caption style and tone you want.</p>
+                    <button id="createPromptBtn" class="control-btn primary">➕ Create New Prompt</button>
+                </div>
+                
+                <!-- Custom Prompts List -->
+                <div id="customPromptsList" class="prompts-list">
+                    <!-- Dynamic content -->
+                </div>
+                
+                <!-- Create/Edit Prompt Form -->
+                <div id="promptForm" class="prompt-form hidden">
+                    <h3 id="formTitle">Create New Prompt</h3>
+                    <form id="customPromptForm">
+                        <input type="hidden" id="promptId" value="">
+                        
+                        <div class="form-group">
+                            <label for="promptName">Name *</label>
+                            <input type="text" id="promptName" maxlength="50" required placeholder="e.g., Product Photography">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="promptIcon">Icon</label>
+                            <div class="icon-picker">
+                                <input type="text" id="promptIcon" value="✨" maxlength="2" placeholder="✨">
+                                <div class="icon-suggestions">
+                                    <button type="button" class="icon-btn">✨</button>
+                                    <button type="button" class="icon-btn">📸</button>
+                                    <button type="button" class="icon-btn">🎨</button>
+                                    <button type="button" class="icon-btn">💼</button>
+                                    <button type="button" class="icon-btn">🌟</button>
+                                    <button type="button" class="icon-btn">🔥</button>
+                                    <button type="button" class="icon-btn">💎</button>
+                                    <button type="button" class="icon-btn">🚀</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="promptDescription">Description</label>
+                            <input type="text" id="promptDescription" maxlength="100" placeholder="Brief description of this prompt style">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="promptText">Prompt Text *</label>
+                            <textarea id="promptText" maxlength="2000" rows="6" required 
+                                placeholder="Create a travel-inspired caption that captures the wanderlust and adventure of this destination. Use descriptive language that makes readers want to visit. Keep it authentic and engaging for social media.
+
+NOTE: The system automatically provides camera info, location, weather, and context. Just focus on the style and tone you want."></textarea>
+                            <small class="form-help">
+                                <strong>Automatic Context:</strong> Camera info, location, weather, and user context are automatically included.<br>
+                                <strong>Hashtags:</strong> The system automatically generates the right number of hashtags with proper # symbols.<br>
+                                <strong>Focus:</strong> Just describe the caption style, tone, and approach you want.
+                            </small>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="button" id="cancelPromptBtn" class="control-btn secondary">Cancel</button>
+                            <button type="submit" class="control-btn primary">Save Prompt</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal and Custom Prompts Styles -->
+    <style>
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.hidden {
+            display: none;
+        }
+        
+        .modal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+        }
+        
+        .modal-content {
+            position: relative;
+            background: var(--card-background);
+            border-radius: 12px;
+            max-width: 800px;
+            width: 90vw;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            color: var(--text-primary);
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+        
+        .modal-body {
+            padding: 20px;
+            max-height: calc(90vh - 80px);
+            overflow-y: auto;
+        }
+        
+        .prompts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            gap: 20px;
+        }
+        
+        .prompts-header p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 14px;
+            flex: 1;
+        }
+        
+        .prompts-list {
+            margin-bottom: 20px;
+        }
+        
+        .prompt-item {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: var(--background-color);
+        }
+        
+        .prompt-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .prompt-item-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .prompt-item-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .prompt-item-actions button {
+            padding: 4px 8px;
+            font-size: 12px;
+            border: 1px solid var(--border-color);
+            background: var(--card-background);
+            color: var(--text-primary);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .prompt-item-actions button:hover {
+            background: var(--text-secondary);
+            color: var(--card-background);
+        }
+        
+        .prompt-item-description {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        
+        .prompt-item-text {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .prompt-form {
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+            margin-top: 20px;
+        }
+        
+        .prompt-form.hidden {
+            display: none;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--card-background);
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+        
+        .icon-picker {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .icon-picker input {
+            width: 60px;
+            text-align: center;
+            font-size: 18px;
+        }
+        
+        .icon-suggestions {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        
+        .icon-btn {
+            padding: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--card-background);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        
+        .icon-btn:hover {
+            background: var(--accent-color);
+            color: white;
+        }
+        
+        .form-help {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 5px;
+            display: block;
+        }
+        
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+    </style>
 </body>
 </html>

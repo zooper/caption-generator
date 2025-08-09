@@ -126,5 +126,19 @@ INSERT OR IGNORE INTO user_tiers (id, name, daily_limit, description) VALUES
 (2, 'Pro', 100, 'Pro tier with 100 captions per day'),
 (3, 'Unlimited', -1, 'Unlimited captions per day');
 
--- Set initial schema version
-INSERT OR IGNORE INTO schema_version (version) VALUES (8);
+-- Custom prompts for user-defined caption styles
+CREATE TABLE IF NOT EXISTS user_prompts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    prompt_text TEXT NOT NULL,
+    icon TEXT DEFAULT '✨',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+-- Set initial schema version (increment to 9 for custom prompts)
+INSERT OR IGNORE INTO schema_version (version) VALUES (9);
