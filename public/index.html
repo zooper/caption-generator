@@ -729,6 +729,7 @@
     <script>
         let selectedStyle = 'creative';
         let uploadedImage = null;
+        let currentImageId = null; // Track current image ID for Instagram posting
         let isAuthenticated = false;
 
         // Authentication functions
@@ -840,6 +841,7 @@
                     previewImage.classList.remove('hidden');
                     uploadPlaceholder.classList.add('hidden');
                     uploadedImage = e.target.result.split(',')[1]; // Remove data:image/jpeg;base64,
+                    currentImageId = null; // Clear image ID for new uploads
                     generateBtn.disabled = false;
                     
                     // Extract EXIF metadata immediately when image is loaded
@@ -1678,7 +1680,7 @@
                     credentials: 'include',
                     body: JSON.stringify({
                         caption: postContent,
-                        image_data: uploadedImage // Send the base64 image data
+                        ...(currentImageId ? { imageId: currentImageId } : { image_data: uploadedImage })
                     })
                 });
                 
@@ -2168,6 +2170,7 @@
                     const reader = new FileReader();
                     reader.onload = function(e) {
                         uploadedImage = e.target.result.split(',')[1]; // Remove data:image/jpeg;base64,
+                        currentImageId = imageId; // Store the image ID for Instagram posting
                         document.getElementById('generateBtn').disabled = false;
                     };
                     reader.readAsDataURL(await fetch(imageDataUrl).then(r => r.blob()));
