@@ -1781,16 +1781,7 @@
             const schedulingCard = document.getElementById('schedulingCard');
             
             if (schedulingCard.style.display === 'block') {
-                schedulingCard.style.display = 'none';
-                
-                // Clear form
-                document.getElementById('scheduleDateTime').value = '';
-                document.getElementById('customCaption').value = '';
-                document.getElementById('customHashtags').value = '';
-                
-                // Clear platform selection
-                const platformSelection = document.getElementById('platformSelection');
-                platformSelection.innerHTML = '';
+                hideScheduling();
             } else {
                 // Show scheduling
                 schedulingCard.style.display = 'block';
@@ -1804,6 +1795,23 @@
                 // Load connected platforms
                 loadConnectedPlatforms();
             }
+        }
+        
+        function hideScheduling() {
+            const schedulingCard = document.getElementById('schedulingCard');
+            schedulingCard.style.display = 'none';
+            
+            // Clear form
+            document.getElementById('scheduleDateTime').value = '';
+            document.getElementById('customCaption').value = '';
+            document.getElementById('customHashtags').value = '';
+            
+            // Clear platform selection
+            const platformSelection = document.getElementById('platformSelection');
+            platformSelection.innerHTML = '';
+            
+            // Reset default schedule time for next use
+            initializeDefaultScheduleTime();
         }
         
         // Show schedule toggle button when results are displayed
