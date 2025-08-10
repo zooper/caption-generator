@@ -5897,29 +5897,35 @@ app.put('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
     }
 });
 
-// Serve images from R2 storage
+// Serve images from R2 storage (public endpoint for displaying images)
 app.get('/api/images/:imageId', async (c) => {
     try {
         const imageId = c.req.param('imageId');
+        console.log('Serving image:', imageId);
         
         if (!c.env.R2_BUCKET) {
+            console.error('R2 storage not configured');
             return c.text('R2 storage not configured', 500);
         }
         
         const imageObject = await c.env.R2_BUCKET.get(`images/${imageId}`);
         
         if (!imageObject) {
+            console.error('Image not found in R2:', imageId);
             return c.text('Image not found', 404);
         }
+        
+        console.log('Image found, serving:', imageId);
         
         const headers = new Headers();
         headers.set('Content-Type', imageObject.httpMetadata?.contentType || 'image/jpeg');
         headers.set('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+        headers.set('Access-Control-Allow-Origin', '*'); // Allow CORS for image serving
         
         return new Response(imageObject.body, { headers });
     } catch (error) {
         console.error('Error serving image:', error);
-        return c.text('Failed to serve image', 500);
+        return c.text('Failed to serve image: ' + error.message, 500);
     }
 });
 

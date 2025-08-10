@@ -1645,6 +1645,7 @@
             const section = document.getElementById('imageLibrarySection');
             const mainContent = document.querySelector('.main-content');
             const uploadedImagesSection = document.getElementById('uploadedImagesSection');
+            const scheduledPostsSection = document.getElementById('scheduledPostsSection');
             
             if (section.style.display === 'block') {
                 section.style.display = 'none';
@@ -1653,6 +1654,7 @@
                 section.style.display = 'block';
                 mainContent.style.display = 'none';
                 uploadedImagesSection.style.display = 'none'; // Hide Lightroom images if open
+                scheduledPostsSection.style.display = 'none'; // Hide Scheduled Posts if open
                 loadImageLibrary();
             }
         }
@@ -3554,6 +3556,7 @@
             const section = document.getElementById('uploadedImagesSection');
             const mainContent = document.querySelector('.main-content');
             const imageLibrarySection = document.getElementById('imageLibrarySection');
+            const scheduledPostsSection = document.getElementById('scheduledPostsSection');
             
             if (section.style.display === 'block') {
                 section.style.display = 'none';
@@ -3562,6 +3565,7 @@
                 section.style.display = 'block';
                 mainContent.style.display = 'none';
                 imageLibrarySection.style.display = 'none'; // Hide Image Library if open
+                scheduledPostsSection.style.display = 'none'; // Hide Scheduled Posts if open
                 loadUploadedImages();
             }
         }
