@@ -140,5 +140,86 @@ CREATE TABLE IF NOT EXISTS user_prompts (
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
--- Set initial schema version (increment to 9 for custom prompts)
-INSERT OR IGNORE INTO schema_version (version) VALUES (9);
+-- Caption history for image library
+CREATE TABLE IF NOT EXISTS caption_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    image_id TEXT NOT NULL,
+    filename TEXT,
+    caption TEXT NOT NULL,
+    hashtags TEXT,
+    alt_text TEXT,
+    style TEXT NOT NULL,
+    context_data TEXT, -- JSON stored as TEXT
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+-- Uploaded images storage
+CREATE TABLE IF NOT EXISTS uploaded_images (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    source TEXT NOT NULL, -- 'web', 'lightroom', etc.
+    uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+-- Scheduled posts for social media automation
+CREATE TABLE IF NOT EXISTS scheduled_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    image_id TEXT,
+    caption_id INTEGER,
+    caption TEXT NOT NULL,
+    hashtags TEXT,
+    platforms TEXT NOT NULL, -- Comma-separated platform names
+    scheduled_time DATETIME NOT NULL,
+    status TEXT DEFAULT 'pending', -- 'pending', 'processing', 'completed', 'failed'
+    error_message TEXT,
+    attempts INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    posted_at DATETIME,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (caption_id) REFERENCES caption_history (id) ON DELETE SET NULL
+);
+
+-- Update user_settings structure for the new format
+UPDATE user_settings SET 
+    setting_category = CASE 
+        WHEN integration_type = 'mastodon' OR integration_type = 'pixelfed' OR integration_type = 'instagram' OR integration_type = 'linkedin' THEN 'social'
+        ELSE integration_type 
+    END,
+    setting_name = CASE 
+        WHEN integration_type = 'mastodon' THEN integration_type || '_' || setting_key
+        WHEN integration_type = 'pixelfed' THEN integration_type || '_' || setting_key
+        WHEN integration_type = 'instagram' THEN integration_type || '_' || setting_key
+        WHEN integration_type = 'linkedin' THEN integration_type || '_' || setting_key
+        ELSE setting_key
+    END,
+    is_encrypted = encrypted
+WHERE setting_category IS NULL;
+
+-- Add new columns if they don't exist
+ALTER TABLE user_settings ADD COLUMN setting_category TEXT;
+ALTER TABLE user_settings ADD COLUMN setting_name TEXT;
+ALTER TABLE user_settings ADD COLUMN is_encrypted BOOLEAN DEFAULT FALSE;
+
+-- Create API keys table for external integrations
+CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    key_type TEXT NOT NULL, -- 'lightroom', 'general', etc.
+    api_key TEXT NOT NULL,
+    key_hash TEXT NOT NULL, -- For secure storage
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_used DATETIME,
+    is_active BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+-- Set schema version to 10 for comprehensive scheduled posts system
+INSERT OR IGNORE INTO schema_version (version) VALUES (10);

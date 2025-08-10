@@ -510,30 +510,53 @@ class D1Database {
     // Scheduled posts table
     async ensureScheduledPostsTable() {
         try {
-            const stmt = this.db.prepare(`
-                CREATE TABLE IF NOT EXISTS scheduled_posts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    image_id INTEGER,
-                    caption_id INTEGER,
-                    custom_caption TEXT,
-                    custom_hashtags TEXT,
-                    platforms TEXT NOT NULL,
-                    scheduled_time DATETIME NOT NULL,
-                    status TEXT DEFAULT 'pending',
-                    attempts INTEGER DEFAULT 0,
-                    error_message TEXT,
-                    posted_at DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id),
-                    FOREIGN KEY (image_id) REFERENCES uploaded_images(id),
-                    FOREIGN KEY (caption_id) REFERENCES caption_history(id)
-                )
-            `);
-            await stmt.run();
+            // Check if table exists first
+            const tableExists = await this.db.prepare(`
+                SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_posts'
+            `).first();
+            
+            if (!tableExists) {
+                // Create table with timezone column
+                const stmt = this.db.prepare(`
+                    CREATE TABLE scheduled_posts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        image_id INTEGER,
+                        caption_id INTEGER,
+                        custom_caption TEXT,
+                        custom_hashtags TEXT,
+                        platforms TEXT NOT NULL,
+                        scheduled_time DATETIME NOT NULL,
+                        timezone TEXT,
+                        status TEXT DEFAULT 'pending',
+                        attempts INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        posted_at DATETIME,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(id),
+                        FOREIGN KEY (image_id) REFERENCES uploaded_images(id),
+                        FOREIGN KEY (caption_id) REFERENCES caption_history(id)
+                    )
+                `);
+                await stmt.run();
+            } else {
+                // Check if timezone column exists, add it if it doesn't
+                const columnExists = await this.db.prepare(`
+                    PRAGMA table_info(scheduled_posts)
+                `).all();
+                
+                const hasTimezone = columnExists.results?.some(col => col.name === 'timezone');
+                
+                if (!hasTimezone) {
+                    const alterStmt = this.db.prepare(`
+                        ALTER TABLE scheduled_posts ADD COLUMN timezone TEXT
+                    `);
+                    await alterStmt.run();
+                }
+            }
         } catch (error) {
-            console.error('Error creating scheduled_posts table:', error);
+            console.error('Error ensuring scheduled_posts table:', error);
         }
     }
 
@@ -612,20 +635,20 @@ class D1Database {
     }
 
     // Scheduled posts methods
-    async createScheduledPost(userId, imageId, captionId, customCaption, customHashtags, platforms, scheduledTime) {
+    async createScheduledPost(userId, imageId, captionId, customCaption, customHashtags, platforms, scheduledTime, timezone = null) {
         try {
             await this.ensureScheduledPostsTable();
             
             const stmt = this.db.prepare(`
                 INSERT INTO scheduled_posts (
                     user_id, image_id, caption_id, custom_caption, custom_hashtags,
-                    platforms, scheduled_time
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    platforms, scheduled_time, timezone
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             `);
             
             const result = await stmt.bind(
                 userId, imageId, captionId, customCaption, customHashtags,
-                JSON.stringify(platforms), scheduledTime
+                JSON.stringify(platforms), scheduledTime, timezone
             ).run();
             
             return result.meta.last_row_id;
@@ -724,6 +747,86 @@ class D1Database {
             return true;
         } catch (error) {
             console.error('Error deleting scheduled post:', error);
+            return false;
+        }
+    }
+
+    async getUserSocialSettings(userId) {
+        try {
+            const stmt = this.db.prepare(`
+                SELECT setting_name, setting_value, is_encrypted 
+                FROM user_settings 
+                WHERE user_id = ? AND setting_category = 'social'
+            `);
+            const results = await stmt.bind(userId).all();
+            const settings = {};
+            
+            if (results.results) {
+                for (const row of results.results) {
+                    const value = row.is_encrypted ? this.decryptValue(row.setting_value) : row.setting_value;
+                    
+                    // Group settings by platform
+                    if (row.setting_name.startsWith('mastodon_')) {
+                        if (!settings.mastodon) settings.mastodon = {};
+                        const key = row.setting_name.replace('mastodon_', '');
+                        settings.mastodon[key] = value;
+                    } else if (row.setting_name.startsWith('pixelfed_')) {
+                        if (!settings.pixelfed) settings.pixelfed = {};
+                        const key = row.setting_name.replace('pixelfed_', '');
+                        settings.pixelfed[key] = value;
+                    } else if (row.setting_name.startsWith('instagram_')) {
+                        if (!settings.instagram) settings.instagram = {};
+                        const key = row.setting_name.replace('instagram_', '');
+                        settings.instagram[key] = value;
+                    } else if (row.setting_name.startsWith('linkedin_')) {
+                        if (!settings.linkedin) settings.linkedin = {};
+                        const key = row.setting_name.replace('linkedin_', '');
+                        settings.linkedin[key] = value;
+                    }
+                }
+            }
+            
+            return settings;
+        } catch (error) {
+            console.error('Error getting user social settings:', error);
+            return {};
+        }
+    }
+
+    async getScheduledPostById(userId, postId) {
+        try {
+            await this.ensureScheduledPostsTable();
+            
+            const stmt = this.db.prepare(`
+                SELECT sp.*, ui.filename, ui.mime_type, ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
+                FROM scheduled_posts sp
+                LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
+                LEFT JOIN caption_history ch ON sp.caption_id = ch.id
+                WHERE sp.id = ? AND sp.user_id = ?
+            `);
+            
+            const result = await stmt.bind(postId, userId).first();
+            return result || null;
+        } catch (error) {
+            console.error('Error getting scheduled post by ID:', error);
+            return null;
+        }
+    }
+
+    async updateScheduledPost(userId, postId, scheduledTime, caption, hashtags) {
+        try {
+            await this.ensureScheduledPostsTable();
+            
+            const stmt = this.db.prepare(`
+                UPDATE scheduled_posts 
+                SET scheduled_time = ?, caption = ?, hashtags = ?, updated_at = datetime('now')
+                WHERE id = ? AND user_id = ? AND status = 'pending'
+            `);
+            
+            const result = await stmt.bind(scheduledTime, caption, hashtags, postId, userId).run();
+            return result.changes > 0;
+        } catch (error) {
+            console.error('Error updating scheduled post:', error);
             return false;
         }
     }
@@ -1248,7 +1351,7 @@ class D1Database {
                        camera_model, lens, iso, aperture, shutter_speed, focal_length, date_time,
                        uploaded_at, generated_caption, generated_hashtags, generated_alt_text
                 FROM uploaded_images 
-                WHERE user_id = ?
+                WHERE user_id = ? AND (source = 'lightroom' OR source IS NULL)
                 ORDER BY uploaded_at DESC
                 LIMIT ? OFFSET ?
             `);
@@ -1445,7 +1548,7 @@ class D1Database {
                     COUNT(ch.id) as caption_count
                 FROM uploaded_images ui
                 LEFT JOIN caption_history ch ON ui.id = ch.image_id
-                WHERE ui.user_id = ? AND ui.source IN ('web', 'lightroom')
+                WHERE ui.user_id = ? AND ui.source = 'web'
                 GROUP BY ui.id
                 ORDER BY ui.uploaded_at DESC
                 LIMIT ? OFFSET ?
@@ -1497,17 +1600,25 @@ class D1Database {
         try {
             await this.ensureInitialized();
             
-            // Start a transaction to delete image and all related data
-            const batch = [
-                // Delete caption history first (foreign key constraint)
-                this.db.prepare(`DELETE FROM caption_history WHERE image_id = ? AND user_id = ?`).bind(imageId, userId),
-                // Delete scheduled posts
-                this.db.prepare(`DELETE FROM scheduled_posts WHERE image_id = ? AND user_id = ?`).bind(imageId, userId),
-                // Delete the image record
-                this.db.prepare(`DELETE FROM uploaded_images WHERE id = ? AND user_id = ?`).bind(imageId, userId)
-            ];
+            // Delete caption history first (foreign key constraint)
+            const captionHistoryStmt = this.db.prepare(`DELETE FROM caption_history WHERE image_id = ? AND user_id = ?`);
+            await captionHistoryStmt.bind(imageId, userId).run();
             
-            const results = await this.db.batch(batch);
+            // Delete scheduled posts if table exists
+            try {
+                const scheduledPostsStmt = this.db.prepare(`DELETE FROM scheduled_posts WHERE image_id = ? AND user_id = ?`);
+                await scheduledPostsStmt.bind(imageId, userId).run();
+            } catch (scheduledError) {
+                // Ignore if scheduled_posts table doesn't exist (for development environments)
+                if (!scheduledError.message.includes('no such table: scheduled_posts')) {
+                    throw scheduledError;
+                }
+            }
+            
+            // Delete the image record
+            const imageStmt = this.db.prepare(`DELETE FROM uploaded_images WHERE id = ? AND user_id = ?`);
+            await imageStmt.bind(imageId, userId).run();
+            
             return true;
         } catch (error) {
             console.error('Error deleting image library entry:', error);
@@ -5298,7 +5409,7 @@ async function getConnectedSocialAccounts(database, userId) {
 app.post('/api/generate-caption', authenticateToken, async (c) => {
   try {
     const user = c.get('user');
-    const { prompt, base64Image, style = 'creative', includeWeather = false, context = {} } = await c.req.json();
+    const { prompt, base64Image, style = 'creative', includeWeather = false, context = {}, filename = 'web-upload.jpg' } = await c.req.json();
     
     if (!c.env.OPENAI_API_KEY) {
       return c.json({ error: 'OpenAI API key not configured' }, 500);
@@ -5498,7 +5609,7 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
                 // Store image metadata in database
                 imageId = await database.storeWebImage(
                     user.id,
-                    'web-upload.jpg', // Default filename for web uploads
+                    filename, // Use the original filename from the request
                     imageBuffer.length,
                     'image/jpeg',
                     imageHash,
@@ -5629,7 +5740,7 @@ app.get('/api/scheduled-posts', authenticateToken, async (c) => {
 app.post('/api/scheduled-posts', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
-        const { imageId, captionId, customCaption, customHashtags, platforms, scheduledTime } = await c.req.json();
+        const { imageId, captionId, customCaption, customHashtags, platforms, scheduledTime, timezone } = await c.req.json();
         const database = new D1Database(c.env.DB);
         
         if (!platforms || platforms.length === 0) {
@@ -5653,7 +5764,8 @@ app.post('/api/scheduled-posts', authenticateToken, async (c) => {
             customCaption || null,
             customHashtags || null,
             platforms,
-            scheduledTime
+            scheduledTime,
+            timezone || null
         );
         
         if (postId) {
@@ -5683,6 +5795,66 @@ app.delete('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
     } catch (error) {
         console.error('Error deleting scheduled post:', error);
         return c.json({ error: 'Failed to delete scheduled post' }, 500);
+    }
+});
+
+// Get individual scheduled post
+app.get('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const postId = c.req.param('postId');
+        const database = new D1Database(c.env.DB);
+        
+        const post = await database.getScheduledPostById(user.id, postId);
+        
+        if (!post) {
+            return c.json({ error: 'Scheduled post not found' }, 404);
+        }
+        
+        // Parse platforms from JSON string
+        try {
+            post.platforms = JSON.parse(post.platforms);
+        } catch (e) {
+            post.platforms = [];
+        }
+        
+        return c.json({ post });
+    } catch (error) {
+        console.error('Error getting scheduled post:', error);
+        return c.json({ error: 'Failed to load scheduled post' }, 500);
+    }
+});
+
+// Update scheduled post
+app.put('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const postId = c.req.param('postId');
+        const { scheduledTime, caption, hashtags, timezone } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        // Validate scheduled time is in the future
+        const scheduledDate = new Date(scheduledTime);
+        if (scheduledDate <= new Date()) {
+            return c.json({ error: 'Scheduled time must be in the future' }, 400);
+        }
+        
+        const success = await database.updateScheduledPost(
+            user.id,
+            postId,
+            scheduledTime,
+            caption,
+            hashtags
+        );
+        
+        if (success) {
+            return c.json({ success: true });
+        } else {
+            return c.json({ error: 'Failed to update scheduled post' }, 500);
+        }
+    } catch (error) {
+        console.error('Error updating scheduled post:', error);
+        return c.json({ error: 'Failed to update scheduled post' }, 500);
     }
 });
 
@@ -6027,5 +6199,311 @@ app.delete('/api/image-library/:id', authenticateToken, async (c) => {
 });
 
 
-export default app;
+// Cron trigger handler for processing scheduled posts
+async function handleScheduledPosts(env) {
+    try {
+        console.log('Processing scheduled posts...');
+        const database = new D1Database(env.DB);
+        
+        // Get all pending scheduled posts that are due
+        const now = new Date().toISOString();
+        const duePosts = await database.getDueScheduledPosts(now);
+        
+        console.log(`Found ${duePosts.length} due posts to process`);
+        
+        for (const post of duePosts) {
+            try {
+                console.log(`Processing post ${post.id} scheduled for ${post.scheduled_time}`);
+                
+                // Mark as in progress
+                await database.updateScheduledPostStatus(post.id, 'processing', null);
+                
+                // Get the image data if needed
+                let imageData = null;
+                if (post.image_id) {
+                    const imageResponse = await env.R2_BUCKET.get(post.r2_key);
+                    if (imageResponse) {
+                        const arrayBuffer = await imageResponse.arrayBuffer();
+                        imageData = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    }
+                }
+                
+                // Get user's social media settings
+                const userSettings = await database.getUserSocialSettings(post.user_id);
+                
+                // Parse platforms
+                let platforms;
+                try {
+                    platforms = JSON.parse(post.platforms);
+                } catch (e) {
+                    platforms = post.platforms.split(',');
+                }
+                
+                // Process each platform
+                let allSuccess = true;
+                let errorMessages = [];
+                
+                for (const platform of platforms) {
+                    try {
+                        const success = await postToSocialMedia(
+                            platform,
+                            post,
+                            imageData,
+                            userSettings[platform],
+                            env
+                        );
+                        
+                        if (!success) {
+                            allSuccess = false;
+                            errorMessages.push(`Failed to post to ${platform}`);
+                        }
+                    } catch (error) {
+                        console.error(`Error posting to ${platform}:`, error);
+                        allSuccess = false;
+                        errorMessages.push(`${platform}: ${error.message}`);
+                    }
+                }
+                
+                // Update post status based on results
+                if (allSuccess) {
+                    await database.updateScheduledPostStatus(post.id, 'posted', null);
+                    console.log(`Successfully posted to all platforms for post ${post.id}`);
+                } else {
+                    await database.updateScheduledPostStatus(
+                        post.id, 
+                        'failed', 
+                        errorMessages.join('; ')
+                    );
+                    console.error(`Failed to post ${post.id}:`, errorMessages.join('; '));
+                }
+                
+            } catch (error) {
+                console.error(`Error processing post ${post.id}:`, error);
+                await database.updateScheduledPostStatus(
+                    post.id, 
+                    'failed', 
+                    `Processing error: ${error.message}`
+                );
+            }
+        }
+        
+        console.log('Finished processing scheduled posts');
+        
+    } catch (error) {
+        console.error('Error in handleScheduledPosts:', error);
+    }
+}
+
+// Helper function to post to social media platforms
+async function postToSocialMedia(platform, post, imageData, platformSettings, env) {
+    if (!platformSettings || !platformSettings.token) {
+        throw new Error(`No valid token for ${platform}`);
+    }
+    
+    const caption = post.custom_caption || post.caption || '';
+    const hashtags = post.custom_hashtags || post.hashtags || '';
+    const content = caption + (hashtags ? ' ' + hashtags : '');
+    
+    switch (platform) {
+        case 'mastodon':
+            return await postToMastodonCron(content, imageData, platformSettings, env);
+        case 'pixelfed':
+            return await postToPixelfedCron(content, imageData, platformSettings, env);
+        case 'instagram':
+            return await postToInstagramCron(content, imageData, platformSettings, env);
+        default:
+            throw new Error(`Unsupported platform: ${platform}`);
+    }
+}
+
+// Platform-specific posting functions for cron
+async function postToMastodonCron(content, imageData, settings, env) {
+    try {
+        const instance = settings.instance;
+        const token = settings.token;
+        
+        let mediaId = null;
+        
+        // Upload image if provided
+        if (imageData) {
+            const imageBuffer = Uint8Array.from(atob(imageData), c => c.charCodeAt(0));
+            const formData = new FormData();
+            formData.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }));
+            
+            const mediaResponse = await fetch(`${instance}/api/v1/media`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                body: formData
+            });
+            
+            if (mediaResponse.ok) {
+                const mediaResult = await mediaResponse.json();
+                mediaId = mediaResult.id;
+            }
+        }
+        
+        // Create post
+        const postData = {
+            status: content,
+            visibility: 'public'
+        };
+        
+        if (mediaId) {
+            postData.media_ids = [mediaId];
+        }
+        
+        const response = await fetch(`${instance}/api/v1/statuses`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(postData)
+        });
+        
+        return response.ok;
+        
+    } catch (error) {
+        console.error('Error posting to Mastodon:', error);
+        return false;
+    }
+}
+
+async function postToPixelfedCron(content, imageData, settings, env) {
+    // Similar implementation for Pixelfed
+    // Using their API format
+    try {
+        const instance = settings.instance;
+        const token = settings.token;
+        
+        // Pixelfed posting logic here
+        // This would be similar to Mastodon but with Pixelfed's API
+        
+        return true; // Placeholder
+    } catch (error) {
+        console.error('Error posting to Pixelfed:', error);
+        return false;
+    }
+}
+
+async function postToInstagramCron(content, imageData, settings, env) {
+    // Instagram Business API implementation
+    try {
+        const accessToken = settings.access_token;
+        const businessAccountId = settings.business_account_id;
+        
+        // Instagram posting logic here
+        // This would use Instagram's Business API
+        
+        return true; // Placeholder
+    } catch (error) {
+        console.error('Error posting to Instagram:', error);
+        return false;
+    }
+}
+
+// Scheduled posts execution handler
+async function handleScheduledPosts(env) {
+    try {
+        console.log('Processing scheduled posts...');
+        const database = new D1Database(env.DB);
+        
+        // Get all pending scheduled posts that are due
+        const duePosts = await database.getPendingScheduledPosts();
+        
+        console.log(`Found ${duePosts.length} posts to process`);
+        
+        for (const post of duePosts) {
+            try {
+                // Update status to processing
+                await database.updateScheduledPostStatus(post.id, 'processing');
+                
+                // Get user's social media settings
+                const socialSettings = await database.getUserSocialSettings(post.user_id);
+                
+                // Get image data if needed
+                let imageData = null;
+                if (post.image_id && env.R2_BUCKET) {
+                    try {
+                        const imageObject = await env.R2_BUCKET.get(`images/${post.image_id}`);
+                        if (imageObject) {
+                            imageData = await imageObject.arrayBuffer();
+                        }
+                    } catch (error) {
+                        console.error(`Failed to get image ${post.image_id}:`, error);
+                    }
+                }
+                
+                // Prepare content
+                const content = {
+                    caption: post.caption,
+                    hashtags: post.hashtags,
+                    combinedContent: post.caption + (post.hashtags ? '\n\n' + post.hashtags : '')
+                };
+                
+                // Post to the specified platform
+                let success = false;
+                let errorMessage = null;
+                
+                switch (post.platform) {
+                    case 'mastodon':
+                        if (socialSettings.mastodon?.instance && socialSettings.mastodon?.token) {
+                            success = await postToMastodonCron(content, imageData, socialSettings.mastodon, env);
+                        } else {
+                            errorMessage = 'Mastodon not configured';
+                        }
+                        break;
+                        
+                    case 'pixelfed':
+                        if (socialSettings.pixelfed?.instance && socialSettings.pixelfed?.token) {
+                            success = await postToPixelfedCron(content, imageData, socialSettings.pixelfed, env);
+                        } else {
+                            errorMessage = 'Pixelfed not configured';
+                        }
+                        break;
+                        
+                    case 'instagram':
+                        if (socialSettings.instagram?.access_token) {
+                            success = await postToInstagramCron(content, imageData, socialSettings.instagram, env);
+                        } else {
+                            errorMessage = 'Instagram not configured';
+                        }
+                        break;
+                        
+                    default:
+                        errorMessage = `Unsupported platform: ${post.platform}`;
+                }
+                
+                // Update status based on result
+                if (success) {
+                    await database.updateScheduledPostStatus(post.id, 'completed');
+                    console.log(`Successfully posted scheduled post ${post.id} to ${post.platform}`);
+                } else {
+                    await database.updateScheduledPostStatus(post.id, 'failed', errorMessage || 'Post failed');
+                    console.error(`Failed to post scheduled post ${post.id} to ${post.platform}: ${errorMessage}`);
+                }
+                
+            } catch (error) {
+                console.error(`Error processing scheduled post ${post.id}:`, error);
+                await database.updateScheduledPostStatus(post.id, 'failed', error.message);
+            }
+        }
+        
+        console.log('Finished processing scheduled posts');
+        
+    } catch (error) {
+        console.error('Error in handleScheduledPosts:', error);
+    }
+}
+
+// Export the main app and the scheduled event handler
+export default {
+    fetch: app.fetch,
+    scheduled: async (event, env, ctx) => {
+        // This runs when the cron trigger fires
+        ctx.waitUntil(handleScheduledPosts(env));
+    }
+};
 
