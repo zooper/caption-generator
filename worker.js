@@ -510,50 +510,55 @@ class D1Database {
     // Scheduled posts table
     async ensureScheduledPostsTable() {
         try {
-            // Check if table exists first
+            // Check if table exists and has correct schema
             const tableExists = await this.db.prepare(`
                 SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_posts'
             `).first();
             
-            if (!tableExists) {
-                // Create table with timezone column
+            if (tableExists) {
+                // Check if table has the correct column structure
+                const columns = await this.db.prepare(`
+                    PRAGMA table_info(scheduled_posts)
+                `).all();
+                
+                const hasCorrectSchema = columns.results?.some(col => col.name === 'caption');
+                
+                if (!hasCorrectSchema) {
+                    // Drop and recreate with correct schema for development
+                    console.log('Updating scheduled_posts table schema...');
+                    await this.db.prepare('DROP TABLE IF EXISTS scheduled_posts').run();
+                }
+            }
+            
+            // Create table if it doesn't exist or was just dropped
+            const tableExistsNow = await this.db.prepare(`
+                SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_posts'
+            `).first();
+            
+            if (!tableExistsNow) {
+                // Create table matching schema.sql
                 const stmt = this.db.prepare(`
                     CREATE TABLE scheduled_posts (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER NOT NULL,
-                        image_id INTEGER,
+                        image_id TEXT,
                         caption_id INTEGER,
-                        custom_caption TEXT,
-                        custom_hashtags TEXT,
+                        caption TEXT NOT NULL,
+                        hashtags TEXT,
                         platforms TEXT NOT NULL,
                         scheduled_time DATETIME NOT NULL,
-                        timezone TEXT,
                         status TEXT DEFAULT 'pending',
-                        attempts INTEGER DEFAULT 0,
                         error_message TEXT,
-                        posted_at DATETIME,
+                        attempts INTEGER DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users(id),
-                        FOREIGN KEY (image_id) REFERENCES uploaded_images(id),
-                        FOREIGN KEY (caption_id) REFERENCES caption_history(id)
+                        posted_at DATETIME,
+                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+                        FOREIGN KEY (caption_id) REFERENCES caption_history (id) ON DELETE SET NULL
                     )
                 `);
                 await stmt.run();
-            } else {
-                // Check if timezone column exists, add it if it doesn't
-                const columnExists = await this.db.prepare(`
-                    PRAGMA table_info(scheduled_posts)
-                `).all();
-                
-                const hasTimezone = columnExists.results?.some(col => col.name === 'timezone');
-                
-                if (!hasTimezone) {
-                    const alterStmt = this.db.prepare(`
-                        ALTER TABLE scheduled_posts ADD COLUMN timezone TEXT
-                    `);
-                    await alterStmt.run();
-                }
+                console.log('Created scheduled_posts table with correct schema');
             }
         } catch (error) {
             console.error('Error ensuring scheduled_posts table:', error);
@@ -639,6 +644,29 @@ class D1Database {
         try {
             await this.ensureScheduledPostsTable();
             
+            // Ensure we have a caption - use custom caption, or get from caption history, or provide default
+            let finalCaption = customCaption;
+            let finalHashtags = customHashtags;
+            
+            if (!finalCaption && captionId) {
+                // Get caption from caption history
+                const captionHistory = await this.db.prepare(`
+                    SELECT caption, hashtags FROM caption_history WHERE id = ?
+                `).bind(captionId).first();
+                
+                if (captionHistory) {
+                    finalCaption = captionHistory.caption;
+                    if (!finalHashtags) {
+                        finalHashtags = captionHistory.hashtags;
+                    }
+                }
+            }
+            
+            // If still no caption, provide a default
+            if (!finalCaption) {
+                finalCaption = 'Scheduled post';
+            }
+            
             const stmt = this.db.prepare(`
                 INSERT INTO scheduled_posts (
                     user_id, image_id, caption_id, caption, hashtags, platforms, scheduled_time
@@ -646,7 +674,7 @@ class D1Database {
             `);
             
             const result = await stmt.bind(
-                userId, imageId, captionId, customCaption, customHashtags,
+                userId, imageId, captionId, finalCaption, finalHashtags,
                 JSON.stringify(platforms), scheduledTime
             ).run();
             
@@ -827,8 +855,10 @@ class D1Database {
                 WHERE id = ? AND user_id = ? AND status = 'pending'
             `);
             
-            const result = await stmt.bind(scheduledTime, caption, hashtags, postId, userId).run();
-            return result.changes > 0;
+            const result = await stmt.bind(scheduledTime, caption, hashtags, parseInt(postId), userId).run();
+            
+            // In D1, changes count is in result.meta.changes
+            return result.meta?.changes > 0 || false;
         } catch (error) {
             console.error('Error updating scheduled post:', error);
             return false;
@@ -5837,6 +5867,11 @@ app.put('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
         const { scheduledTime, caption, hashtags, timezone } = await c.req.json();
         const database = new D1Database(c.env.DB);
         
+        // Validate required fields
+        if (!scheduledTime) {
+            return c.json({ error: 'Scheduled time is required' }, 400);
+        }
+        
         // Validate scheduled time is in the future
         const scheduledDate = new Date(scheduledTime);
         if (scheduledDate <= new Date()) {
@@ -5854,11 +5889,55 @@ app.put('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
         if (success) {
             return c.json({ success: true });
         } else {
-            return c.json({ error: 'Failed to update scheduled post' }, 500);
+            return c.json({ error: 'Failed to update scheduled post - no matching post found or post is not pending' }, 400);
         }
     } catch (error) {
         console.error('Error updating scheduled post:', error);
-        return c.json({ error: 'Failed to update scheduled post' }, 500);
+        return c.json({ error: 'Failed to update scheduled post: ' + error.message }, 500);
+    }
+});
+
+// Serve images from R2 storage
+app.get('/api/images/:imageId', async (c) => {
+    try {
+        const imageId = c.req.param('imageId');
+        
+        if (!c.env.R2_BUCKET) {
+            return c.text('R2 storage not configured', 500);
+        }
+        
+        const imageObject = await c.env.R2_BUCKET.get(`images/${imageId}`);
+        
+        if (!imageObject) {
+            return c.text('Image not found', 404);
+        }
+        
+        const headers = new Headers();
+        headers.set('Content-Type', imageObject.httpMetadata?.contentType || 'image/jpeg');
+        headers.set('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+        
+        return new Response(imageObject.body, { headers });
+    } catch (error) {
+        console.error('Error serving image:', error);
+        return c.text('Failed to serve image', 500);
+    }
+});
+
+// Manual trigger for scheduled posts (for local testing)
+app.get('/api/trigger-scheduled-posts', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        if (!user.isAdmin) {
+            return c.json({ error: 'Admin access required' }, 403);
+        }
+        
+        console.log('Manually triggering scheduled posts processing...');
+        await handleScheduledPosts(c.env);
+        
+        return c.json({ success: true, message: 'Scheduled posts processing triggered' });
+    } catch (error) {
+        console.error('Error triggering scheduled posts:', error);
+        return c.json({ error: 'Failed to trigger scheduled posts: ' + error.message }, 500);
     }
 });
 
