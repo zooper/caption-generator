@@ -3793,11 +3793,28 @@ app.get('/auth/instagram/callback', async (c) => {
                     console.log('Token exchange successful');
                     const accessToken = tokenData.access_token;
                     
+                    // Step 0: Exchange short-lived token for long-lived token
+                    console.log('Exchanging for long-lived Instagram token...');
+                    const longLivedTokenResponse = await fetch(`https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${c.env.INSTAGRAM_APP_SECRET}&access_token=${accessToken}`);
+                    
+                    let finalAccessToken = accessToken;
+                    let tokenExpiresIn = 3600; // Default 1 hour for short-lived tokens
+                    
+                    if (longLivedTokenResponse.ok) {
+                        const longLivedData = await longLivedTokenResponse.json();
+                        console.log('Long-lived token exchange successful, expires in:', longLivedData.expires_in, 'seconds');
+                        finalAccessToken = longLivedData.access_token;
+                        tokenExpiresIn = longLivedData.expires_in; // Usually 60 days (5184000 seconds)
+                    } else {
+                        const errorData = await longLivedTokenResponse.text();
+                        console.warn('Long-lived token exchange failed, using short-lived token:', errorData);
+                    }
+                    
                     // For Instagram Business API, we need to get the Instagram Business Account ID
                     // This is different from the personal Instagram account ID
                     
                     // Step 1: Get user's connected accounts
-                    const pagesResponse = await fetch(`https://graph.facebook.com/me/accounts?access_token=${accessToken}`);
+                    const pagesResponse = await fetch(`https://graph.facebook.com/me/accounts?access_token=${finalAccessToken}`);
                     
                     let instagramBusinessAccountId = null;
                     let instagramUsername = 'Unknown';
@@ -3810,14 +3827,14 @@ app.get('/auth/instagram/callback', async (c) => {
                         // Step 2: Find Instagram Business Account connected to the Facebook page
                         for (const page of pagesData.data || []) {
                             try {
-                                const igAccountResponse = await fetch(`https://graph.facebook.com/${page.id}?fields=instagram_business_account&access_token=${accessToken}`);
+                                const igAccountResponse = await fetch(`https://graph.facebook.com/${page.id}?fields=instagram_business_account&access_token=${finalAccessToken}`);
                                 if (igAccountResponse.ok) {
                                     const igAccountData = await igAccountResponse.json();
                                     if (igAccountData.instagram_business_account) {
                                         instagramBusinessAccountId = igAccountData.instagram_business_account.id;
                                         
                                         // Get Instagram account details
-                                        const igDetailsResponse = await fetch(`https://graph.facebook.com/${instagramBusinessAccountId}?fields=username,account_type&access_token=${accessToken}`);
+                                        const igDetailsResponse = await fetch(`https://graph.facebook.com/${instagramBusinessAccountId}?fields=username,account_type&access_token=${finalAccessToken}`);
                                         if (igDetailsResponse.ok) {
                                             const igDetailsData = await igDetailsResponse.json();
                                             instagramUsername = igDetailsData.username || 'Unknown';
@@ -3834,7 +3851,7 @@ app.get('/auth/instagram/callback', async (c) => {
                     
                     // Fallback: try to get personal Instagram account info if no business account found
                     if (!instagramBusinessAccountId) {
-                        const userResponse = await fetch(`https://graph.instagram.com/me?fields=id,username,account_type&access_token=${accessToken}`);
+                        const userResponse = await fetch(`https://graph.instagram.com/me?fields=id,username,account_type&access_token=${finalAccessToken}`);
                         if (userResponse.ok) {
                             const userData = await userResponse.json();
                             instagramBusinessAccountId = userData.id;
@@ -3869,8 +3886,14 @@ app.get('/auth/instagram/callback', async (c) => {
                         
                         if (userId) {
                             try {
-                                // Save Instagram access token
-                                await database.setUserSetting(userId, 'social', 'instagram_access_token', accessToken, true);
+                                // Calculate token expiration date
+                                const expiresAt = new Date(Date.now() + (tokenExpiresIn * 1000)).toISOString();
+                                
+                                // Save Instagram access token (long-lived)
+                                await database.setUserSetting(userId, 'social', 'instagram_access_token', finalAccessToken, true);
+                                
+                                // Save token expiration date
+                                await database.setUserSetting(userId, 'social', 'instagram_token_expires_at', expiresAt, false);
                                 
                                 // Save Instagram Business Account ID (this is what we need for posting)
                                 await database.setUserSetting(userId, 'social', 'instagram_account_id', instagramBusinessAccountId, false);
@@ -3892,6 +3915,8 @@ app.get('/auth/instagram/callback', async (c) => {
                                 <p>Your Instagram business account @${instagramUsername} is now connected.</p>
                                 <p>Account Type: ${instagramAccountType}</p>
                                 <p>Business Account ID: ${instagramBusinessAccountId}</p>
+                                <p>Token Type: ${tokenExpiresIn > 86400 ? 'Long-lived (60 days)' : 'Short-lived (1 hour)'}</p>
+                                <p>Expires: ${new Date(Date.now() + (tokenExpiresIn * 1000)).toLocaleDateString()}</p>
                                 <p>Redirecting you back to settings...</p>
                                 
                                 <script>
@@ -4143,6 +4168,156 @@ app.post('/api/user/post/instagram', authenticateToken, async (c) => {
         return c.json({ error: 'Failed to post to Instagram: ' + error.message }, 500);
     }
 });
+
+// Instagram token refresh function
+async function refreshInstagramToken(accessToken, env) {
+    try {
+        console.log('Refreshing Instagram long-lived token...');
+        
+        // Refresh the long-lived token (extends expiration by another 60 days)
+        const refreshResponse = await fetch(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${accessToken}`);
+        
+        if (refreshResponse.ok) {
+            const refreshData = await refreshResponse.json();
+            console.log('Token refresh successful, new expiration:', refreshData.expires_in, 'seconds');
+            
+            return {
+                success: true,
+                access_token: refreshData.access_token,
+                expires_in: refreshData.expires_in,
+                expires_at: new Date(Date.now() + (refreshData.expires_in * 1000)).toISOString()
+            };
+        } else {
+            const errorData = await refreshResponse.text();
+            console.error('Token refresh failed:', errorData);
+            
+            return {
+                success: false,
+                error: errorData
+            };
+        }
+    } catch (error) {
+        console.error('Token refresh error:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// Check and refresh Instagram tokens that are nearing expiration
+async function checkAndRefreshInstagramTokens(database, env) {
+    const result = {
+        usersChecked: 0,
+        tokensRefreshed: 0,
+        tokensExpiringSoon: 0,
+        errors: [],
+        details: []
+    };
+    
+    try {
+        console.log('Checking Instagram tokens for expiration...');
+        
+        // Get all users with Instagram tokens
+        const stmt = database.db.prepare(`
+            SELECT DISTINCT user_id 
+            FROM user_settings 
+            WHERE integration_type = 'social' 
+            AND setting_key = 'instagram_access_token'
+            AND setting_value IS NOT NULL 
+            AND setting_value != ''
+        `);
+        
+        const users = await stmt.all();
+        const userList = users.results || [];
+        
+        console.log(`Found ${userList.length} users with Instagram tokens`);
+        result.usersChecked = userList.length;
+        
+        for (const userRow of userList) {
+            const userId = userRow.user_id;
+            
+            try {
+                // Get user's Instagram settings
+                const settings = await database.getUserSettings(userId, 'social');
+                let accessToken = null;
+                let expiresAt = null;
+                
+                settings.forEach(setting => {
+                    if (setting.setting_key === 'instagram_access_token') {
+                        accessToken = setting.setting_value;
+                    } else if (setting.setting_key === 'instagram_token_expires_at') {
+                        expiresAt = setting.setting_value;
+                    }
+                });
+                
+                if (!accessToken || !expiresAt) {
+                    console.log(`User ${userId}: Missing token or expiration date, skipping`);
+                    result.details.push({ userId, status: 'skipped', reason: 'Missing token or expiration date' });
+                    continue;
+                }
+                
+                const expirationDate = new Date(expiresAt);
+                const now = new Date();
+                const daysUntilExpiration = (expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+                
+                console.log(`User ${userId}: Token expires in ${daysUntilExpiration.toFixed(1)} days`);
+                
+                // Refresh if token expires within 7 days
+                if (daysUntilExpiration <= 7) {
+                    result.tokensExpiringSoon++;
+                    console.log(`User ${userId}: Refreshing token (expires soon)`);
+                    
+                    const refreshResult = await refreshInstagramToken(accessToken, env);
+                    
+                    if (refreshResult.success) {
+                        // Update token and expiration date in database
+                        await database.setUserSetting(userId, 'social', 'instagram_access_token', refreshResult.access_token, true);
+                        await database.setUserSetting(userId, 'social', 'instagram_token_expires_at', refreshResult.expires_at, false);
+                        
+                        result.tokensRefreshed++;
+                        console.log(`User ${userId}: Token refreshed successfully, new expiration: ${refreshResult.expires_at}`);
+                        result.details.push({ 
+                            userId, 
+                            status: 'refreshed', 
+                            oldExpiration: expiresAt,
+                            newExpiration: refreshResult.expires_at,
+                            daysUntilExpiration: daysUntilExpiration.toFixed(1)
+                        });
+                    } else {
+                        console.error(`User ${userId}: Token refresh failed:`, refreshResult.error);
+                        result.errors.push(`User ${userId}: ${refreshResult.error}`);
+                        result.details.push({ 
+                            userId, 
+                            status: 'failed', 
+                            error: refreshResult.error,
+                            daysUntilExpiration: daysUntilExpiration.toFixed(1)
+                        });
+                    }
+                } else {
+                    result.details.push({ 
+                        userId, 
+                        status: 'ok', 
+                        daysUntilExpiration: daysUntilExpiration.toFixed(1),
+                        expiresAt 
+                    });
+                }
+            } catch (error) {
+                console.error(`Error processing user ${userId}:`, error);
+                result.errors.push(`User ${userId}: ${error.message}`);
+                result.details.push({ userId, status: 'error', error: error.message });
+            }
+        }
+        
+        console.log('Instagram token check completed:', result);
+        return result;
+        
+    } catch (error) {
+        console.error('Error checking Instagram tokens:', error);
+        result.errors.push(`General error: ${error.message}`);
+        return result;
+    }
+}
 
 // Instagram webhook endpoints (required for Facebook app verification)
 // Public image serving endpoint for Instagram and other external services
@@ -5282,6 +5457,71 @@ app.get('/test-worker', (c) => {
   return c.json({ message: 'Worker is running', timestamp: new Date().toISOString() });
 });
 
+// Instagram token refresh endpoint (can be called manually or via cron job)
+app.post('/api/maintenance/refresh-instagram-tokens', authenticateToken, async (c) => {
+    const user = c.get('user');
+    
+    // Only allow admins to trigger token refresh
+    if (!user || !user.isAdmin) {
+        return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    try {
+        const database = new D1Database(c.env.DB);
+        const refreshResult = await checkAndRefreshInstagramTokens(database, c.env);
+        
+        return c.json({
+            success: true,
+            message: 'Instagram token refresh completed',
+            ...refreshResult
+        });
+    } catch (error) {
+        console.error('Error in Instagram token refresh endpoint:', error);
+        return c.json({ 
+            error: 'Failed to refresh Instagram tokens',
+            details: error.message 
+        }, 500);
+    }
+});
+
+// Background maintenance endpoint (can be called by external cron services)
+app.get('/api/cron/maintenance', async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        const results = {
+            instagram_token_refresh: null,
+            timestamp: new Date().toISOString()
+        };
+
+        // Refresh Instagram tokens
+        try {
+            const refreshResult = await checkAndRefreshInstagramTokens(database, c.env);
+            results.instagram_token_refresh = {
+                success: true,
+                ...refreshResult
+            };
+        } catch (error) {
+            console.error('Instagram token refresh failed in cron job:', error);
+            results.instagram_token_refresh = {
+                success: false,
+                error: error.message
+            };
+        }
+
+        return c.json({
+            success: true,
+            message: 'Maintenance tasks completed',
+            results
+        });
+    } catch (error) {
+        console.error('Error in maintenance cron job:', error);
+        return c.json({ 
+            error: 'Maintenance tasks failed',
+            details: error.message 
+        }, 500);
+    }
+});
+
 // Static page routes - serve HTML files for main application pages
 // These routes serve the actual HTML pages (not API endpoints)
 
@@ -5297,6 +5537,39 @@ app.get('/admin/tiers', async (c) => {
   return c.redirect('/admin-tiers.html');
 });
 
+
+// Scheduled event handler for cron jobs
+export async function scheduled(event, env, ctx) {
+    switch (event.cron) {
+        case '0 6 * * *': // Instagram token refresh job
+            ctx.waitUntil(handleInstagramTokenRefresh(env));
+            break;
+        default:
+            console.log('Unknown scheduled event:', event.cron);
+    }
+}
+
+// Handle Instagram token refresh scheduled job
+async function handleInstagramTokenRefresh(env) {
+    try {
+        console.log('Starting scheduled Instagram token refresh job');
+        const database = new D1Database(env.DB);
+        const refreshResult = await checkAndRefreshInstagramTokens(database, env);
+        
+        console.log('Scheduled Instagram token refresh completed:', refreshResult);
+        
+        // Optionally, you could send an admin notification here if needed
+        if (refreshResult.errors?.length > 0) {
+            console.error('Instagram token refresh had errors:', refreshResult.errors);
+        }
+        
+        return refreshResult;
+    } catch (error) {
+        console.error('Scheduled Instagram token refresh failed:', error);
+        // You could add error notification logic here
+        throw error;
+    }
+}
 
 export default app;
 

@@ -33,3 +33,8 @@ ADMIN_EMAIL = "tomas@jonsson.io"
 # - OPENAI_API_KEY  
 # - SMTP_PASSWORD (Resend API key)
 # - OPENWEATHER_API_KEY
+
+# Scheduled events (cron jobs)
+[[triggers.crons]]
+cron = "0 6 * * *"  # Daily at 6 AM UTC
+name = "instagram-token-refresh"
