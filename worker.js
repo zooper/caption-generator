@@ -77,7 +77,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 12;
+        this.CURRENT_SCHEMA_VERSION = 13;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -147,6 +147,13 @@ class D1Database {
                 console.log('Running migration: Add custom prompts table (v12)');
                 await this.migration_v12();
                 await this.setSchemaVersion(12);
+            }
+            
+            // Migration to version 13: Add file_hash and source columns to uploaded_images
+            if (fromVersion < 13) {
+                console.log('Running migration: Add file_hash and source columns (v13)');
+                await this.migration_v13();
+                await this.setSchemaVersion(13);
             }
         } catch (error) {
             console.error('Migration failed:', error);
@@ -474,6 +481,62 @@ class D1Database {
         }
     }
 
+    // Caption history table
+    async ensureCaptionHistoryTable() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS caption_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    image_id INTEGER,
+                    caption TEXT NOT NULL,
+                    hashtags TEXT,
+                    alt_text TEXT,
+                    style TEXT NOT NULL,
+                    context_data TEXT,
+                    weather_data TEXT,
+                    used_count INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    FOREIGN KEY (image_id) REFERENCES uploaded_images(id)
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.error('Error creating caption_history table:', error);
+        }
+    }
+
+    // Scheduled posts table
+    async ensureScheduledPostsTable() {
+        try {
+            const stmt = this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS scheduled_posts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    image_id INTEGER,
+                    caption_id INTEGER,
+                    custom_caption TEXT,
+                    custom_hashtags TEXT,
+                    platforms TEXT NOT NULL,
+                    scheduled_time DATETIME NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    attempts INTEGER DEFAULT 0,
+                    error_message TEXT,
+                    posted_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    FOREIGN KEY (image_id) REFERENCES uploaded_images(id),
+                    FOREIGN KEY (caption_id) REFERENCES caption_history(id)
+                )
+            `);
+            await stmt.run();
+        } catch (error) {
+            console.error('Error creating scheduled_posts table:', error);
+        }
+    }
+
     async getAllSystemSettings() {
         try {
             // Ensure table exists first
@@ -486,6 +549,182 @@ class D1Database {
             return result.results || [];
         } catch (error) {
             return [];
+        }
+    }
+
+    // Caption history methods
+    async saveCaptionHistory(userId, imageId, caption, hashtags, altText, style, contextData = null, weatherData = null) {
+        try {
+            await this.ensureCaptionHistoryTable();
+            
+            const stmt = this.db.prepare(`
+                INSERT INTO caption_history (
+                    user_id, image_id, caption, hashtags, alt_text, style, 
+                    context_data, weather_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+            
+            const result = await stmt.bind(
+                userId, imageId, caption, hashtags, altText, style,
+                contextData ? JSON.stringify(contextData) : null,
+                weatherData ? JSON.stringify(weatherData) : null
+            ).run();
+            
+            return result.meta.last_row_id;
+        } catch (error) {
+            console.error('Error saving caption history:', error);
+            return null;
+        }
+    }
+
+    async getCaptionHistoryForImage(userId, imageId) {
+        try {
+            await this.ensureCaptionHistoryTable();
+            
+            const stmt = this.db.prepare(`
+                SELECT * FROM caption_history 
+                WHERE user_id = ? AND image_id = ?
+                ORDER BY created_at DESC
+            `);
+            
+            const result = await stmt.bind(userId, imageId).all();
+            return result.results || [];
+        } catch (error) {
+            console.error('Error getting caption history:', error);
+            return [];
+        }
+    }
+
+    async incrementCaptionUsage(captionId) {
+        try {
+            const stmt = this.db.prepare(`
+                UPDATE caption_history 
+                SET used_count = used_count + 1 
+                WHERE id = ?
+            `);
+            
+            await stmt.bind(captionId).run();
+            return true;
+        } catch (error) {
+            console.error('Error incrementing caption usage:', error);
+            return false;
+        }
+    }
+
+    // Scheduled posts methods
+    async createScheduledPost(userId, imageId, captionId, customCaption, customHashtags, platforms, scheduledTime) {
+        try {
+            await this.ensureScheduledPostsTable();
+            
+            const stmt = this.db.prepare(`
+                INSERT INTO scheduled_posts (
+                    user_id, image_id, caption_id, custom_caption, custom_hashtags,
+                    platforms, scheduled_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            `);
+            
+            const result = await stmt.bind(
+                userId, imageId, captionId, customCaption, customHashtags,
+                JSON.stringify(platforms), scheduledTime
+            ).run();
+            
+            return result.meta.last_row_id;
+        } catch (error) {
+            console.error('Error creating scheduled post:', error);
+            return null;
+        }
+    }
+
+    async getScheduledPosts(userId, status = null) {
+        try {
+            await this.ensureScheduledPostsTable();
+            
+            let query = `
+                SELECT sp.*, ui.filename, ui.mime_type, ch.caption, ch.hashtags, ch.style
+                FROM scheduled_posts sp
+                LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
+                LEFT JOIN caption_history ch ON sp.caption_id = ch.id
+                WHERE sp.user_id = ?
+            `;
+            
+            const params = [userId];
+            
+            if (status) {
+                query += ` AND sp.status = ?`;
+                params.push(status);
+            }
+            
+            query += ` ORDER BY sp.scheduled_time ASC`;
+            
+            const stmt = this.db.prepare(query);
+            const result = await stmt.bind(...params).all();
+            return result.results || [];
+        } catch (error) {
+            console.error('Error getting scheduled posts:', error);
+            return [];
+        }
+    }
+
+    async getPendingScheduledPosts() {
+        try {
+            await this.ensureScheduledPostsTable();
+            
+            const stmt = this.db.prepare(`
+                SELECT sp.*, ui.filename, ui.mime_type, ui.r2_key, ch.caption, ch.hashtags
+                FROM scheduled_posts sp
+                LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
+                LEFT JOIN caption_history ch ON sp.caption_id = ch.id
+                WHERE sp.status = 'pending' 
+                AND sp.scheduled_time <= datetime('now')
+                ORDER BY sp.scheduled_time ASC
+            `);
+            
+            const result = await stmt.all();
+            return result.results || [];
+        } catch (error) {
+            console.error('Error getting pending scheduled posts:', error);
+            return [];
+        }
+    }
+
+    async updateScheduledPostStatus(postId, status, errorMessage = null) {
+        try {
+            let stmt;
+            if (status === 'completed') {
+                stmt = this.db.prepare(`
+                    UPDATE scheduled_posts 
+                    SET status = ?, posted_at = datetime('now'), updated_at = datetime('now')
+                    WHERE id = ?
+                `);
+                await stmt.bind(status, postId).run();
+            } else {
+                stmt = this.db.prepare(`
+                    UPDATE scheduled_posts 
+                    SET status = ?, error_message = ?, attempts = attempts + 1, updated_at = datetime('now')
+                    WHERE id = ?
+                `);
+                await stmt.bind(status, errorMessage, postId).run();
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('Error updating scheduled post status:', error);
+            return false;
+        }
+    }
+
+    async deleteScheduledPost(userId, postId) {
+        try {
+            const stmt = this.db.prepare(`
+                DELETE FROM scheduled_posts 
+                WHERE id = ? AND user_id = ?
+            `);
+            
+            await stmt.bind(postId, userId).run();
+            return true;
+        } catch (error) {
+            console.error('Error deleting scheduled post:', error);
+            return false;
         }
     }
 
@@ -842,6 +1081,31 @@ class D1Database {
         }
     }
 
+    // Database migration for image library columns (v13)
+    async migration_v13() {
+        try {
+            // Add file_hash column to uploaded_images table
+            await this.db.prepare(`
+                ALTER TABLE uploaded_images ADD COLUMN file_hash TEXT
+            `).run();
+            
+            // Add source column to uploaded_images table  
+            await this.db.prepare(`
+                ALTER TABLE uploaded_images ADD COLUMN source TEXT DEFAULT 'lightroom'
+            `).run();
+            
+            // Add location column to uploaded_images table
+            await this.db.prepare(`
+                ALTER TABLE uploaded_images ADD COLUMN location TEXT
+            `).run();
+            
+            console.log('Migration v13 completed: Added file_hash, source, and location columns');
+        } catch (error) {
+            console.error('Migration v13 failed:', error);
+            // Some columns might already exist, so we'll continue
+        }
+    }
+
     // API Key Management Methods
     async getUserApiKeys(userId) {
         try {
@@ -1135,6 +1399,136 @@ class D1Database {
             return result;
         } catch (error) {
             console.error('Failed to get custom prompt by id:', error);
+            return null;
+        }
+    }
+
+    // Image Library Methods
+    async storeWebImage(userId, filename, fileSize, mimeType, imageHash, r2Key, originalImageData = null) {
+        try {
+            await this.ensureInitialized();
+            
+            const stmt = this.db.prepare(`
+                INSERT INTO uploaded_images (
+                    id, user_id, filename, original_filename, file_size, mime_type, 
+                    file_hash, r2_key, uploaded_at, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'web')
+                RETURNING id
+            `);
+            
+            // Generate a unique ID for the image
+            const imageId = generateRandomId();
+            
+            const result = await stmt.bind(
+                imageId, userId, filename, filename, fileSize, mimeType, imageHash, r2Key
+            ).first();
+            
+            return result ? result.id : null;
+        } catch (error) {
+            console.error('Error storing web image:', error);
+            return null;
+        }
+    }
+
+    async getImageLibrary(userId, limit = 50, offset = 0) {
+        try {
+            await this.ensureInitialized();
+            
+            const stmt = this.db.prepare(`
+                SELECT 
+                    ui.id,
+                    ui.original_filename,
+                    ui.file_size,
+                    ui.mime_type,
+                    ui.uploaded_at as created_at,
+                    ui.r2_key,
+                    COUNT(ch.id) as caption_count
+                FROM uploaded_images ui
+                LEFT JOIN caption_history ch ON ui.id = ch.image_id
+                WHERE ui.user_id = ? AND ui.source IN ('web', 'lightroom')
+                GROUP BY ui.id
+                ORDER BY ui.uploaded_at DESC
+                LIMIT ? OFFSET ?
+            `);
+            
+            const result = await stmt.bind(userId, limit, offset).all();
+            return result.results || [];
+        } catch (error) {
+            console.error('Error getting image library:', error);
+            return [];
+        }
+    }
+
+    async getImageWithCaptions(userId, imageId) {
+        try {
+            await this.ensureInitialized();
+            
+            // Get image details
+            const imageStmt = this.db.prepare(`
+                SELECT * FROM uploaded_images 
+                WHERE id = ? AND user_id = ?
+            `);
+            const image = await imageStmt.bind(imageId, userId).first();
+            
+            if (!image) {
+                return null;
+            }
+            
+            // Get caption history for this image
+            const captionsStmt = this.db.prepare(`
+                SELECT * FROM caption_history 
+                WHERE image_id = ? AND user_id = ?
+                ORDER BY created_at DESC
+            `);
+            const captionsResult = await captionsStmt.bind(imageId, userId).all();
+            const captions = captionsResult.results || [];
+            
+            return {
+                image: image,
+                captions: captions
+            };
+        } catch (error) {
+            console.error('Error getting image with captions:', error);
+            return null;
+        }
+    }
+
+    async deleteImageLibraryEntry(userId, imageId) {
+        try {
+            await this.ensureInitialized();
+            
+            // Start a transaction to delete image and all related data
+            const batch = [
+                // Delete caption history first (foreign key constraint)
+                this.db.prepare(`DELETE FROM caption_history WHERE image_id = ? AND user_id = ?`).bind(imageId, userId),
+                // Delete scheduled posts
+                this.db.prepare(`DELETE FROM scheduled_posts WHERE image_id = ? AND user_id = ?`).bind(imageId, userId),
+                // Delete the image record
+                this.db.prepare(`DELETE FROM uploaded_images WHERE id = ? AND user_id = ?`).bind(imageId, userId)
+            ];
+            
+            const results = await this.db.batch(batch);
+            return true;
+        } catch (error) {
+            console.error('Error deleting image library entry:', error);
+            return false;
+        }
+    }
+
+    async getImageByHash(userId, imageHash) {
+        try {
+            await this.ensureInitialized();
+            
+            const stmt = this.db.prepare(`
+                SELECT * FROM uploaded_images 
+                WHERE user_id = ? AND file_hash = ?
+                ORDER BY uploaded_at DESC
+                LIMIT 1
+            `);
+            
+            return await stmt.bind(userId, imageHash).first();
+        } catch (error) {
+            console.error('Error getting image by hash:', error);
             return null;
         }
     }
@@ -5040,6 +5434,101 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     const data = await response.json();
     const responseContent = data.choices[0].message.content;
     
+    // Parse the response content to extract caption, hashtags, and alt text
+    let caption = '', hashtags = '', altText = '';
+    try {
+        const lines = responseContent.split('\n');
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith('CAPTION:')) {
+                caption = trimmedLine.replace('CAPTION:', '').trim();
+            } else if (trimmedLine.startsWith('HASHTAGS:')) {
+                hashtags = trimmedLine.replace('HASHTAGS:', '').trim();
+            } else if (trimmedLine.startsWith('ALT_TEXT:')) {
+                altText = trimmedLine.replace('ALT_TEXT:', '').trim();
+            }
+        }
+    } catch (parseError) {
+        console.error('Error parsing caption response:', parseError);
+        // Fallback: use entire response as caption
+        caption = responseContent;
+    }
+    
+    // Store web-uploaded image and save to caption history
+    let imageId = context.imageId; // Use existing imageId if provided
+    let captionHistoryId = null;
+    
+    // If no imageId provided, this is a new web upload - store it
+    if (!imageId && caption) {
+        try {
+            // Generate image hash for deduplication
+            // Convert base64 to ArrayBuffer for Cloudflare Workers
+            const binaryString = atob(base64Image);
+            const imageBuffer = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                imageBuffer[i] = binaryString.charCodeAt(i);
+            }
+            
+            const imageHash = await crypto.subtle.digest('SHA-256', imageBuffer)
+                .then(hashBuffer => Array.from(new Uint8Array(hashBuffer))
+                    .map(b => b.toString(16).padStart(2, '0')).join(''));
+            
+            // Check if we already have this image
+            const existingImage = await database.getImageByHash(user.id, imageHash);
+            
+            if (existingImage) {
+                imageId = existingImage.id;
+            } else {
+                // Store new image in R2 if available
+                let r2Key = null;
+                if (c.env.R2_BUCKET) {
+                    try {
+                        r2Key = `images/${user.id}/${Date.now()}-${imageHash.substring(0, 8)}.jpg`;
+                        await c.env.R2_BUCKET.put(r2Key, imageBuffer, {
+                            httpMetadata: {
+                                contentType: 'image/jpeg'
+                            }
+                        });
+                    } catch (r2Error) {
+                        console.error('Error storing image in R2:', r2Error);
+                        // Continue without R2 storage
+                    }
+                }
+                
+                // Store image metadata in database
+                imageId = await database.storeWebImage(
+                    user.id,
+                    'web-upload.jpg', // Default filename for web uploads
+                    imageBuffer.length,
+                    'image/jpeg',
+                    imageHash,
+                    r2Key
+                );
+            }
+        } catch (imageError) {
+            console.error('Error storing web image:', imageError);
+            // Continue without storing image
+        }
+    }
+    
+    // Save to caption history
+    if (caption) {
+        try {
+            captionHistoryId = await database.saveCaptionHistory(
+                user.id,
+                imageId,
+                caption,
+                hashtags,
+                altText,
+                style,
+                context,
+                extractedData?.weatherData
+            );
+        } catch (historyError) {
+            console.error('Error saving caption history:', historyError);
+        }
+    }
+    
     // Log the query and increment usage
     const queryId = generateRandomId();
     
@@ -5055,7 +5544,10 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     const usageResult = await database.incrementDailyUsage(user.id);
     
     // Include extracted data in response if available
-    const responseData = { content: responseContent };
+    const responseData = { 
+        content: responseContent,
+        captionHistoryId: captionHistoryId
+    };
     if (extractedData) {
         if (extractedData.weatherData) responseData.weatherData = extractedData.weatherData;
         if (extractedData.locationName) responseData.locationName = extractedData.locationName;
@@ -5077,6 +5569,121 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
   } catch (error) {
     return c.json({ error: 'Internal server error' }, 500);
   }
+});
+
+// Caption history API endpoints
+app.get('/api/caption-history/:imageId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const imageId = c.req.param('imageId');
+        const database = new D1Database(c.env.DB);
+        
+        const history = await database.getCaptionHistoryForImage(user.id, parseInt(imageId));
+        return c.json({ history });
+    } catch (error) {
+        console.error('Error getting caption history:', error);
+        return c.json({ error: 'Failed to load caption history' }, 500);
+    }
+});
+
+app.post('/api/caption-history/:captionId/use', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const captionId = c.req.param('captionId');
+        const database = new D1Database(c.env.DB);
+        
+        await database.incrementCaptionUsage(parseInt(captionId));
+        return c.json({ success: true });
+    } catch (error) {
+        console.error('Error incrementing caption usage:', error);
+        return c.json({ error: 'Failed to update caption usage' }, 500);
+    }
+});
+
+// Scheduled posts API endpoints
+app.get('/api/scheduled-posts', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const status = c.req.query('status');
+        const database = new D1Database(c.env.DB);
+        
+        const posts = await database.getScheduledPosts(user.id, status);
+        
+        // Parse platforms from JSON string
+        const parsedPosts = posts.map(post => {
+            try {
+                post.platforms = JSON.parse(post.platforms);
+            } catch (e) {
+                post.platforms = [];
+            }
+            return post;
+        });
+        
+        return c.json({ posts: parsedPosts });
+    } catch (error) {
+        console.error('Error getting scheduled posts:', error);
+        return c.json({ error: 'Failed to load scheduled posts' }, 500);
+    }
+});
+
+app.post('/api/scheduled-posts', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { imageId, captionId, customCaption, customHashtags, platforms, scheduledTime } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        
+        if (!platforms || platforms.length === 0) {
+            return c.json({ error: 'At least one platform must be selected' }, 400);
+        }
+        
+        if (!scheduledTime) {
+            return c.json({ error: 'Scheduled time is required' }, 400);
+        }
+        
+        // Validate scheduled time is in the future
+        const scheduledDate = new Date(scheduledTime);
+        if (scheduledDate <= new Date()) {
+            return c.json({ error: 'Scheduled time must be in the future' }, 400);
+        }
+        
+        const postId = await database.createScheduledPost(
+            user.id,
+            imageId || null,
+            captionId || null,
+            customCaption || null,
+            customHashtags || null,
+            platforms,
+            scheduledTime
+        );
+        
+        if (postId) {
+            return c.json({ success: true, postId });
+        } else {
+            return c.json({ error: 'Failed to create scheduled post' }, 500);
+        }
+    } catch (error) {
+        console.error('Error creating scheduled post:', error);
+        return c.json({ error: 'Failed to create scheduled post' }, 500);
+    }
+});
+
+app.delete('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const postId = c.req.param('postId');
+        const database = new D1Database(c.env.DB);
+        
+        const success = await database.deleteScheduledPost(user.id, parseInt(postId));
+        
+        if (success) {
+            return c.json({ success: true });
+        } else {
+            return c.json({ error: 'Failed to delete scheduled post' }, 500);
+        }
+    } catch (error) {
+        console.error('Error deleting scheduled post:', error);
+        return c.json({ error: 'Failed to delete scheduled post' }, 500);
+    }
 });
 
 // Test page route to debug JavaScript
@@ -5295,6 +5902,128 @@ app.get('/admin/users', async (c) => {
 app.get('/admin/tiers', async (c) => {
   // Serve the admin-tiers.html file
   return c.redirect('/admin-tiers.html');
+});
+
+// Image Library API Endpoints
+app.get('/api/image-library', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        const images = await database.getImageLibrary(user.id);
+        
+        return c.json({
+            success: true,
+            images: images
+        });
+    } catch (error) {
+        console.error('Error loading image library:', error);
+        return c.json({ error: 'Failed to load image library' }, 500);
+    }
+});
+
+app.get('/api/image-library/:id/captions', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const imageId = c.req.param('id');
+        const database = new D1Database(c.env.DB);
+        
+        const imageWithCaptions = await database.getImageWithCaptions(user.id, imageId);
+        
+        if (!imageWithCaptions) {
+            return c.json({ error: 'Image not found' }, 404);
+        }
+        
+        return c.json({
+            success: true,
+            image: imageWithCaptions.image,
+            captions: imageWithCaptions.captions
+        });
+    } catch (error) {
+        console.error('Error loading image captions:', error);
+        return c.json({ error: 'Failed to load image captions' }, 500);
+    }
+});
+
+app.get('/api/image-library/:id/preview', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const imageId = c.req.param('id');
+        const database = new D1Database(c.env.DB);
+        
+        // Get image details
+        const imageData = await database.getImageWithCaptions(user.id, imageId);
+        
+        if (!imageData || !imageData.image) {
+            return c.json({ error: 'Image not found' }, 404);
+        }
+        
+        const image = imageData.image;
+        
+        // Get image from R2 if available
+        if (c.env.R2_BUCKET && image.r2_key) {
+            try {
+                const r2Object = await c.env.R2_BUCKET.get(image.r2_key);
+                if (r2Object) {
+                    const headers = new Headers();
+                    headers.set('Content-Type', image.mime_type || 'image/jpeg');
+                    headers.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+                    
+                    return new Response(r2Object.body, { headers });
+                }
+            } catch (r2Error) {
+                console.error('Error fetching from R2:', r2Error);
+            }
+        }
+        
+        // Fallback to placeholder or error
+        return c.json({ error: 'Image data not available' }, 404);
+    } catch (error) {
+        console.error('Error loading image preview:', error);
+        return c.json({ error: 'Failed to load image preview' }, 500);
+    }
+});
+
+app.delete('/api/image-library/:id', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const imageId = c.req.param('id');
+        const database = new D1Database(c.env.DB);
+        
+        // Get image details first to get R2 key
+        const imageData = await database.getImageWithCaptions(user.id, imageId);
+        
+        if (!imageData || !imageData.image) {
+            return c.json({ error: 'Image not found' }, 404);
+        }
+        
+        const image = imageData.image;
+        
+        // Delete from database first
+        const deleted = await database.deleteImageLibraryEntry(user.id, imageId);
+        
+        if (!deleted) {
+            return c.json({ error: 'Failed to delete image from database' }, 500);
+        }
+        
+        // Delete from R2 if exists
+        if (c.env.R2_BUCKET && image.r2_key) {
+            try {
+                await c.env.R2_BUCKET.delete(image.r2_key);
+            } catch (r2Error) {
+                console.error('Error deleting from R2:', r2Error);
+                // Don't fail the request if R2 deletion fails
+            }
+        }
+        
+        return c.json({
+            success: true,
+            message: 'Image deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting image:', error);
+        return c.json({ error: 'Failed to delete image' }, 500);
+    }
 });
 
 
