@@ -571,7 +571,9 @@
                         <div class="user-welcome">Welcome, <span id="userEmail"></span>!</div>
                         <div class="user-controls">
                             <button id="adminButton" onclick="window.location.href='/admin'" class="control-btn primary" style="display: none;">🛠️ Admin</button>
+                            <button id="imageLibraryBtn" onclick="toggleImageLibrary()" class="control-btn secondary">📚 Caption Library</button>
                             <button id="uploadedImagesBtn" onclick="toggleUploadedImages()" class="control-btn secondary">📁 Lightroom Images</button>
+                            <button id="scheduledPostsBtn" onclick="toggleScheduledPosts()" class="control-btn secondary">📅 Scheduled Posts</button>
                             <button onclick="window.location.href='/lightroom'" class="control-btn secondary">📷 Plugin</button>
                             <button onclick="window.location.href='/settings'" class="control-btn secondary">⚙️ Settings</button>
                             <button onclick="logout()" class="control-btn secondary">Logout</button>
@@ -724,12 +726,56 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Image Library Section -->
+        <div id="imageLibrarySection" class="container uploaded-images-section" style="display: none;">
+            <div class="uploaded-images-header">
+                <div>
+                    <h3>📚 Caption Library</h3>
+                    <p style="margin: 0; font-size: 14px; color: var(--text-secondary);">Images with generated captions from web uploads</p>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="toggleImageLibrary()" class="control-btn primary">🏠 Back to Main</button>
+                    <button onclick="refreshImageLibrary()" class="control-btn secondary">🔄 Refresh</button>
+                </div>
+            </div>
+            
+            <div id="imageLibraryContent">
+                <div class="empty-uploads">
+                    <div class="empty-uploads-icon">📚</div>
+                    <p>Loading image library...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Scheduled Posts Section -->
+        <div id="scheduledPostsSection" class="container uploaded-images-section" style="display: none;">
+            <div class="uploaded-images-header">
+                <div>
+                    <h3>📅 Scheduled Posts</h3>
+                    <p style="margin: 0; font-size: 14px; color: var(--text-secondary);">Manage your scheduled social media posts</p>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="toggleScheduledPosts()" class="control-btn primary">🏠 Back to Main</button>
+                    <button onclick="refreshScheduledPosts()" class="control-btn secondary">🔄 Refresh</button>
+                </div>
+            </div>
+            
+            <div id="scheduledPostsContent">
+                <div class="empty-uploads">
+                    <div class="empty-uploads-icon">📅</div>
+                    <p>Loading scheduled posts...</p>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
         let selectedStyle = 'creative';
         let uploadedImage = null;
         let currentImageId = null; // Track current image ID for Instagram posting
+        let currentImageHash = null; // Track current image hash for caption history
+        let currentImageFilename = null; // Track original filename for web uploads
         let isAuthenticated = false;
 
         // Authentication functions
@@ -842,6 +888,7 @@
                     uploadPlaceholder.classList.add('hidden');
                     uploadedImage = e.target.result.split(',')[1]; // Remove data:image/jpeg;base64,
                     currentImageId = null; // Clear image ID for new uploads
+                    currentImageFilename = file.name; // Store original filename
                     generateBtn.disabled = false;
                     
                     // Extract EXIF metadata immediately when image is loaded
@@ -1169,7 +1216,8 @@
                     body: JSON.stringify({
                         base64Image: uploadedImage,
                         style: selectedStyle,
-                        context: contextData
+                        context: contextData,
+                        filename: currentImageFilename || 'web-upload.jpg'
                     })
                 });
 
@@ -1546,6 +1594,1427 @@
             }
             
         }); // End of DOMContentLoaded callback
+        
+        // Image Library Functions
+        function toggleImageLibrary() {
+            const section = document.getElementById('imageLibrarySection');
+            const mainContent = document.querySelector('.main-content');
+            const uploadedImagesSection = document.getElementById('uploadedImagesSection');
+            
+            if (section.style.display === 'block') {
+                section.style.display = 'none';
+                mainContent.style.display = 'grid';
+            } else {
+                section.style.display = 'block';
+                mainContent.style.display = 'none';
+                uploadedImagesSection.style.display = 'none'; // Hide Lightroom images if open
+                loadImageLibrary();
+            }
+        }
+        
+        async function loadImageLibrary() {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/image-library', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    displayImageLibrary(data.images || []);
+                } else {
+                    displayImageLibrary([]);
+                }
+            } catch (error) {
+                console.error('Error loading image library:', error);
+                displayImageLibrary([]);
+            }
+        }
+        
+        function displayImageLibrary(images) {
+            const content = document.getElementById('imageLibraryContent');
+            
+            if (images.length === 0) {
+                content.innerHTML = `
+                    <div class="empty-uploads">
+                        <div class="empty-uploads-icon">📚</div>
+                        <p>No captioned images in your library yet.</p>
+                        <p style="font-size: 14px; margin-top: 8px;">Upload images via the web interface and generate captions to build your caption library.</p>
+                        <p style="font-size: 12px; margin-top: 8px; color: var(--text-secondary);">Note: Lightroom uploads are shown in the "📁 Lightroom Images" tab.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const gridHtml = `
+                <div class="uploaded-images-grid">
+                    ${images.map(image => `
+                        <div class="uploaded-image-card">
+                            <div class="uploaded-image-preview" id="library-preview-${image.id}">
+                                <div class="image-loading">Loading...</div>
+                            </div>
+                            <div class="uploaded-image-info">
+                                <div class="uploaded-image-filename">${image.original_filename || 'Web Upload'}</div>
+                                <div class="uploaded-image-meta">
+                                    <div>📅 ${new Date(image.created_at).toLocaleDateString()}</div>
+                                    ${image.caption_count ? `<div>📝 ${image.caption_count} caption(s)</div>` : ''}
+                                    ${image.file_size ? `<div>📊 ${Math.round(image.file_size / 1024)}KB</div>` : ''}
+                                </div>
+                                <div class="uploaded-image-actions">
+                                    <button class="uploaded-image-btn primary" onclick="viewImageCaptions('${image.id}')">📚 View Captions</button>
+                                    <button class="uploaded-image-btn secondary" onclick="loadImageForEditing('${image.id}')">✨ Generate More</button>
+                                    <button class="uploaded-image-btn danger" onclick="deleteLibraryImage('${image.id}')">🗑️ Delete</button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            
+            content.innerHTML = gridHtml;
+            
+            // Load image previews
+            images.forEach(image => {
+                loadLibraryImagePreview(image.id);
+            });
+        }
+        
+        function refreshImageLibrary() {
+            const content = document.getElementById('imageLibraryContent');
+            content.innerHTML = `
+                <div class="empty-uploads">
+                    <div class="empty-uploads-icon">🔄</div>
+                    <p>Refreshing...</p>
+                </div>
+            `;
+            loadImageLibrary();
+        }
+        
+        async function loadLibraryImagePreview(imageId) {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const previewElement = document.getElementById(`library-preview-${imageId}`);
+                
+                if (!previewElement) return;
+                
+                const response = await fetch(`/api/image-library/${imageId}/preview`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const imageUrl = URL.createObjectURL(blob);
+                    
+                    const img = document.createElement('img');
+                    img.src = imageUrl;
+                    img.alt = 'Image preview';
+                    img.onload = function() {
+                        previewElement.innerHTML = '';
+                        previewElement.appendChild(img);
+                    };
+                    img.onerror = function() {
+                        previewElement.innerHTML = '<div style="font-size: 14px; padding: 20px;">📷 Preview unavailable</div>';
+                    };
+                } else {
+                    previewElement.innerHTML = '<div style="font-size: 14px; padding: 20px;">📷 Preview unavailable</div>';
+                }
+            } catch (error) {
+                const previewElement = document.getElementById(`library-preview-${imageId}`);
+                if (previewElement) {
+                    previewElement.innerHTML = '<div style="font-size: 14px; padding: 20px;">📷 Preview unavailable</div>';
+                }
+            }
+        }
+        
+        function toggleScheduling() {
+            const schedulingCard = document.getElementById('schedulingCard');
+            
+            if (schedulingCard.style.display === 'block') {
+                schedulingCard.style.display = 'none';
+                
+                // Clear form
+                document.getElementById('scheduleDateTime').value = '';
+                document.getElementById('customCaption').value = '';
+                document.getElementById('customHashtags').value = '';
+                
+                // Clear platform selection
+                const platformSelection = document.getElementById('platformSelection');
+                platformSelection.innerHTML = '';
+            } else {
+                // Show scheduling
+                schedulingCard.style.display = 'block';
+                
+                // Set minimum datetime to current time
+                const now = new Date();
+                now.setMinutes(now.getMinutes() + 30); // Default to 30 minutes from now
+                document.getElementById('scheduleDateTime').min = new Date().toISOString().slice(0, 16);
+                document.getElementById('scheduleDateTime').value = now.toISOString().slice(0, 16);
+                
+                // Load connected platforms
+                loadConnectedPlatforms();
+            }
+        }
+        
+        // Show schedule toggle button when results are displayed
+        function showScheduleButton() {
+            const scheduleToggleBtn = document.getElementById('scheduleToggleBtn');
+            scheduleToggleBtn.style.display = 'inline-block';
+        }
+        
+        // Image Library Action Functions
+        async function viewImageCaptions(imageId) {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/image-library/${imageId}/captions`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showImageCaptionsModal(data.image, data.captions);
+                } else {
+                    alert('Failed to load image captions');
+                }
+            } catch (error) {
+                console.error('Error loading image captions:', error);
+                alert('Failed to load image captions');
+            }
+        }
+        
+        function showImageCaptionsModal(image, captions) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            `;
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.cssText = `
+                background: var(--card-background);
+                color: var(--text-primary);
+                border-radius: 12px;
+                padding: 30px;
+                max-width: 800px;
+                max-height: 80vh;
+                overflow-y: auto;
+                margin: 20px;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            `;
+            
+            const captionsHtml = captions.map(caption => `
+                <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-bottom: 15px; background: var(--card-background);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <div style="font-weight: 600; color: var(--text-primary);">
+                            ${getStyleIcon(caption.style)} ${getStyleName(caption.style)}
+                            <span style="font-size: 12px; color: var(--text-secondary); margin-left: 10px;">
+                                ${new Date(caption.created_at).toLocaleDateString()}
+                            </span>
+                        </div>
+                        <div style="display: flex; gap: 5px;">
+                            <button onclick="copyModalText('${caption.caption.replace(/'/g, "\\'")}', this)" style="padding: 4px 8px; font-size: 12px; background: var(--accent-color); color: white; border: none; border-radius: 4px; cursor: pointer;">📋 Copy</button>
+                            <button onclick="scheduleCaptionFromLibrary('${image.id}', '${caption.id}')" style="padding: 4px 8px; font-size: 12px; background: #ffa726; color: white; border: none; border-radius: 4px; cursor: pointer;">⏰ Schedule</button>
+                            <button onclick="postCaptionFromLibrary('${image.id}', '${caption.id}')" style="padding: 4px 8px; font-size: 12px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer;">📝 Post</button>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 8px;"><strong>Caption:</strong> ${caption.caption}</div>
+                    <div style="margin-bottom: 8px;"><strong>Hashtags:</strong> ${caption.hashtags}</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);"><strong>Alt Text:</strong> ${caption.alt_text}</div>
+                    ${caption.used_count > 0 ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Used ${caption.used_count} time(s)</div>` : ''}
+                </div>
+            `).join('');
+            
+            modalContent.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3>📚 Caption History - ${image.original_filename || 'Web Upload'}</h3>
+                    <button onclick="this.closest('.modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <p style="color: var(--text-secondary);">Generated ${captions.length} caption(s) for this image</p>
+                </div>
+                
+                ${captions.length > 0 ? captionsHtml : '<p style="text-align: center; color: var(--text-secondary);">No captions generated yet</p>'}
+                
+                <div style="margin-top: 20px; text-align: center;">
+                    <button onclick="this.closest('.modal').remove()" style="padding: 10px 20px; background: var(--accent-color); color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>
+                </div>
+            `;
+            
+            modal.className = 'modal';
+            modal.appendChild(modalContent);
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            document.body.appendChild(modal);
+        }
+        
+        function getStyleIcon(style) {
+            const icons = {
+                'creative': '✨',
+                'professional': '💼',
+                'casual': '😄',
+                'trendy': '🔥',
+                'inspirational': '💭',
+                'humorous': '😂',
+                'edgy': '🖤'
+            };
+            
+            if (style.startsWith('custom_')) {
+                const customPrompt = customPrompts.find(p => p.id === parseInt(style.replace('custom_', '')));
+                return customPrompt ? customPrompt.icon : '✨';
+            }
+            
+            return icons[style] || '✨';
+        }
+        
+        function getStyleName(style) {
+            const names = {
+                'creative': 'Creative',
+                'professional': 'Professional',
+                'casual': 'Casual',
+                'trendy': 'Trendy',
+                'inspirational': 'Inspirational',
+                'humorous': 'Humorous',
+                'edgy': 'Edgy'
+            };
+            
+            if (style.startsWith('custom_')) {
+                const customPrompt = customPrompts.find(p => p.id === parseInt(style.replace('custom_', '')));
+                return customPrompt ? customPrompt.name : 'Custom';
+            }
+            
+            return names[style] || 'Unknown';
+        }
+        
+        async function loadImageForEditing(imageId) {
+            try {
+                const token = localStorage.getItem('auth_token');
+                
+                // Get image details
+                const response = await fetch(`/api/image-library/${imageId}/captions`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load image details');
+                }
+                
+                const data = await response.json();
+                const image = data.image;
+                
+                // Get image data for preview
+                const imageResponse = await fetch(`/api/image-library/${imageId}/preview`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (!imageResponse.ok) {
+                    throw new Error('Failed to load image data');
+                }
+                
+                // Convert image to blob and then to base64
+                const imageBlob = await imageResponse.blob();
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    // Switch to main caption generation interface
+                    const imageLibrarySection = document.getElementById('imageLibrarySection');
+                    const mainContent = document.querySelector('.main-content');
+                    
+                    imageLibrarySection.style.display = 'none';
+                    mainContent.style.display = 'grid';
+                    
+                    // Load the image into the main interface
+                    const previewImage = document.getElementById('previewImage');
+                    const uploadPlaceholder = document.getElementById('uploadPlaceholder');
+                    
+                    previewImage.src = e.target.result;
+                    previewImage.classList.remove('hidden');
+                    uploadPlaceholder.classList.add('hidden');
+                    
+                    // Convert to base64 for caption generation
+                    uploadedImage = e.target.result.split(',')[1]; // Remove data:image/...;base64,
+                    currentImageId = imageId; // Store the image ID
+                    currentImageHash = image.file_hash; // Store the hash
+                    document.getElementById('generateBtn').disabled = false;
+                    
+                    // Pre-fill context fields if available
+                    if (image.camera_model) {
+                        document.getElementById('cameraInput').value = image.camera_model;
+                        document.getElementById('cameraInput').dataset.autoDetected = 'true';
+                    }
+                    if (image.location) {
+                        document.getElementById('locationInput').value = image.location;
+                        document.getElementById('locationInput').dataset.autoDetected = 'true';
+                    }
+                    
+                    // Show success message
+                    alert('✅ Image loaded! You can now generate new captions with different styles.');
+                };
+                
+                reader.readAsDataURL(imageBlob);
+                
+            } catch (error) {
+                console.error('Error loading image for editing:', error);
+                alert('❌ Failed to load image for editing: ' + error.message);
+            }
+        }
+        
+        async function deleteLibraryImage(imageId) {
+            if (!confirm('Are you sure you want to delete this image and all its captions? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/image-library/${imageId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    // Remove the card from the display
+                    const card = document.querySelector(`[onclick*="'${imageId}'"]`)?.closest('.uploaded-image-card');
+                    if (card) {
+                        card.style.opacity = '0.5';
+                        card.style.transform = 'scale(0.95)';
+                        setTimeout(() => {
+                            card.remove();
+                            
+                            // Check if there are any images left
+                            const remainingCards = document.querySelectorAll('#imageLibraryContent .uploaded-image-card');
+                            if (remainingCards.length === 0) {
+                                displayImageLibrary([]);
+                            }
+                        }, 300);
+                    }
+                    
+                    alert('✅ Image deleted successfully!');
+                } else {
+                    const errorData = await response.json();
+                    alert('❌ Failed to delete image: ' + (errorData.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error deleting image:', error);
+                alert('❌ Failed to delete image: ' + error.message);
+            }
+        }
+        
+        async function loadConnectedPlatforms() {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/user/settings/social', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const settings = await response.json();
+                    displayPlatformSelection(settings);
+                } else {
+                    displayPlatformSelection({});
+                }
+            } catch (error) {
+                console.error('Error loading connected platforms:', error);
+                displayPlatformSelection({});
+            }
+        }
+        
+        function displayPlatformSelection(settings) {
+            const platformSelection = document.getElementById('platformSelection');
+            const platforms = [
+                { key: 'mastodon', name: 'Mastodon', icon: '🐘' },
+                { key: 'pixelfed', name: 'Pixelfed', icon: '📸' },
+                { key: 'linkedin', name: 'LinkedIn', icon: '💼' },
+                { key: 'instagram', name: 'Instagram', icon: '📷' }
+            ];
+            
+            const platformHtml = platforms.map(platform => {
+                const isConnected = settings[platform.key] && 
+                    (settings[platform.key].token || settings[platform.key].access_token || settings[platform.key].connected);
+                
+                return `
+                    <div style="display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; ${!isConnected ? 'opacity: 0.5;' : ''}">
+                        <input type="checkbox" id="platform_${platform.key}" ${!isConnected ? 'disabled' : ''} style="margin: 0;">
+                        <label for="platform_${platform.key}" style="display: flex; align-items: center; gap: 5px; margin: 0; cursor: ${isConnected ? 'pointer' : 'not-allowed'};">
+                            <span>${platform.icon}</span>
+                            <span>${platform.name}</span>
+                        </label>
+                        ${!isConnected ? '<span style="font-size: 10px; color: var(--text-secondary);">Not connected</span>' : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            platformSelection.innerHTML = platformHtml;
+        }
+        
+        async function schedulePost() {
+            try {
+                const scheduleDateTime = document.getElementById('scheduleDateTime').value;
+                if (!scheduleDateTime) {
+                    alert('Please select a date and time for scheduling');
+                    return;
+                }
+                
+                // Check if scheduled time is in the future
+                const scheduledTime = new Date(scheduleDateTime);
+                if (scheduledTime <= new Date()) {
+                    alert('Scheduled time must be in the future');
+                    return;
+                }
+                
+                // Check if scheduled time is on a 5-minute interval
+                const minutes = scheduledTime.getMinutes();
+                if (minutes % 5 !== 0) {
+                    alert('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.)\n\nThis is because scheduled posts are processed every 5 minutes.');
+                    return;
+                }
+                
+                // Get selected platforms
+                const selectedPlatforms = [];
+                const platformCheckboxes = document.querySelectorAll('#platformSelection input[type="checkbox"]:checked');
+                platformCheckboxes.forEach(checkbox => {
+                    selectedPlatforms.push(checkbox.id.replace('platform_', ''));
+                });
+                
+                if (selectedPlatforms.length === 0) {
+                    alert('Please select at least one platform');
+                    return;
+                }
+                
+                // Get content
+                const customCaption = document.getElementById('customCaption').value.trim();
+                const customHashtags = document.getElementById('customHashtags').value.trim();
+                const generatedCaption = document.getElementById('captionText').textContent;
+                const generatedHashtags = document.getElementById('hashtagsText').textContent;
+                
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/scheduled-posts', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        imageId: currentImageId,
+                        imageHash: currentImageHash,
+                        caption: customCaption || generatedCaption,
+                        hashtags: customHashtags || generatedHashtags,
+                        platforms: selectedPlatforms,
+                        scheduledTime: scheduledTime.toISOString(),
+                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        imageData: currentImageId ? null : uploadedImage // Only send image data if no imageId
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ Post scheduled successfully!');
+                    hideScheduling();
+                } else {
+                    alert('❌ Failed to schedule post: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error scheduling post:', error);
+                alert('❌ Error scheduling post: ' + error.message);
+            }
+        }
+        
+        // Post caption from library function
+        async function postCaptionFromLibrary(imageId, captionId) {
+            try {
+                // First, get the image and caption data
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/image-library/${imageId}/captions`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load caption data');
+                }
+                
+                const data = await response.json();
+                const caption = data.captions.find(c => c.id == captionId);
+                
+                if (!caption) {
+                    throw new Error('Caption not found');
+                }
+                
+                // Get connected social media accounts
+                const settingsResponse = await fetch('/api/user/settings/social', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                let connectedAccounts = {};
+                if (settingsResponse.ok) {
+                    connectedAccounts = await settingsResponse.json();
+                }
+                
+                // Show platform selection modal
+                showPlatformSelectionModal(imageId, caption, connectedAccounts);
+                
+            } catch (error) {
+                console.error('Error posting caption from library:', error);
+                alert('❌ Failed to load posting options: ' + error.message);
+            }
+        }
+        
+        function showPlatformSelectionModal(imageId, caption, connectedAccounts) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1001;
+            `;
+            
+            const platforms = [
+                { key: 'mastodon', name: 'Mastodon', icon: '🐘' },
+                { key: 'pixelfed', name: 'Pixelfed', icon: '📸' },
+                { key: 'instagram', name: 'Instagram', icon: '📷' }
+            ];
+            
+            const platformHtml = platforms.map(platform => {
+                const isConnected = connectedAccounts[platform.key] && 
+                    (connectedAccounts[platform.key].token || connectedAccounts[platform.key].access_token || connectedAccounts[platform.key].connected);
+                
+                if (!isConnected) return '';
+                
+                return `
+                    <button onclick="postToSocialFromLibrary('${platform.key}', '${imageId}', '${caption.id}'); this.closest('.modal').remove();" 
+                            style="display: flex; align-items: center; gap: 10px; padding: 15px; margin: 10px 0; background: var(--card-background); border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; width: 100%; transition: all 0.2s ease;">
+                        <span style="font-size: 20px;">${platform.icon}</span>
+                        <div>
+                            <div style="font-weight: 600;">${platform.name}</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">Post this caption</div>
+                        </div>
+                    </button>
+                `;
+            }).join('');
+            
+            const modalContent = `
+                <div style="background: var(--card-background); border-radius: 12px; padding: 30px; max-width: 400px; margin: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3>📝 Post to Social Media</h3>
+                        <button onclick="this.closest('.modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px; padding: 15px; background: var(--border-color); border-radius: 8px;">
+                        <div style="font-size: 14px; margin-bottom: 8px;"><strong>Caption:</strong> ${caption.caption}</div>
+                        <div style="font-size: 14px; margin-bottom: 8px;"><strong>Hashtags:</strong> ${caption.hashtags}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary);"><strong>Alt Text:</strong> ${caption.alt_text}</div>
+                    </div>
+                    
+                    <div>
+                        ${platformHtml || '<p style="text-align: center; color: var(--text-secondary);">No connected social media accounts found. <a href="/settings" style="color: var(--accent-color);">Connect accounts in Settings</a></p>'}
+                    </div>
+                </div>
+            `;
+            
+            modal.innerHTML = modalContent;
+            modal.className = 'modal';
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            document.body.appendChild(modal);
+        }
+        
+        async function postToSocialFromLibrary(platform, imageId, captionId) {
+            try {
+                const token = localStorage.getItem('auth_token');
+                
+                // Get the caption and image data
+                const response = await fetch(`/api/image-library/${imageId}/captions`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load caption data');
+                }
+                
+                const data = await response.json();
+                const caption = data.captions.find(c => c.id == captionId);
+                
+                if (!caption) {
+                    throw new Error('Caption not found');
+                }
+                
+                // Get image data
+                const imageResponse = await fetch(`/api/image-library/${imageId}/preview`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (!imageResponse.ok) {
+                    throw new Error('Failed to load image data');
+                }
+                
+                const imageBlob = await imageResponse.blob();
+                const reader = new FileReader();
+                
+                reader.onload = async function(e) {
+                    const base64Image = e.target.result.split(',')[1];
+                    
+                    // Post to the selected platform
+                    let postContent, apiEndpoint;
+                    
+                    if (platform === 'mastodon') {
+                        postContent = caption.caption + (caption.hashtags ? ' ' + caption.hashtags : '');
+                        apiEndpoint = '/api/user/post/mastodon';
+                    } else if (platform === 'pixelfed') {
+                        postContent = caption.caption + (caption.hashtags ? '\n\n' + caption.hashtags : '');
+                        apiEndpoint = '/api/user/post/pixelfed';
+                    } else if (platform === 'instagram') {
+                        postContent = caption.caption + (caption.hashtags ? '\n\n' + caption.hashtags : '');
+                        apiEndpoint = '/api/user/post/instagram';
+                    }
+                    
+                    const postResponse = await fetch(apiEndpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + token
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            status: postContent,
+                            caption: postContent,
+                            alt_text: caption.alt_text,
+                            image_data: base64Image,
+                            imageId: imageId
+                        })
+                    });
+                    
+                    const result = await postResponse.json();
+                    
+                    if (result.success) {
+                        alert('✅ Posted successfully to ' + platform + '!');
+                        
+                        // Increment caption usage count
+                        await fetch(`/api/caption-history/${captionId}/use`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': 'Bearer ' + token
+                            },
+                            credentials: 'include'
+                        });
+                        
+                        if (result.url) {
+                            if (confirm('Would you like to view the post?')) {
+                                window.open(result.url, '_blank');
+                            }
+                        }
+                    } else {
+                        alert('❌ Failed to post: ' + (result.error || 'Unknown error'));
+                    }
+                };
+                
+                reader.readAsDataURL(imageBlob);
+                
+            } catch (error) {
+                console.error('Error posting to social media:', error);
+                alert('❌ Failed to post: ' + error.message);
+            }
+        }
+        
+        // Scheduled Posts Functions
+        function toggleScheduledPosts() {
+            const section = document.getElementById('scheduledPostsSection');
+            const mainContent = document.querySelector('.main-content');
+            const imageLibrarySection = document.getElementById('imageLibrarySection');
+            const uploadedImagesSection = document.getElementById('uploadedImagesSection');
+            
+            if (section.style.display === 'block') {
+                section.style.display = 'none';
+                mainContent.style.display = 'grid';
+            } else {
+                section.style.display = 'block';
+                mainContent.style.display = 'none';
+                imageLibrarySection.style.display = 'none'; // Hide Image Library if open
+                uploadedImagesSection.style.display = 'none'; // Hide Lightroom Images if open
+                loadScheduledPosts();
+            }
+        }
+        
+        async function loadScheduledPosts() {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/scheduled-posts', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    displayScheduledPosts(data.posts || []);
+                } else {
+                    displayScheduledPosts([]);
+                }
+            } catch (error) {
+                console.error('Error loading scheduled posts:', error);
+                displayScheduledPosts([]);
+            }
+        }
+        
+        function displayScheduledPosts(posts) {
+            const content = document.getElementById('scheduledPostsContent');
+            
+            if (posts.length === 0) {
+                content.innerHTML = `
+                    <div class="empty-uploads">
+                        <div class="empty-uploads-icon">📅</div>
+                        <p>No scheduled posts yet.</p>
+                        <p style="font-size: 14px; margin-top: 8px;">Schedule posts from the caption generation interface to see them here.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const gridHtml = `
+                <div class="uploaded-images-grid">
+                    ${posts.map(post => {
+                        const scheduledDate = new Date(post.scheduled_time);
+                        const isOverdue = scheduledDate < new Date();
+                        const statusColor = post.status === 'pending' ? (isOverdue ? '#dc3545' : '#28a745') : 
+                                          post.status === 'posted' ? '#28a745' : '#ffc107';
+                        const statusText = post.status === 'pending' ? (isOverdue ? 'Overdue' : 'Scheduled') : 
+                                         post.status === 'posted' ? 'Posted' : 'Failed';
+                        
+                        return `
+                        <div class="uploaded-image-card">
+                            <div class="uploaded-image-preview" style="height: 120px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px;">
+                                📅
+                            </div>
+                            <div class="uploaded-image-info">
+                                <div class="uploaded-image-filename">${post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}</div>
+                                <div class="uploaded-image-meta">
+                                    <div style="color: ${statusColor};">📊 ${statusText}</div>
+                                    <div>⏰ ${scheduledDate.toLocaleDateString()} ${scheduledDate.toLocaleTimeString()}</div>
+                                    <div>📝 ${post.caption ? post.caption.substring(0, 50) + '...' : 'No caption'}</div>
+                                </div>
+                                <div class="uploaded-image-actions">
+                                    <button class="uploaded-image-btn secondary" onclick="viewScheduledPost('${post.id}')">👁️ View</button>
+                                    ${post.status === 'pending' ? `
+                                        <button class="uploaded-image-btn primary" onclick="editScheduledPost('${post.id}')">✏️ Edit</button>
+                                        <button class="uploaded-image-btn danger" onclick="deleteScheduledPost('${post.id}')">🗑️ Delete</button>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    }).join('')}
+                </div>
+            `;
+            
+            content.innerHTML = gridHtml;
+        }
+        
+        function refreshScheduledPosts() {
+            const content = document.getElementById('scheduledPostsContent');
+            content.innerHTML = `
+                <div class="empty-uploads">
+                    <div class="empty-uploads-icon">🔄</div>
+                    <p>Refreshing...</p>
+                </div>
+            `;
+            loadScheduledPosts();
+        }
+        
+        async function viewScheduledPost(postId) {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/scheduled-posts/${postId}`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showScheduledPostModal(data.post);
+                } else {
+                    alert('Failed to load scheduled post details');
+                }
+            } catch (error) {
+                console.error('Error loading scheduled post:', error);
+                alert('Failed to load scheduled post details');
+            }
+        }
+        
+        function showScheduledPostModal(post) {
+            const scheduledDate = new Date(post.scheduled_time);
+            const isOverdue = scheduledDate < new Date();
+            const statusColor = post.status === 'pending' ? (isOverdue ? '#dc3545' : '#28a745') : 
+                              post.status === 'posted' ? '#28a745' : '#ffc107';
+            const statusText = post.status === 'pending' ? (isOverdue ? 'Overdue' : 'Scheduled') : 
+                             post.status === 'posted' ? 'Posted' : 'Failed';
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            `;
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.cssText = `
+                background: var(--card-background);
+                color: var(--text-primary);
+                border-radius: 12px;
+                padding: 30px;
+                max-width: 600px;
+                max-height: 80vh;
+                overflow-y: auto;
+                margin: 20px;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            `;
+            
+            modalContent.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3>📅 Scheduled Post Details</h3>
+                    <button onclick="this.closest('.modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                        <div>
+                            <strong>Status:</strong> 
+                            <span style="color: ${statusColor}; font-weight: 600;">${statusText}</span>
+                        </div>
+                        <div>
+                            <strong>Platforms:</strong> ${post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}
+                        </div>
+                        <div>
+                            <strong>Scheduled Time:</strong> ${scheduledDate.toLocaleString()}
+                        </div>
+                        <div>
+                            <strong>Created:</strong> ${new Date(post.created_at).toLocaleDateString()}
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <strong>Caption:</strong>
+                        <div style="background: var(--border-color); padding: 10px; border-radius: 4px; margin-top: 5px; white-space: pre-wrap;">${post.caption || 'No caption'}</div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <strong>Hashtags:</strong>
+                        <div style="background: var(--border-color); padding: 10px; border-radius: 4px; margin-top: 5px;">${post.hashtags || 'No hashtags'}</div>
+                    </div>
+                    
+                    ${post.error_message ? `
+                        <div style="margin-bottom: 15px;">
+                            <strong>Error Message:</strong>
+                            <div style="background: #ffe6e6; padding: 10px; border-radius: 4px; margin-top: 5px; color: #dc3545;">${post.error_message}</div>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <div style="text-align: center; display: flex; gap: 10px; justify-content: center;">
+                    ${post.status === 'pending' ? `
+                        <button onclick="this.closest('.modal').remove(); editScheduledPost('${post.id}');" style="padding: 10px 20px; background: var(--accent-color); color: white; border: none; border-radius: 6px; cursor: pointer;">✏️ Edit</button>
+                        <button onclick="this.closest('.modal').remove(); deleteScheduledPost('${post.id}');" style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Delete</button>
+                    ` : ''}
+                    <button onclick="this.closest('.modal').remove()" style="padding: 10px 20px; background: var(--text-secondary); color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>
+                </div>
+            `;
+            
+            modal.className = 'modal';
+            modal.appendChild(modalContent);
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            document.body.appendChild(modal);
+        }
+        
+        async function editScheduledPost(postId) {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/scheduled-posts/${postId}`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showEditScheduledPostModal(data.post);
+                } else {
+                    alert('Failed to load scheduled post for editing');
+                }
+            } catch (error) {
+                console.error('Error loading scheduled post for editing:', error);
+                alert('Failed to load scheduled post for editing');
+            }
+        }
+        
+        function showEditScheduledPostModal(post) {
+            const scheduledDate = new Date(post.scheduled_time);
+            const formattedDateTime = scheduledDate.toISOString().slice(0, 16);
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            `;
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.cssText = `
+                background: var(--card-background);
+                color: var(--text-primary);
+                border-radius: 12px;
+                padding: 30px;
+                max-width: 600px;
+                max-height: 80vh;
+                overflow-y: auto;
+                margin: 20px;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            `;
+            
+            modalContent.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3>✏️ Edit Scheduled Post</h3>
+                    <button onclick="this.closest('.modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                </div>
+                
+                <form id="editScheduledPostForm">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">📅 Scheduled Time</label>
+                        <input type="datetime-local" id="editScheduleDateTime" value="${formattedDateTime}" min="${new Date().toISOString().slice(0, 16)}" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-background); color: var(--text-primary);">
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">📱 Platforms</label>
+                        <div style="padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--border-color);">
+                            ${post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">📝 Caption</label>
+                        <textarea id="editCaption" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-background); color: var(--text-primary); min-height: 100px; resize: vertical;">${post.caption || ''}</textarea>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600;">🏷️ Hashtags</label>
+                        <textarea id="editHashtags" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-background); color: var(--text-primary); min-height: 60px; resize: vertical;">${post.hashtags || ''}</textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button type="button" onclick="this.closest('.modal').remove()" style="padding: 10px 20px; background: var(--text-secondary); color: white; border: none; border-radius: 6px; cursor: pointer;">Cancel</button>
+                        <button type="submit" style="padding: 10px 20px; background: var(--accent-color); color: white; border: none; border-radius: 6px; cursor: pointer;">💾 Update Post</button>
+                    </div>
+                </form>
+            `;
+            
+            modal.className = 'modal';
+            modal.appendChild(modalContent);
+            
+            // Handle form submission
+            const form = modalContent.querySelector('#editScheduledPostForm');
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const newDateTime = document.getElementById('editScheduleDateTime').value;
+                const newCaption = document.getElementById('editCaption').value.trim();
+                const newHashtags = document.getElementById('editHashtags').value.trim();
+                
+                if (!newDateTime) {
+                    alert('Please select a date and time');
+                    return;
+                }
+                
+                const scheduledTime = new Date(newDateTime);
+                if (scheduledTime <= new Date()) {
+                    alert('Scheduled time must be in the future');
+                    return;
+                }
+                
+                // Check if scheduled time is on a 5-minute interval
+                const minutes = scheduledTime.getMinutes();
+                if (minutes % 5 !== 0) {
+                    alert('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.)\n\nThis is because scheduled posts are processed every 5 minutes.');
+                    return;
+                }
+                
+                try {
+                    const token = localStorage.getItem('auth_token');
+                    const response = await fetch(`/api/scheduled-posts/${post.id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': 'Bearer ' + token,
+                            'Content-Type': 'application/json'
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            scheduledTime: scheduledTime.toISOString(),
+                            caption: newCaption,
+                            hashtags: newHashtags,
+                            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('✅ Scheduled post updated successfully!');
+                        modal.remove();
+                        loadScheduledPosts(); // Refresh the list
+                    } else {
+                        alert('❌ Failed to update scheduled post: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    console.error('Error updating scheduled post:', error);
+                    alert('❌ Error updating scheduled post: ' + error.message);
+                }
+            });
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            document.body.appendChild(modal);
+        }
+        
+        async function deleteScheduledPost(postId) {
+            if (!confirm('Are you sure you want to delete this scheduled post? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/scheduled-posts/${postId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    alert('✅ Scheduled post deleted successfully!');
+                    loadScheduledPosts(); // Refresh the list
+                } else {
+                    const errorData = await response.json();
+                    alert('❌ Failed to delete scheduled post: ' + (errorData.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error deleting scheduled post:', error);
+                alert('❌ Failed to delete scheduled post: ' + error.message);
+            }
+        }
+        
+        // Schedule caption from library function
+        async function scheduleCaptionFromLibrary(imageId, captionId) {
+            try {
+                // First, get the image and caption data
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/image-library/${imageId}/captions`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load caption data');
+                }
+                
+                const data = await response.json();
+                const caption = data.captions.find(c => c.id == captionId);
+                
+                if (!caption) {
+                    throw new Error('Caption not found');
+                }
+                
+                // Get connected social media accounts
+                const settingsResponse = await fetch('/api/user/settings/social', {
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    },
+                    credentials: 'include'
+                });
+                
+                let connectedAccounts = {};
+                if (settingsResponse.ok) {
+                    connectedAccounts = await settingsResponse.json();
+                }
+                
+                // Show scheduling modal
+                showSchedulingModal(imageId, caption, connectedAccounts);
+                
+            } catch (error) {
+                console.error('Error scheduling caption from library:', error);
+                alert('❌ Failed to load scheduling options: ' + error.message);
+            }
+        }
+        
+        function showSchedulingModal(imageId, caption, connectedAccounts) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1001;
+            `;
+            
+            const platforms = [
+                { key: 'mastodon', name: 'Mastodon', icon: '🐘' },
+                { key: 'pixelfed', name: 'Pixelfed', icon: '📸' },
+                { key: 'instagram', name: 'Instagram', icon: '📷' }
+            ];
+            
+            const platformHtml = platforms.map(platform => {
+                const isConnected = connectedAccounts[platform.key] && 
+                    (connectedAccounts[platform.key].token || connectedAccounts[platform.key].access_token || connectedAccounts[platform.key].connected);
+                
+                if (!isConnected) return '';
+                
+                return `
+                    <div style="display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px;">
+                        <input type="checkbox" id="schedule_platform_${platform.key}" style="margin: 0;">
+                        <label for="schedule_platform_${platform.key}" style="display: flex; align-items: center; gap: 5px; margin: 0; cursor: pointer;">
+                            <span>${platform.icon}</span>
+                            <span>${platform.name}</span>
+                        </label>
+                    </div>
+                `;
+            }).join('');
+            
+            // Set default schedule time to 30 minutes from now, rounded to 5-minute interval
+            const now = new Date();
+            now.setMinutes(now.getMinutes() + 30);
+            // Round to nearest 5-minute interval
+            const minutes = now.getMinutes();
+            const roundedMinutes = Math.ceil(minutes / 5) * 5;
+            now.setMinutes(roundedMinutes);
+            now.setSeconds(0);
+            now.setMilliseconds(0);
+            const defaultDateTime = now.toISOString().slice(0, 16);
+            const minDateTime = new Date().toISOString().slice(0, 16);
+            
+            const modalContent = `
+                <div style="background: var(--card-background); border-radius: 12px; padding: 30px; max-width: 500px; margin: 20px; max-height: 80vh; overflow-y: auto;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3>⏰ Schedule Caption</h3>
+                        <button onclick="this.closest('.modal').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text-secondary);">×</button>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px; padding: 15px; background: var(--border-color); border-radius: 8px;">
+                        <div style="font-size: 14px; margin-bottom: 8px;"><strong>Caption:</strong> ${caption.caption}</div>
+                        <div style="font-size: 14px; margin-bottom: 8px;"><strong>Hashtags:</strong> ${caption.hashtags}</div>
+                        <div style="font-size: 12px; color: var(--text-secondary);"><strong>Alt Text:</strong> ${caption.alt_text}</div>
+                    </div>
+                    
+                    <form id="scheduleFromLibraryForm">
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-primary);">📅 Schedule Date & Time</label>
+                            <input type="datetime-local" id="scheduleLibraryDateTime" value="${defaultDateTime}" min="${minDateTime}" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 14px; background: var(--card-background); color: var(--text-primary);">
+                        </div>
+                        
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-primary);">📱 Select Platforms</label>
+                            <div id="scheduleLibraryPlatforms" style="display: grid; grid-template-columns: 1fr; gap: 10px;">
+                                ${platformHtml || '<p style="text-align: center; color: var(--text-secondary);">No connected social media accounts found. <a href="/settings" style="color: var(--accent-color);">Connect accounts in Settings</a></p>'}
+                            </div>
+                        </div>
+                        
+                        <div style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-primary);">✏️ Custom Caption (Optional)</label>
+                            <textarea id="scheduleLibraryCaption" placeholder="Leave empty to use the caption above..." style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 14px; background: var(--card-background); color: var(--text-primary); min-height: 80px; resize: vertical;"></textarea>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--text-primary);">🏷️ Custom Hashtags (Optional)</label>
+                            <textarea id="scheduleLibraryHashtags" placeholder="Leave empty to use the hashtags above..." style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 14px; background: var(--card-background); color: var(--text-primary); min-height: 60px; resize: vertical;"></textarea>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                            <button type="button" onclick="this.closest('.modal').remove()" style="padding: 10px 20px; background: var(--text-secondary); color: white; border: none; border-radius: 6px; cursor: pointer;">Cancel</button>
+                            <button type="submit" style="padding: 10px 20px; background: var(--accent-color); color: white; border: none; border-radius: 6px; cursor: pointer;">⏰ Schedule Post</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            
+            modal.innerHTML = modalContent;
+            modal.className = 'modal';
+            
+            // Handle form submission
+            const form = modal.querySelector('#scheduleFromLibraryForm');
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const scheduleDateTime = document.getElementById('scheduleLibraryDateTime').value;
+                if (!scheduleDateTime) {
+                    alert('Please select a date and time for scheduling');
+                    return;
+                }
+                
+                // Check if scheduled time is in the future
+                const scheduledTime = new Date(scheduleDateTime);
+                if (scheduledTime <= new Date()) {
+                    alert('Scheduled time must be in the future');
+                    return;
+                }
+                
+                // Check if scheduled time is on a 5-minute interval
+                const minutes = scheduledTime.getMinutes();
+                if (minutes % 5 !== 0) {
+                    alert('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.)\n\nThis is because scheduled posts are processed every 5 minutes.');
+                    return;
+                }
+                
+                // Get selected platforms
+                const selectedPlatforms = [];
+                const platformCheckboxes = modal.querySelectorAll('#scheduleLibraryPlatforms input[type="checkbox"]:checked');
+                platformCheckboxes.forEach(checkbox => {
+                    selectedPlatforms.push(checkbox.id.replace('schedule_platform_', ''));
+                });
+                
+                if (selectedPlatforms.length === 0) {
+                    alert('Please select at least one platform');
+                    return;
+                }
+                
+                // Get content
+                const customCaption = document.getElementById('scheduleLibraryCaption').value.trim();
+                const customHashtags = document.getElementById('scheduleLibraryHashtags').value.trim();
+                const finalCaption = customCaption || caption.caption;
+                const finalHashtags = customHashtags || caption.hashtags;
+                
+                try {
+                    const token = localStorage.getItem('auth_token');
+                    const response = await fetch('/api/scheduled-posts', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Bearer ' + token,
+                            'Content-Type': 'application/json'
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            imageId: imageId,
+                            captionId: caption.id,
+                            caption: finalCaption,
+                            hashtags: finalHashtags,
+                            platforms: selectedPlatforms,
+                            scheduledTime: scheduledTime.toISOString(),
+                            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('✅ Caption scheduled successfully!');
+                        modal.remove();
+                    } else {
+                        alert('❌ Failed to schedule caption: ' + (result.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    console.error('Error scheduling caption:', error);
+                    alert('❌ Error scheduling caption: ' + error.message);
+                }
+            });
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            document.body.appendChild(modal);
+        }
         
         // Global functions that need to be accessible from onclick handlers
         async function postToMastodon() {
@@ -2019,6 +3488,7 @@
         function toggleUploadedImages() {
             const section = document.getElementById('uploadedImagesSection');
             const mainContent = document.querySelector('.main-content');
+            const imageLibrarySection = document.getElementById('imageLibrarySection');
             
             if (section.style.display === 'block') {
                 section.style.display = 'none';
@@ -2026,6 +3496,7 @@
             } else {
                 section.style.display = 'block';
                 mainContent.style.display = 'none';
+                imageLibrarySection.style.display = 'none'; // Hide Image Library if open
                 loadUploadedImages();
             }
         }
@@ -2508,6 +3979,29 @@
                 }
             }
         }
+        
+        // Initialize default schedule time
+        function initializeDefaultScheduleTime() {
+            const scheduleInput = document.getElementById('scheduleDateTime');
+            if (scheduleInput && !scheduleInput.value) {
+                // Set default to 30 minutes from now, rounded to 5-minute interval
+                const now = new Date();
+                now.setMinutes(now.getMinutes() + 30);
+                // Round to nearest 5-minute interval  
+                const minutes = now.getMinutes();
+                const roundedMinutes = Math.ceil(minutes / 5) * 5;
+                now.setMinutes(roundedMinutes);
+                now.setSeconds(0);
+                now.setMilliseconds(0);
+                scheduleInput.value = now.toISOString().slice(0, 16);
+            }
+        }
+        
+        // Initialize when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeDefaultScheduleTime();
+        });
+        
     </script>
 
     <!-- Custom Prompts Management Modal -->

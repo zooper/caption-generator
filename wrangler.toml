@@ -28,6 +28,10 @@ SMTP_FROM_EMAIL = "no-reply@jonsson.io"
 SMTP_FROM_NAME = "AI Caption Studio"
 ADMIN_EMAIL = "tomas@jonsson.io"
 
+# Cron trigger for processing scheduled posts
+[triggers]
+crons = ["*/5 * * * *"]  # Run every 5 minutes
+
 # Required secrets (set with `wrangler secret put <NAME>`):
 # - JWT_SECRET
 # - OPENAI_API_KEY  
