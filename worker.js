@@ -5691,7 +5691,8 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     // Include extracted data in response if available
     const responseData = { 
         content: responseContent,
-        captionHistoryId: captionHistoryId
+        captionHistoryId: captionHistoryId,
+        imageId: imageId
     };
     if (extractedData) {
         if (extractedData.weatherData) responseData.weatherData = extractedData.weatherData;

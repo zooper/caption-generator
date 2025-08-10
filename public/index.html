@@ -1378,6 +1378,11 @@
                 } else {
                     metadataCard.style.display = 'none';
                 }
+                
+                // Capture imageId from response for scheduled posts
+                if (data.imageId) {
+                    currentImageId = data.imageId;
+                }
 
                 // Display social media previews if connected accounts exist
                 const socialPreviewCard = document.getElementById('socialPreviewCard');
