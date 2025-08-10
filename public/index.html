@@ -1789,8 +1789,8 @@
                 // Set minimum datetime to current time
                 const now = new Date();
                 now.setMinutes(now.getMinutes() + 30); // Default to 30 minutes from now
-                document.getElementById('scheduleDateTime').min = new Date().toISOString().slice(0, 16);
-                document.getElementById('scheduleDateTime').value = now.toISOString().slice(0, 16);
+                document.getElementById('scheduleDateTime').min = formatDateTimeLocal(new Date());
+                document.getElementById('scheduleDateTime').value = formatDateTimeLocal(now);
                 
                 // Load connected platforms
                 loadConnectedPlatforms();
@@ -2675,7 +2675,7 @@
         
         function showEditScheduledPostModal(post) {
             const scheduledDate = new Date(post.scheduled_time);
-            const formattedDateTime = scheduledDate.toISOString().slice(0, 16);
+            const formattedDateTime = formatDateTimeLocal(scheduledDate);
             
             const modal = document.createElement('div');
             modal.style.cssText = `
@@ -2713,7 +2713,7 @@
                 <form id="editScheduledPostForm">
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 8px; font-weight: 600;">📅 Scheduled Time</label>
-                        <input type="datetime-local" id="editScheduleDateTime" value="${formattedDateTime}" min="${new Date().toISOString().slice(0, 16)}" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-background); color: var(--text-primary);">
+                        <input type="datetime-local" id="editScheduleDateTime" value="${formattedDateTime}" min="${formatDateTimeLocal(new Date())}" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-background); color: var(--text-primary);">
                     </div>
                     
                     <div style="margin-bottom: 15px;">
@@ -2932,8 +2932,8 @@
             now.setMinutes(roundedMinutes);
             now.setSeconds(0);
             now.setMilliseconds(0);
-            const defaultDateTime = now.toISOString().slice(0, 16);
-            const minDateTime = new Date().toISOString().slice(0, 16);
+            const defaultDateTime = formatDateTimeLocal(now);
+            const minDateTime = formatDateTimeLocal(new Date());
             
             const modalContent = `
                 <div style="background: var(--card-background); border-radius: 12px; padding: 30px; max-width: 500px; margin: 20px; max-height: 80vh; overflow-y: auto;">
@@ -4037,6 +4037,16 @@
             }
         }
         
+        // Helper function to format date for datetime-local input (in local time)
+        function formatDateTimeLocal(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        }
+
         // Initialize default schedule time
         function initializeDefaultScheduleTime() {
             const scheduleInput = document.getElementById('scheduleDateTime');
@@ -4050,7 +4060,7 @@
                 now.setMinutes(roundedMinutes);
                 now.setSeconds(0);
                 now.setMilliseconds(0);
-                scheduleInput.value = now.toISOString().slice(0, 16);
+                scheduleInput.value = formatDateTimeLocal(now);
             }
         }
         
