@@ -2186,8 +2186,8 @@
                     body: JSON.stringify({
                         imageId: currentImageId,
                         imageHash: currentImageHash,
-                        caption: customCaption || generatedCaption,
-                        hashtags: customHashtags || generatedHashtags,
+                        customCaption: customCaption || generatedCaption,
+                        customHashtags: customHashtags || generatedHashtags,
                         platforms: selectedPlatforms,
                         scheduledTime: scheduledTime.toISOString(),
                         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
