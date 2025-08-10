@@ -3078,7 +3078,7 @@ app.get('/api/user/settings/social', authenticateToken, async (c) => {
             mastodon: {},
             pixelfed: {},
             linkedin: {},
-            instagram: {}
+            instagram: {},
         };
         
         settings.forEach(setting => {
@@ -3652,6 +3652,7 @@ app.post('/api/user/post/pixelfed', authenticateToken, async (c) => {
     }
 });
 
+
 // Instagram API endpoints
 app.post('/api/user/settings/test-instagram', authenticateToken, async (c) => {
     try {
@@ -3673,7 +3674,7 @@ app.post('/api/user/settings/test-instagram', authenticateToken, async (c) => {
         }
         
         // Test Instagram connection by getting account info
-        const testUrl = `https://graph.facebook.com/me/accounts?access_token=${instagramAccessToken}`;
+        const testUrl = `https://graph.facebook.com/me?access_token=${instagramAccessToken}`;
         const response = await fetch(testUrl);
         
         if (response.ok) {
@@ -3795,7 +3796,7 @@ app.get('/auth/instagram/callback', async (c) => {
                     // For Instagram Business API, we need to get the Instagram Business Account ID
                     // This is different from the personal Instagram account ID
                     
-                    // Step 1: Get user's Facebook pages
+                    // Step 1: Get user's connected accounts
                     const pagesResponse = await fetch(`https://graph.facebook.com/me/accounts?access_token=${accessToken}`);
                     
                     let instagramBusinessAccountId = null;
@@ -3804,7 +3805,7 @@ app.get('/auth/instagram/callback', async (c) => {
                     
                     if (pagesResponse.ok) {
                         const pagesData = await pagesResponse.json();
-                        console.log('Facebook pages retrieved successfully');
+                        console.log('Connected accounts retrieved successfully');
                         
                         // Step 2: Find Instagram Business Account connected to the Facebook page
                         for (const page of pagesData.data || []) {
@@ -3904,7 +3905,7 @@ app.get('/auth/instagram/callback', async (c) => {
                         return c.html(`
                             <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
                                 <h2>⚠️ Instagram Business Account Not Found</h2>
-                                <p>Could not find an Instagram Business Account connected to your Facebook account.</p>
+                                <p>Could not find an Instagram Business Account connected to your account.</p>
                                 <p>Please ensure your Instagram account is:</p>
                                 <ul style="text-align: left; max-width: 400px; margin: 20px auto;">
                                     <li>Set to Business or Creator account type</li>
@@ -3990,6 +3991,7 @@ app.get('/auth/instagram/callback', async (c) => {
         `);
     }
 });
+
 
 app.post('/api/user/post/instagram', authenticateToken, async (c) => {
     try {
@@ -4876,7 +4878,7 @@ async function getConnectedSocialAccounts(database, userId) {
             mastodon: null,
             pixelfed: null,
             linkedin: null,
-            instagram: null
+            instagram: null,
         };
         
         settings.forEach(setting => {
