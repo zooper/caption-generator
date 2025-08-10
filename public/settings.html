@@ -437,6 +437,7 @@
                     </div>
                 </div>
 
+
                 <div class="mt-3">
                     <p class="text-sm text-muted">
                         <strong>Privacy Note:</strong> Your social media tokens are encrypted and stored securely. 
@@ -581,6 +582,7 @@
                         }
                         document.getElementById('instagramAutoPost').checked = settings.instagram.autoPost || false;
                     }
+                    
                 }
             } catch (error) {
             }
@@ -1039,6 +1041,7 @@
                 alert('❌ Failed to disconnect: ' + error.message);
             }
         }
+
 
         // API Key Management
         async function loadApiKeys() {
