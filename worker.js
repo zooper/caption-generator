@@ -641,14 +641,13 @@ class D1Database {
             
             const stmt = this.db.prepare(`
                 INSERT INTO scheduled_posts (
-                    user_id, image_id, caption_id, custom_caption, custom_hashtags,
-                    platforms, scheduled_time, timezone
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    user_id, image_id, caption_id, caption, hashtags, platforms, scheduled_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
             `);
             
             const result = await stmt.bind(
                 userId, imageId, captionId, customCaption, customHashtags,
-                JSON.stringify(platforms), scheduledTime, timezone
+                JSON.stringify(platforms), scheduledTime
             ).run();
             
             return result.meta.last_row_id;
@@ -663,7 +662,12 @@ class D1Database {
             await this.ensureScheduledPostsTable();
             
             let query = `
-                SELECT sp.*, ui.filename, ui.mime_type, ch.caption, ch.hashtags, ch.style
+                SELECT 
+                    sp.id, sp.user_id, sp.image_id, sp.caption_id, 
+                    sp.caption, sp.hashtags, sp.platforms, sp.scheduled_time, 
+                    sp.status, sp.error_message, sp.attempts, sp.created_at, sp.updated_at, sp.posted_at,
+                    ui.filename, ui.mime_type, 
+                    ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
                 FROM scheduled_posts sp
                 LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
                 LEFT JOIN caption_history ch ON sp.caption_id = ch.id
