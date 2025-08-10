@@ -919,7 +919,7 @@
 
                 function handleFile(file) {
                 if (file.size > 10 * 1024 * 1024) {
-                    alert('File too large. Please select an image under 10MB.');
+                    showError('File too large. Please select an image under 10MB.', 'File Size Error');
                     return;
                 }
 
@@ -1266,7 +1266,7 @@
                 const data = await response.json();
                 
                 if (data.error) {
-                    alert('Error: ' + data.error);
+                    showError(data.error, 'Caption Generation Failed');
                     return;
                 }
 
@@ -1475,7 +1475,7 @@
                 // Show schedule button when results are displayed
                 showScheduleButton();
             } catch (error) {
-                alert('Error generating caption: ' + error.message);
+                showError('Error generating caption: ' + error.message, 'Generation Error');
             } finally {
                 // Reset button state
                 generateBtn.textContent = 'Generate Caption';
@@ -1835,11 +1835,11 @@
                     const data = await response.json();
                     showImageCaptionsModal(data.image, data.captions);
                 } else {
-                    alert('Failed to load image captions');
+                    showError('Failed to load image captions', 'Load Error');
                 }
             } catch (error) {
                 console.error('Error loading image captions:', error);
-                alert('Failed to load image captions');
+                showError('Failed to load image captions', 'Load Error');
             }
         }
         
@@ -2029,14 +2029,14 @@
                     }
                     
                     // Show success message
-                    alert('✅ Image loaded! You can now generate new captions with different styles.');
+                    showSuccess('Image loaded! You can now generate new captions with different styles.', 'Image Ready');
                 };
                 
                 reader.readAsDataURL(imageBlob);
                 
             } catch (error) {
                 console.error('Error loading image for editing:', error);
-                alert('❌ Failed to load image for editing: ' + error.message);
+                showError('Failed to load image for editing: ' + error.message, 'Load Error');
             }
         }
         
@@ -2072,14 +2072,14 @@
                         }, 300);
                     }
                     
-                    alert('✅ Image deleted successfully!');
+                    showSuccess('Image deleted successfully!', 'Deleted');
                 } else {
                     const errorData = await response.json();
-                    alert('❌ Failed to delete image: ' + (errorData.error || 'Unknown error'));
+                    showError('Failed to delete image: ' + (errorData.error || 'Unknown error'), 'Delete Failed');
                 }
             } catch (error) {
                 console.error('Error deleting image:', error);
-                alert('❌ Failed to delete image: ' + error.message);
+                showError('Failed to delete image: ' + error.message, 'Delete Error');
             }
         }
         
@@ -2137,21 +2137,21 @@
             try {
                 const scheduleDateTime = document.getElementById('scheduleDateTime').value;
                 if (!scheduleDateTime) {
-                    alert('Please select a date and time for scheduling');
+                    showWarning('Please select a date and time for scheduling', 'Missing Schedule Time');
                     return;
                 }
                 
                 // Check if scheduled time is in the future
                 const scheduledTime = new Date(scheduleDateTime);
                 if (scheduledTime <= new Date()) {
-                    alert('Scheduled time must be in the future');
+                    showWarning('Scheduled time must be in the future', 'Invalid Time');
                     return;
                 }
                 
                 // Check if scheduled time is on a 5-minute interval
                 const minutes = scheduledTime.getMinutes();
                 if (minutes % 5 !== 0) {
-                    alert('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.)\n\nThis is because scheduled posts are processed every 5 minutes.');
+                    showWarning('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.). This is because scheduled posts are processed every 5 minutes.', '5-Minute Interval Required');
                     return;
                 }
                 
@@ -2163,7 +2163,7 @@
                 });
                 
                 if (selectedPlatforms.length === 0) {
-                    alert('Please select at least one platform');
+                    showWarning('Please select at least one platform', 'No Platform Selected');
                     return;
                 }
                 
@@ -2196,14 +2196,14 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    alert('✅ Post scheduled successfully!');
+                    showSuccess('Post scheduled successfully!', 'Scheduled');
                     hideScheduling();
                 } else {
-                    alert('❌ Failed to schedule post: ' + (result.error || 'Unknown error'));
+                    showError('Failed to schedule post: ' + (result.error || 'Unknown error'), 'Schedule Failed');
                 }
             } catch (error) {
                 console.error('Error scheduling post:', error);
-                alert('❌ Error scheduling post: ' + error.message);
+                showError('Error scheduling post: ' + error.message, 'Schedule Error');
             }
         }
         
@@ -2248,7 +2248,7 @@
                 
             } catch (error) {
                 console.error('Error posting caption from library:', error);
-                alert('❌ Failed to load posting options: ' + error.message);
+                showError('Failed to load posting options: ' + error.message, 'Load Error');
             }
         }
         
@@ -2397,7 +2397,7 @@
                     const result = await postResponse.json();
                     
                     if (result.success) {
-                        alert('✅ Posted successfully to ' + platform + '!');
+                        showSuccess('Posted successfully to ' + platform + '!', 'Posted');
                         
                         // Increment caption usage count
                         await fetch(`/api/caption-history/${captionId}/use`, {
@@ -2414,7 +2414,7 @@
                             }
                         }
                     } else {
-                        alert('❌ Failed to post: ' + (result.error || 'Unknown error'));
+                        showError('Failed to post: ' + (result.error || 'Unknown error'), 'Post Failed');
                     }
                 };
                 
@@ -2422,7 +2422,7 @@
                 
             } catch (error) {
                 console.error('Error posting to social media:', error);
-                alert('❌ Failed to post: ' + error.message);
+                showError('Failed to post: ', 'Error');
             }
         }
         
@@ -2493,11 +2493,17 @@
                         
                         return `
                         <div class="uploaded-image-card">
-                            <div class="uploaded-image-preview" style="height: 120px; background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px;">
-                                📅
+                            <div class="uploaded-image-preview" style="height: 120px; ${post.image_id ? 
+                                `background-image: url('/api/images/${post.image_id}'); background-size: cover; background-position: center; position: relative;` :
+                                'background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px;'
+                            }">
+                                ${post.image_id ? 
+                                    '<div style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">📅</div>' :
+                                    '📅'
+                                }
                             </div>
                             <div class="uploaded-image-info">
-                                <div class="uploaded-image-filename">${post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}</div>
+                                <div class="uploaded-image-filename">${Array.isArray(post.platforms) ? post.platforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ') : 'Unknown platforms'}</div>
                                 <div class="uploaded-image-meta">
                                     <div style="color: ${statusColor};">📊 ${statusText}</div>
                                     <div>⏰ ${scheduledDate.toLocaleDateString()} ${scheduledDate.toLocaleTimeString()}</div>
@@ -2545,11 +2551,11 @@
                     const data = await response.json();
                     showScheduledPostModal(data.post);
                 } else {
-                    alert('Failed to load scheduled post details');
+                    showError('Failed to load scheduled post details', 'Load Error');
                 }
             } catch (error) {
                 console.error('Error loading scheduled post:', error);
-                alert('Failed to load scheduled post details');
+                showError('Failed to load scheduled post details', 'Notification');
             }
         }
         
@@ -2601,7 +2607,10 @@
                             <span style="color: ${statusColor}; font-weight: 600;">${statusText}</span>
                         </div>
                         <div>
-                            <strong>Platforms:</strong> ${post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}
+                            <strong>Platforms:</strong> ${Array.isArray(post.platforms) 
+                                ? post.platforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')
+                                : post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')
+                            }
                         </div>
                         <div>
                             <strong>Scheduled Time:</strong> ${scheduledDate.toLocaleString()}
@@ -2665,11 +2674,11 @@
                     const data = await response.json();
                     showEditScheduledPostModal(data.post);
                 } else {
-                    alert('Failed to load scheduled post for editing');
+                    showError('Failed to load scheduled post for editing', 'Notification');
                 }
             } catch (error) {
                 console.error('Error loading scheduled post for editing:', error);
-                alert('Failed to load scheduled post for editing');
+                showError('Failed to load scheduled post for editing', 'Notification');
             }
         }
         
@@ -2719,7 +2728,10 @@
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 8px; font-weight: 600;">📱 Platforms</label>
                         <div style="padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--border-color);">
-                            ${post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}
+                            ${Array.isArray(post.platforms) 
+                                ? post.platforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')
+                                : post.platforms.split(',').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')
+                            }
                         </div>
                     </div>
                     
@@ -2753,20 +2765,20 @@
                 const newHashtags = document.getElementById('editHashtags').value.trim();
                 
                 if (!newDateTime) {
-                    alert('Please select a date and time');
+                    showError('Please select a date and time', 'Notification');
                     return;
                 }
                 
                 const scheduledTime = new Date(newDateTime);
                 if (scheduledTime <= new Date()) {
-                    alert('Scheduled time must be in the future');
+                    showWarning('Scheduled time must be in the future', 'Invalid Time');
                     return;
                 }
                 
                 // Check if scheduled time is on a 5-minute interval
                 const minutes = scheduledTime.getMinutes();
                 if (minutes % 5 !== 0) {
-                    alert('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.)\n\nThis is because scheduled posts are processed every 5 minutes.');
+                    showWarning('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.). This is because scheduled posts are processed every 5 minutes.', '5-Minute Interval Required');
                     return;
                 }
                 
@@ -2790,15 +2802,15 @@
                     const result = await response.json();
                     
                     if (result.success) {
-                        alert('✅ Scheduled post updated successfully!');
+                        showSuccess('Scheduled post updated successfully!', 'Updated');
                         modal.remove();
                         loadScheduledPosts(); // Refresh the list
                     } else {
-                        alert('❌ Failed to update scheduled post: ' + (result.error || 'Unknown error'));
+                        showError('Failed to update scheduled post: ', 'Error');
                     }
                 } catch (error) {
                     console.error('Error updating scheduled post:', error);
-                    alert('❌ Error updating scheduled post: ' + error.message);
+                    showError('Error updating scheduled post: ', 'Error');
                 }
             });
             
@@ -2828,15 +2840,15 @@
                 });
                 
                 if (response.ok) {
-                    alert('✅ Scheduled post deleted successfully!');
+                    showSuccess('Scheduled post deleted successfully!', 'Deleted');
                     loadScheduledPosts(); // Refresh the list
                 } else {
                     const errorData = await response.json();
-                    alert('❌ Failed to delete scheduled post: ' + (errorData.error || 'Unknown error'));
+                    showError('Failed to delete scheduled post: ', 'Error');
                 }
             } catch (error) {
                 console.error('Error deleting scheduled post:', error);
-                alert('❌ Failed to delete scheduled post: ' + error.message);
+                showError('Failed to delete scheduled post: ', 'Error');
             }
         }
         
@@ -2881,7 +2893,7 @@
                 
             } catch (error) {
                 console.error('Error scheduling caption from library:', error);
-                alert('❌ Failed to load scheduling options: ' + error.message);
+                showError('Failed to load scheduling options: ', 'Error');
             }
         }
         
@@ -2989,21 +3001,21 @@
                 
                 const scheduleDateTime = document.getElementById('scheduleLibraryDateTime').value;
                 if (!scheduleDateTime) {
-                    alert('Please select a date and time for scheduling');
+                    showWarning('Please select a date and time for scheduling', 'Missing Schedule Time');
                     return;
                 }
                 
                 // Check if scheduled time is in the future
                 const scheduledTime = new Date(scheduleDateTime);
                 if (scheduledTime <= new Date()) {
-                    alert('Scheduled time must be in the future');
+                    showWarning('Scheduled time must be in the future', 'Invalid Time');
                     return;
                 }
                 
                 // Check if scheduled time is on a 5-minute interval
                 const minutes = scheduledTime.getMinutes();
                 if (minutes % 5 !== 0) {
-                    alert('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.)\n\nThis is because scheduled posts are processed every 5 minutes.');
+                    showWarning('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.). This is because scheduled posts are processed every 5 minutes.', '5-Minute Interval Required');
                     return;
                 }
                 
@@ -3015,7 +3027,7 @@
                 });
                 
                 if (selectedPlatforms.length === 0) {
-                    alert('Please select at least one platform');
+                    showWarning('Please select at least one platform', 'No Platform Selected');
                     return;
                 }
                 
@@ -3048,14 +3060,14 @@
                     const result = await response.json();
                     
                     if (result.success) {
-                        alert('✅ Caption scheduled successfully!');
+                        showSuccess('Caption scheduled successfully!', 'Scheduled');
                         modal.remove();
                     } else {
-                        alert('❌ Failed to schedule caption: ' + (result.error || 'Unknown error'));
+                        showError('Failed to schedule caption: ', 'Error');
                     }
                 } catch (error) {
                     console.error('Error scheduling caption:', error);
-                    alert('❌ Error scheduling caption: ' + error.message);
+                    showError('Error scheduling caption: ', 'Error');
                 }
             });
             
@@ -3112,11 +3124,11 @@
                     }
                 } else {
                     btn.textContent = '❌ Failed';
-                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                    showError('Failed to post: ' + (result.error || 'Unknown error'), 'Post Failed');
                 }
             } catch (error) {
                 event.target.textContent = '❌ Error';
-                alert('Error posting to Mastodon: ' + error.message);
+                showError('Error posting to Mastodon: ' + error.message, 'Mastodon Error');
             } finally {
                 setTimeout(() => {
                     event.target.disabled = false;
@@ -3167,11 +3179,11 @@
                     }
                 } else {
                     btn.textContent = '❌ Failed';
-                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                    showError('Failed to post: ' + (result.error || 'Unknown error'), 'Post Failed');
                 }
             } catch (error) {
                 event.target.textContent = '❌ Error';
-                alert('Error posting to Pixelfed: ' + error.message);
+                showError('Error posting to Pixelfed: ' + error.message, 'Pixelfed Error');
             } finally {
                 setTimeout(() => {
                     event.target.disabled = false;
@@ -3220,11 +3232,11 @@
                     }
                 } else {
                     btn.textContent = '❌ Failed';
-                    alert('Failed to post: ' + (result.error || 'Unknown error'));
+                    showError('Failed to post: ' + (result.error || 'Unknown error'), 'Post Failed');
                 }
             } catch (error) {
                 event.target.textContent = '❌ Error';
-                alert('Error posting to Instagram: ' + error.message);
+                showError('Error posting to Instagram: ' + error.message, 'Instagram Error');
             } finally {
                 setTimeout(() => {
                     event.target.disabled = false;
@@ -3407,7 +3419,7 @@
             };
             
             if (!formData.name || !formData.promptText) {
-                alert('Name and prompt text are required');
+                showError('Name and prompt text are required', 'Notification');
                 return;
             }
             
@@ -3430,16 +3442,16 @@
                 });
                 
                 if (response.ok) {
-                    alert(editingPromptId ? 'Prompt updated successfully!' : 'Prompt created successfully!');
+                    showSuccess(editingPromptId ? 'Prompt updated successfully!' : 'Prompt created successfully!', 'Saved');
                     await loadCustomPrompts();
                     hidePromptForm();
                     await updateStyleButtonsWithCustomPrompts();
                 } else {
                     const errorData = await response.json();
-                    alert(errorData.error || 'Failed to save prompt');
+                    showError(errorData.error || 'Failed to save prompt', 'Save Error');
                 }
             } catch (error) {
-                alert('Error saving prompt');
+                showError('Error saving prompt', 'Notification');
             }
         }
         
@@ -3470,15 +3482,15 @@
                 });
                 
                 if (response.ok) {
-                    alert('Prompt deleted successfully!');
+                    showSuccess('Prompt deleted successfully!', 'Deleted');
                     await loadCustomPrompts();
                     await updateStyleButtonsWithCustomPrompts();
                 } else {
                     const errorData = await response.json();
-                    alert(errorData.error || 'Failed to delete prompt');
+                    showError(errorData.error || 'Failed to delete prompt', 'Delete Error');
                 }
             } catch (error) {
-                alert('Error deleting prompt');
+                showError('Error deleting prompt', 'Notification');
             }
         }
         
@@ -3736,7 +3748,7 @@
                 btn.style.background = '#dc3545';
                 btn.style.opacity = '1';
                 
-                alert('Failed to load image: ' + error.message);
+                showError('Failed to load image: ' + error.message, 'Load Error');
                 
                 // Reset button
                 setTimeout(() => {
@@ -3818,10 +3830,10 @@
                     showImageDetails(data.image);
                 } else {
                     const errorData = await response.json();
-                    alert('Failed to load image details: ' + (errorData.error || 'Unknown error'));
+                    showError('Failed to load image details: ' + (errorData.error || 'Unknown error'), 'Load Error');
                 }
             } catch (error) {
-                alert('Failed to load image details: ' + error.message);
+                showError('Failed to load image details: ' + error.message, 'Load Error');
             }
         }
         
@@ -3990,10 +4002,10 @@
                     }
                 } else {
                     const errorData = await response.json();
-                    alert('Failed to delete image: ' + (errorData.error || 'Unknown error'));
+                    showError('Failed to delete image: ' + (errorData.error || 'Unknown error'), 'Delete Error');
                 }
             } catch (error) {
-                alert('Failed to delete image: ' + error.message);
+                showError('Failed to delete image: ' + error.message, 'Delete Error');
             }
         }
         
@@ -4399,6 +4411,193 @@ NOTE: The system automatically provides camera info, location, weather, and cont
             margin-bottom: 15px;
             opacity: 0.5;
         }
+
+        /* Toast Notification System */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: var(--card-background);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            transform: translateX(100%);
+            opacity: 0;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            min-width: 300px;
+            pointer-events: auto;
+            backdrop-filter: blur(10px);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success-color);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--error-color);
+        }
+
+        .toast.warning {
+            border-left: 4px solid var(--warning-color);
+        }
+
+        .toast.info {
+            border-left: 4px solid var(--accent-color);
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .toast-content {
+            flex: 1;
+        }
+
+        .toast-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+
+        .toast-message {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .toast-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0;
+            margin-left: 8px;
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .toast-close:hover {
+            color: var(--text-primary);
+            background: var(--border-color);
+        }
+
+        @media (max-width: 768px) {
+            .toast-container {
+                left: 10px;
+                right: 10px;
+                top: 10px;
+                max-width: none;
+            }
+            
+            .toast {
+                min-width: auto;
+            }
+        }
     </style>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // Toast Notification System
+        function showToast(message, type = 'info', title = null, duration = 5000) {
+            const container = document.getElementById('toastContainer');
+            if (!container) return;
+
+            const toastId = 'toast_' + Date.now();
+            const iconMap = {
+                success: '✅',
+                error: '❌',
+                warning: '⚠️',
+                info: 'ℹ️'
+            };
+
+            const titleMap = {
+                success: title || 'Success',
+                error: title || 'Error',
+                warning: title || 'Warning',
+                info: title || 'Info'
+            };
+
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.id = toastId;
+            toast.innerHTML = `
+                <div class="toast-icon">${iconMap[type] || iconMap.info}</div>
+                <div class="toast-content">
+                    <div class="toast-title">${titleMap[type]}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+                <button class="toast-close" onclick="closeToast('${toastId}')" title="Close">×</button>
+            `;
+
+            container.appendChild(toast);
+
+            // Trigger animation
+            setTimeout(() => toast.classList.add('show'), 10);
+
+            // Auto-remove after duration
+            setTimeout(() => closeToast(toastId), duration);
+
+            return toastId;
+        }
+
+        function closeToast(toastId) {
+            const toast = document.getElementById(toastId);
+            if (toast) {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }
+        }
+
+        // Convenience functions
+        function showSuccess(message, title = null, duration = 4000) {
+            return showToast(message, 'success', title, duration);
+        }
+
+        function showError(message, title = null, duration = 6000) {
+            return showToast(message, 'error', title, duration);
+        }
+
+        function showWarning(message, title = null, duration = 5000) {
+            return showToast(message, 'warning', title, duration);
+        }
+
+        function showInfo(message, title = null, duration = 4000) {
+            return showToast(message, 'info', title, duration);
+        }
+    </script>
 </body>
 </html>
