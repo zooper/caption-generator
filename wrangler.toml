@@ -30,7 +30,7 @@ ADMIN_EMAIL = "tomas@jonsson.io"
 
 # Cron trigger for processing scheduled posts
 [triggers]
-crons = ["*/5 * * * *"]  # Run every 5 minutes
+crons = ["* * * * *"]  # Run every 1 minute
 
 # Required secrets (set with `wrangler secret put <NAME>`):
 # - JWT_SECRET
