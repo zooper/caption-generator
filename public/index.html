@@ -2486,7 +2486,6 @@
             const gridHtml = `
                 <div class="uploaded-images-grid">
                     ${posts.map(post => {
-                        console.log('Debug post status:', post.id, post.status);
                         const scheduledDate = new Date(post.scheduled_time);
                         const now = new Date();
                         const timeSinceScheduled = now - scheduledDate;
@@ -2525,7 +2524,6 @@
                                     ${(post.status === 'pending' || post.status === 'failed') ? `
                                         <button class="uploaded-image-btn primary" onclick="editScheduledPost('${post.id}')">✏️ Edit</button>
                                     ` : ''}
-                                    <!-- Debug: Status = ${post.status} -->
                                     <button class="uploaded-image-btn danger" onclick="deleteScheduledPost('${post.id}')">🗑️ Delete</button>
                                 </div>
                             </div>
