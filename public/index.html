@@ -2486,12 +2486,21 @@
             const gridHtml = `
                 <div class="uploaded-images-grid">
                     ${posts.map(post => {
+                        console.log('Debug post status:', post.id, post.status);
                         const scheduledDate = new Date(post.scheduled_time);
-                        const isOverdue = scheduledDate < new Date();
-                        const statusColor = post.status === 'pending' ? (isOverdue ? '#dc3545' : '#28a745') : 
-                                          post.status === 'posted' ? '#28a745' : '#ffc107';
-                        const statusText = post.status === 'pending' ? (isOverdue ? 'Overdue' : 'Scheduled') : 
-                                         post.status === 'posted' ? 'Posted' : 'Failed';
+                        const now = new Date();
+                        const timeSinceScheduled = now - scheduledDate;
+                        const isProcessing = timeSinceScheduled > 0 && timeSinceScheduled < 300000; // 5 minutes grace period
+                        const isOverdue = timeSinceScheduled >= 300000; // Overdue after 5 minutes
+                        
+                        const statusColor = post.status === 'pending' ? 
+                                          (isOverdue ? '#dc3545' : isProcessing ? '#ffc107' : '#28a745') : 
+                                          post.status === 'posted' || post.status === 'completed' ? '#28a745' : 
+                                          post.status === 'processing' ? '#ffc107' : '#dc3545';
+                        const statusText = post.status === 'pending' ? 
+                                         (isOverdue ? 'Overdue' : isProcessing ? 'Processing' : 'Scheduled') : 
+                                         post.status === 'posted' || post.status === 'completed' ? 'Posted' : 
+                                         post.status === 'processing' ? 'Processing' : 'Failed';
                         
                         return `
                         <div class="uploaded-image-card">
@@ -2513,9 +2522,10 @@
                                 </div>
                                 <div class="uploaded-image-actions">
                                     <button class="uploaded-image-btn secondary" onclick="viewScheduledPost('${post.id}')">👁️ View</button>
-                                    ${post.status === 'pending' || post.status === 'failed' ? `
+                                    ${(post.status === 'pending' || post.status === 'failed') ? `
                                         <button class="uploaded-image-btn primary" onclick="editScheduledPost('${post.id}')">✏️ Edit</button>
                                     ` : ''}
+                                    <!-- Debug: Status = ${post.status} -->
                                     <button class="uploaded-image-btn danger" onclick="deleteScheduledPost('${post.id}')">🗑️ Delete</button>
                                 </div>
                             </div>
@@ -2563,11 +2573,19 @@
         
         function showScheduledPostModal(post) {
             const scheduledDate = new Date(post.scheduled_time);
-            const isOverdue = scheduledDate < new Date();
-            const statusColor = post.status === 'pending' ? (isOverdue ? '#dc3545' : '#28a745') : 
-                              post.status === 'posted' ? '#28a745' : '#ffc107';
-            const statusText = post.status === 'pending' ? (isOverdue ? 'Overdue' : 'Scheduled') : 
-                             post.status === 'posted' ? 'Posted' : 'Failed';
+            const now = new Date();
+            const timeSinceScheduled = now - scheduledDate;
+            const isProcessing = timeSinceScheduled > 0 && timeSinceScheduled < 300000; // 5 minutes grace period
+            const isOverdue = timeSinceScheduled >= 300000; // Overdue after 5 minutes
+            
+            const statusColor = post.status === 'pending' ? 
+                              (isOverdue ? '#dc3545' : isProcessing ? '#ffc107' : '#28a745') : 
+                              post.status === 'posted' ? '#28a745' : 
+                              post.status === 'processing' ? '#ffc107' : '#dc3545';
+            const statusText = post.status === 'pending' ? 
+                             (isOverdue ? 'Overdue' : isProcessing ? 'Processing' : 'Scheduled') : 
+                             post.status === 'posted' ? 'Posted' : 
+                             post.status === 'processing' ? 'Processing' : 'Failed';
             
             const modal = document.createElement('div');
             modal.style.cssText = `
@@ -2632,17 +2650,19 @@
                         <div style="background: var(--border-color); padding: 10px; border-radius: 4px; margin-top: 5px;">${post.hashtags || 'No hashtags'}</div>
                     </div>
                     
-                    ${post.error_message ? `
+                    ${post.status === 'failed' ? `
                         <div style="margin-bottom: 15px;">
                             <strong>Error Message:</strong>
-                            <div style="background: #ffe6e6; padding: 10px; border-radius: 4px; margin-top: 5px; color: #dc3545;">${post.error_message}</div>
+                            <div style="background: #ffe6e6; padding: 10px; border-radius: 4px; margin-top: 5px; color: #dc3545;">${post.error_message || 'Unknown error occurred'}</div>
                         </div>
                     ` : ''}
                 </div>
                 
                 <div style="text-align: center; display: flex; gap: 10px; justify-content: center;">
-                    ${post.status === 'pending' ? `
+                    ${(post.status === 'pending' || post.status === 'failed') ? `
                         <button onclick="this.closest('.modal').remove(); editScheduledPost('${post.id}');" style="padding: 10px 20px; background: var(--accent-color); color: white; border: none; border-radius: 6px; cursor: pointer;">✏️ Edit</button>
+                        <button onclick="this.closest('.modal').remove(); deleteScheduledPost('${post.id}');" style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Delete</button>
+                    ` : post.status === 'completed' || post.status === 'posted' ? `
                         <button onclick="this.closest('.modal').remove(); deleteScheduledPost('${post.id}');" style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer;">🗑️ Delete</button>
                     ` : ''}
                     <button onclick="this.closest('.modal').remove()" style="padding: 10px 20px; background: var(--text-secondary); color: white; border: none; border-radius: 6px; cursor: pointer;">Close</button>

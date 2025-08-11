@@ -795,39 +795,51 @@ class D1Database {
 
     async getUserSocialSettings(userId) {
         try {
+            // First let's see what columns actually exist
+            const tableInfo = await this.db.prepare(`PRAGMA table_info(user_settings)`).all();
+            console.log('Table columns:', tableInfo.results?.map(col => col.name));
+            
             const stmt = this.db.prepare(`
-                SELECT setting_name, setting_value, is_encrypted 
+                SELECT setting_key, setting_value, encrypted 
                 FROM user_settings 
-                WHERE user_id = ? AND setting_category = 'social'
+                WHERE user_id = ? AND integration_type = 'social'
             `);
             const results = await stmt.bind(userId).all();
             const settings = {};
             
+            console.log(`Debug getUserSocialSettings for user ${userId}:`, results.results?.length || 0, 'rows found');
             if (results.results) {
+                console.log('Raw results:', JSON.stringify(results.results, null, 2));
                 for (const row of results.results) {
-                    const value = row.is_encrypted ? this.decryptValue(row.setting_value) : row.setting_value;
+                    console.log(`Processing row:`, row.setting_key, '=', row.setting_value ? '[EXISTS]' : '[NULL]');
+                    const value = row.encrypted ? this.decryptValue(row.setting_value) : row.setting_value;
                     
                     // Group settings by platform
-                    if (row.setting_name.startsWith('mastodon_')) {
+                    if (row.setting_key.startsWith('mastodon_')) {
                         if (!settings.mastodon) settings.mastodon = {};
-                        const key = row.setting_name.replace('mastodon_', '');
+                        const key = row.setting_key.replace('mastodon_', '');
                         settings.mastodon[key] = value;
-                    } else if (row.setting_name.startsWith('pixelfed_')) {
+                    } else if (row.setting_key.startsWith('pixelfed_')) {
                         if (!settings.pixelfed) settings.pixelfed = {};
-                        const key = row.setting_name.replace('pixelfed_', '');
+                        const key = row.setting_key.replace('pixelfed_', '');
                         settings.pixelfed[key] = value;
-                    } else if (row.setting_name.startsWith('instagram_')) {
+                    } else if (row.setting_key.startsWith('instagram_')) {
                         if (!settings.instagram) settings.instagram = {};
-                        const key = row.setting_name.replace('instagram_', '');
+                        const key = row.setting_key.replace('instagram_', '');
                         settings.instagram[key] = value;
-                    } else if (row.setting_name.startsWith('linkedin_')) {
+                        console.log(`Instagram setting: ${key} = ${value ? '[DECRYPTED]' : '[NULL]'}`);
+                        if (key === 'access_token') {
+                            console.log(`Instagram access_token length: ${value?.length || 0}`);
+                        }
+                    } else if (row.setting_key.startsWith('linkedin_')) {
                         if (!settings.linkedin) settings.linkedin = {};
-                        const key = row.setting_name.replace('linkedin_', '');
+                        const key = row.setting_key.replace('linkedin_', '');
                         settings.linkedin[key] = value;
                     }
                 }
             }
             
+            console.log(`Final grouped settings for user ${userId}:`, JSON.stringify(settings, null, 2));
             return settings;
         } catch (error) {
             console.error('Error getting user social settings:', error);
@@ -891,13 +903,13 @@ class D1Database {
                     CREATE TABLE user_settings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER NOT NULL,
-                        category TEXT NOT NULL,
+                        integration_type TEXT NOT NULL,
                         setting_key TEXT NOT NULL,
                         setting_value TEXT NOT NULL,
                         encrypted BOOLEAN DEFAULT 0,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(user_id, category, setting_key),
+                        UNIQUE(user_id, integration_type, setting_key),
                         FOREIGN KEY (user_id) REFERENCES users(id)
                     )
                 `);
@@ -1031,12 +1043,6 @@ class D1Database {
                     placeholders.push("datetime('now')");
                 }
                 
-                // Handle the integration_type column that seems to be NOT NULL
-                if (columns.includes('integration_type')) {
-                    insertColumns.push('integration_type');
-                    insertValues.push(settingKey.split('_')[0]); // e.g., 'mastodon' from 'mastodon_token'
-                    placeholders.push('?');
-                }
                 
                 const insertSQL = `
                     INSERT INTO user_settings (${insertColumns.join(', ')}) 
@@ -6144,6 +6150,31 @@ app.get('/api/images/:imageId', async (c) => {
     }
 });
 
+// Debug endpoint to check Instagram settings
+app.get('/api/debug-instagram-settings', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+        
+        // Check user settings with old method
+        const oldSettings = await database.getUserSettings(user.id, 'social');
+        console.log('Old method settings:', JSON.stringify(oldSettings, null, 2));
+        
+        // Check user settings with new method
+        const newSettings = await database.getUserSocialSettings(user.id);
+        console.log('New method settings:', JSON.stringify(newSettings, null, 2));
+        
+        return c.json({
+            userId: user.id,
+            oldMethod: oldSettings,
+            newMethod: newSettings,
+            instagramFound: !!newSettings.instagram?.access_token
+        });
+    } catch (error) {
+        return c.json({ error: error.message }, 500);
+    }
+});
+
 // Manual trigger for scheduled posts (for local testing)
 app.get('/api/trigger-scheduled-posts', authenticateToken, async (c) => {
     try {
@@ -6664,17 +6695,104 @@ async function postToPixelfedCron(content, imageData, settings, env) {
 }
 
 async function postToInstagramCron(content, imageData, settings, env) {
-    // Instagram Business API implementation
+    // Instagram Business API implementation - copied from working manual posting
     try {
-        const accessToken = settings.access_token;
-        const businessAccountId = settings.business_account_id;
+        const instagramAccessToken = settings.access_token;
+        const instagramAccountId = settings.account_id;
         
-        // Instagram posting logic here
-        // This would use Instagram's Business API
+        console.log('Posting to Instagram via scheduled post...');
+        console.log('Caption:', content.combinedContent.substring(0, 100) + '...');
         
-        return true; // Placeholder
+        if (!instagramAccessToken) {
+            console.error('No Instagram access token found');
+            return false;
+        }
+        
+        if (!instagramAccountId) {
+            console.error('No Instagram account ID found');
+            return false;
+        }
+        
+        if (!imageData) {
+            console.error('No image data provided');
+            return false;
+        }
+        
+        // Convert imageData to buffer if it's base64
+        let imageBuffer;
+        if (typeof imageData === 'string') {
+            imageBuffer = Buffer.from(imageData, 'base64');
+        } else {
+            imageBuffer = imageData;
+        }
+        
+        // Upload image to Instagram posts folder for public access
+        const imageKey = `instagram-posts/${Date.now()}-scheduled.jpg`;
+        
+        await env.R2_BUCKET.put(imageKey, imageBuffer, {
+            httpMetadata: {
+                contentType: 'image/jpeg'
+            }
+        });
+        
+        // For Instagram posting, we need a publicly accessible URL
+        const publicImageUrl = `https://ai-caption-studio.jonsson.workers.dev/public-image/${imageKey}`;
+        
+        // Wait a moment to ensure image is fully available
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 2: Create Instagram media container
+        const containerResponse = await fetch(`https://graph.instagram.com/${instagramAccountId}/media`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                image_url: publicImageUrl,
+                caption: content.combinedContent,
+                access_token: instagramAccessToken
+            })
+        });
+        
+        if (!containerResponse.ok) {
+            const errorData = await containerResponse.json();
+            console.error('Failed to create Instagram media container:', errorData);
+            await env.R2_BUCKET.delete(imageKey); // Clean up
+            return false;
+        }
+        
+        const containerData = await containerResponse.json();
+        const containerId = containerData.id;
+        
+        // Step 3: Publish the container
+        const publishResponse = await fetch(`https://graph.instagram.com/${instagramAccountId}/media_publish`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                creation_id: containerId,
+                access_token: instagramAccessToken
+            })
+        });
+        
+        if (publishResponse.ok) {
+            const publishData = await publishResponse.json();
+            console.log('Successfully posted to Instagram:', publishData.id);
+            
+            // Clean up temporary image after successful post
+            await env.R2_BUCKET.delete(imageKey);
+            
+            return true;
+        } else {
+            const errorData = await publishResponse.json();
+            console.error('Failed to publish Instagram post:', errorData);
+            await env.R2_BUCKET.delete(imageKey); // Clean up
+            return false;
+        }
+        
     } catch (error) {
-        console.error('Error posting to Instagram:', error);
+        console.error('Error posting to Instagram in scheduled post:', error);
         return false;
     }
 }
@@ -6695,9 +6813,34 @@ async function handleScheduledPosts(env) {
                 // Update status to processing
                 await database.updateScheduledPostStatus(post.id, 'processing');
                 
-                // Get user's social media settings
-                const socialSettings = await database.getUserSocialSettings(post.user_id);
-                console.log(`Social settings for user ${post.user_id}:`, JSON.stringify(socialSettings, null, 2));
+                // Get user's social media settings using the same method as manual posting
+                const allSettings = await database.getUserSettings(post.user_id, 'social');
+                console.log(`Raw settings for user ${post.user_id}:`, allSettings?.length || 0, 'found');
+                
+                // Build platform-specific settings the same way manual posting does
+                const platformSettings = {
+                    instagram: {},
+                    mastodon: {},
+                    pixelfed: {}
+                };
+                
+                allSettings.forEach(setting => {
+                    if (setting.setting_key === 'instagram_access_token') {
+                        platformSettings.instagram.access_token = setting.setting_value;
+                    } else if (setting.setting_key === 'instagram_account_id') {
+                        platformSettings.instagram.account_id = setting.setting_value;
+                    } else if (setting.setting_key === 'mastodon_token') {
+                        platformSettings.mastodon.token = setting.setting_value;
+                    } else if (setting.setting_key === 'mastodon_instance') {
+                        platformSettings.mastodon.instance = setting.setting_value;
+                    } else if (setting.setting_key === 'pixelfed_token') {
+                        platformSettings.pixelfed.token = setting.setting_value;
+                    } else if (setting.setting_key === 'pixelfed_instance') {
+                        platformSettings.pixelfed.instance = setting.setting_value;
+                    }
+                });
+                
+                console.log(`Platform settings for user ${post.user_id}:`, JSON.stringify(platformSettings, null, 2));
                 
                 // Get image data if needed
                 let imageData = null;
@@ -6740,26 +6883,32 @@ async function handleScheduledPosts(env) {
                         
                         switch (platform) {
                             case 'mastodon':
-                                if (socialSettings.mastodon?.instance && socialSettings.mastodon?.token) {
-                                    platformSuccess = await postToMastodonCron(content, imageData, socialSettings.mastodon, env);
+                                if (platformSettings.mastodon?.instance && platformSettings.mastodon?.token) {
+                                    platformSuccess = await postToMastodonCron(content, imageData, platformSettings.mastodon, env);
                                 } else {
                                     errorMessage = 'Mastodon not configured';
                                 }
                                 break;
                                 
                             case 'pixelfed':
-                                if (socialSettings.pixelfed?.instance && socialSettings.pixelfed?.token) {
-                                    platformSuccess = await postToPixelfedCron(content, imageData, socialSettings.pixelfed, env);
+                                if (platformSettings.pixelfed?.instance && platformSettings.pixelfed?.token) {
+                                    platformSuccess = await postToPixelfedCron(content, imageData, platformSettings.pixelfed, env);
                                 } else {
                                     errorMessage = 'Pixelfed not configured';
                                 }
                                 break;
                                 
                             case 'instagram':
-                                if (socialSettings.instagram?.access_token) {
-                                    platformSuccess = await postToInstagramCron(content, imageData, socialSettings.instagram, env);
+                                console.log(`Debug Instagram settings for user ${post.user_id}:`, JSON.stringify(platformSettings.instagram, null, 2));
+                                console.log(`Debug: platformSettings.instagram.access_token exists:`, !!platformSettings.instagram?.access_token);
+                                console.log(`Debug: platformSettings.instagram.access_token length:`, platformSettings.instagram?.access_token?.length || 0);
+                                if (platformSettings.instagram?.access_token) {
+                                    console.log(`Debug: Calling postToInstagramCron for post ${post.id}`);
+                                    platformSuccess = await postToInstagramCron(content, imageData, platformSettings.instagram, env);
+                                    console.log(`Debug: postToInstagramCron returned:`, platformSuccess);
                                 } else {
-                                    errorMessage = 'Instagram not configured';
+                                    errorMessage = 'Instagram not configured - no access token found';
+                                    console.log(`Debug: Instagram not configured for user ${post.user_id}`);
                                 }
                                 break;
                                 
@@ -6772,6 +6921,7 @@ async function handleScheduledPosts(env) {
                             console.log(`Successfully posted scheduled post ${post.id} to ${platform}`);
                         } else {
                             console.error(`Failed to post scheduled post ${post.id} to ${platform}: ${errorMessage}`);
+                            console.log(`Debug: errorMessage value:`, JSON.stringify(errorMessage));
                         }
                         
                     } catch (platformError) {
@@ -6785,8 +6935,10 @@ async function handleScheduledPosts(env) {
                     await database.updateScheduledPostStatus(post.id, 'completed');
                     console.log(`Successfully posted scheduled post ${post.id} to ${post.platform}`);
                 } else {
-                    await database.updateScheduledPostStatus(post.id, 'failed', errorMessage || 'Post failed');
-                    console.error(`Failed to post scheduled post ${post.id} to ${post.platform}: ${errorMessage}`);
+                    const finalErrorMessage = errorMessage || 'Post failed';
+                    console.log(`Debug: About to update post ${post.id} with error:`, JSON.stringify(finalErrorMessage));
+                    await database.updateScheduledPostStatus(post.id, 'failed', finalErrorMessage);
+                    console.error(`Failed to post scheduled post ${post.id}: ${finalErrorMessage}`);
                 }
                 
             } catch (error) {
