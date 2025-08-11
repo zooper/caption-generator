@@ -6048,8 +6048,7 @@ async function handleScheduledPosts(env) {
         const database = new D1Database(env.DB);
         
         // Get all pending scheduled posts that are due
-        const now = new Date().toISOString();
-        const duePosts = await database.getDueScheduledPosts(now);
+        const duePosts = await database.getPendingScheduledPosts();
         
         console.log(`Found ${duePosts.length} due posts to process`);
         
