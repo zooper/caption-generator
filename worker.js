@@ -77,7 +77,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 13;
+        this.CURRENT_SCHEMA_VERSION = 14;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -154,6 +154,18 @@ class D1Database {
                 console.log('Running migration: Add file_hash and source columns (v13)');
                 await this.migration_v13();
                 await this.setSchemaVersion(13);
+            }
+            
+            // Migration to version 14: Add name field to API keys and update existing keys
+            if (fromVersion < 14) {
+                console.log('Running migration: Add name field to API keys (v14)');
+                try {
+                    await this.migration_v14();
+                    await this.setSchemaVersion(14);
+                    console.log('Migration v14 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v14 failed:', migrationError);
+                }
             }
         } catch (error) {
             console.error('Migration failed:', error);
@@ -1236,6 +1248,30 @@ class D1Database {
             // Some columns might already exist, so we'll continue
         }
     }
+    
+    // Database migration for API key names (v14)
+    async migration_v14() {
+        try {
+            // Add name column to user_api_keys table
+            await this.db.prepare(`
+                ALTER TABLE user_api_keys ADD COLUMN name TEXT
+            `).run();
+            
+            // Update existing API keys to have a default name based on integration_type
+            await this.db.prepare(`
+                UPDATE user_api_keys 
+                SET name = CASE 
+                    WHEN integration_type = 'lightroom' THEN 'Lightroom'
+                    ELSE 'API Key'
+                END
+                WHERE name IS NULL
+            `).run();
+            
+            console.log('Migration v14 completed: Added name field to API keys');
+        } catch (error) {
+            console.error('Migration v14 failed:', error);
+        }
+    }
 
     // API Key Management Methods
     async getUserApiKeys(userId) {
@@ -1249,11 +1285,12 @@ class D1Database {
             const result = await stmt.bind(userId).all();
             return result.results || [];
         } catch (error) {
+            console.error('Error in getUserApiKeys:', error);
             return [];
         }
     }
 
-    async createOrUpdateApiKey(userId, integrationType, apiKey) {
+    async createOrUpdateApiKey(userId, integrationType, apiKey, name = null) {
         try {
             // Check if API key already exists for this user and integration
             const existingStmt = this.db.prepare(`
@@ -1266,17 +1303,17 @@ class D1Database {
                 // Update existing key
                 const updateStmt = this.db.prepare(`
                     UPDATE user_api_keys 
-                    SET api_key = ?, created_at = datetime('now'), last_used = NULL
+                    SET api_key = ?, name = ?, created_at = datetime('now'), last_used = NULL
                     WHERE user_id = ? AND integration_type = ?
                 `);
-                await updateStmt.bind(apiKey, userId, integrationType).run();
+                await updateStmt.bind(apiKey, name, userId, integrationType).run();
             } else {
                 // Insert new key
                 const insertStmt = this.db.prepare(`
-                    INSERT INTO user_api_keys (user_id, integration_type, api_key, created_at, last_used) 
-                    VALUES (?, ?, ?, datetime('now'), NULL)
+                    INSERT INTO user_api_keys (user_id, integration_type, api_key, name, created_at, last_used) 
+                    VALUES (?, ?, ?, ?, datetime('now'), NULL)
                 `);
-                await insertStmt.bind(userId, integrationType, apiKey).run();
+                await insertStmt.bind(userId, integrationType, apiKey, name).run();
             }
             return true;
         } catch (error) {
@@ -1321,6 +1358,20 @@ class D1Database {
                 WHERE user_id = ? AND integration_type = ?
             `);
             const result = await stmt.bind(userId, integrationType).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    async deleteApiKeyById(userId, keyId) {
+        try {
+            const stmt = this.db.prepare(`
+                DELETE FROM user_api_keys 
+                WHERE user_id = ? AND id = ?
+            `);
+            const result = await stmt.bind(userId, keyId).run();
             const changes = result.meta && result.meta.changes || result.changes || 0;
             return changes > 0;
         } catch (error) {
@@ -3000,6 +3051,7 @@ app.get('/api/settings/api-keys', authenticateToken, async (c) => {
         const maskedKeys = apiKeys.map(key => ({
             id: key.id,
             integration_type: key.integration_type,
+            name: key.name || (key.integration_type ? key.integration_type.charAt(0).toUpperCase() + key.integration_type.slice(1) : 'API Key'),
             created_at: key.created_at,
             last_used: key.last_used,
             masked_key: key.api_key.substring(0, 8) + '...' + key.api_key.substring(key.api_key.length - 4)
@@ -3011,6 +3063,40 @@ app.get('/api/settings/api-keys', authenticateToken, async (c) => {
     }
 });
 
+app.post('/api/settings/api-keys', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const body = await c.req.json();
+        const { name, integration_type = 'general' } = body;
+        
+        if (!name || name.trim().length === 0) {
+            return c.json({ error: 'API key name is required' }, 400);
+        }
+        
+        // Generate a new API key using Web Crypto API
+        const apiKey = 'acs_' + generateRandomId().replace(/-/g, '') + '_' + Date.now().toString(36);
+        
+        const database = new D1Database(c.env.DB);
+        const success = await database.createOrUpdateApiKey(user.id, integration_type, apiKey, name.trim());
+        
+        if (success) {
+            return c.json({ 
+                success: true,
+                apiKey: apiKey,  // Use camelCase to match frontend expectations
+                api_key: apiKey, // Also include snake_case for compatibility
+                integration_type: integration_type,
+                name: name.trim(),
+                message: 'API key generated successfully'
+            });
+        } else {
+            return c.json({ error: 'Failed to create API key' }, 500);
+        }
+    } catch (error) {
+        return c.json({ error: 'Failed to generate API key' }, 500);
+    }
+});
+
+// Legacy endpoint for backward compatibility
 app.post('/api/settings/api-keys/:integrationType', authenticateToken, async (c) => {
     try {
         const user = c.get('user');
@@ -3025,8 +3111,11 @@ app.post('/api/settings/api-keys/:integrationType', authenticateToken, async (c)
         // Generate a new API key using Web Crypto API
         const apiKey = 'acs_' + generateRandomId().replace(/-/g, '') + '_' + Date.now().toString(36);
         
+        // Use integration type as name for legacy compatibility
+        const name = integrationType.charAt(0).toUpperCase() + integrationType.slice(1);
+        
         const database = new D1Database(c.env.DB);
-        const success = await database.createOrUpdateApiKey(user.id, integrationType, apiKey);
+        const success = await database.createOrUpdateApiKey(user.id, integrationType, apiKey, name);
         
         if (success) {
             return c.json({ 
@@ -3034,6 +3123,7 @@ app.post('/api/settings/api-keys/:integrationType', authenticateToken, async (c)
                 apiKey: apiKey,  // Use camelCase to match frontend expectations
                 api_key: apiKey, // Also include snake_case for compatibility
                 integration_type: integrationType,
+                name: name,
                 message: 'API key generated successfully'
             });
         } else {
@@ -3044,6 +3134,29 @@ app.post('/api/settings/api-keys/:integrationType', authenticateToken, async (c)
     }
 });
 
+// Delete API key by ID (new method)
+app.delete('/api/settings/api-keys/id/:keyId', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { keyId } = c.req.param();
+        
+        const database = new D1Database(c.env.DB);
+        const success = await database.deleteApiKeyById(user.id, keyId);
+        
+        if (success) {
+            return c.json({ 
+                success: true,
+                message: 'API key revoked successfully'
+            });
+        } else {
+            return c.json({ error: 'API key not found' }, 404);
+        }
+    } catch (error) {
+        return c.json({ error: 'Failed to revoke API key' }, 500);
+    }
+});
+
+// Legacy endpoint for backward compatibility (delete by integration type)
 app.delete('/api/settings/api-keys/:integrationType', authenticateToken, async (c) => {
     try {
         const user = c.get('user');

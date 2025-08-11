@@ -278,37 +278,31 @@
             <!-- API Keys -->
             <div class="settings-section">
                 <div class="section-title">🔑 API Keys</div>
-                <p class="text-muted mb-3">Generate API keys to connect external applications like Lightroom plugins to your account.</p>
+                <p class="text-muted mb-3">Generate API keys to connect external applications to your account.</p>
                 
+                <!-- Create New API Key -->
                 <div class="integration-card">
                     <div class="integration-header">
                         <div class="integration-title">
-                            <span>📸</span>
-                            <span>Lightroom Plugin</span>
-                        </div>
-                        <span id="lightroomApiKeyStatus" class="status-badge status-disconnected">No Key</span>
-                    </div>
-                    <div id="lightroomApiKeySettings">
-                        <div class="form-group">
-                            <label class="form-label" for="lightroomApiKey">API Key</label>
-                            <div class="flex gap-2">
-                                <input type="password" id="lightroomApiKey" class="form-input" readonly placeholder="Click 'Generate' to create an API key">
-                                <button class="btn btn-primary" onclick="generateLightroomApiKey()">🔄 Generate</button>
-                                <button class="btn btn-secondary" onclick="copyLightroomApiKey()" id="copyLightroomBtn" style="display: none;">📋 Copy</button>
-                                <button class="btn btn-danger" onclick="revokeLightroomApiKey()" id="revokeLightroomBtn" style="display: none;">🗑️ Revoke</button>
-                            </div>
-                            <p class="text-sm text-muted mt-3">
-                                Use this API key in your Lightroom plugin to connect to AI Caption Studio. 
-                                Keep this key secure and don't share it publicly.
-                            </p>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Usage Information</label>
-                            <div id="lightroomApiKeyInfo" class="text-sm text-muted">
-                                No API key generated yet
-                            </div>
+                            <span>➕</span>
+                            <span>Create New API Key</span>
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label" for="newApiKeyName">API Key Name</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="newApiKeyName" class="form-input" placeholder="e.g., Lightroom Plugin, Mobile App, etc.">
+                            <button class="btn btn-primary" onclick="createNewApiKey()">🔄 Generate</button>
+                        </div>
+                        <p class="text-sm text-muted mt-3">
+                            Give your API key a descriptive name to help you identify its purpose.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Existing API Keys -->
+                <div id="existingApiKeys">
+                    <!-- API keys will be loaded here -->
                 </div>
             </div>
 
@@ -1050,68 +1044,109 @@
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
+                console.log('API keys response status:', response.status); // Debug log
+                
                 if (response.ok) {
                     const apiKeys = await response.json();
-                    
-                    if (apiKeys.lightroom) {
-                        updateLightroomApiKeyStatus('active');
-                        document.getElementById('lightroomApiKey').value = '••••••••••••••••••••••••••••••••';
-                        document.getElementById('lightroomApiKeyInfo').innerHTML = `
-                            <strong>Created:</strong> ${new Date(apiKeys.lightroom.created_at).toLocaleDateString()}<br>
-                            <strong>Last Used:</strong> ${apiKeys.lightroom.last_used ? new Date(apiKeys.lightroom.last_used).toLocaleDateString() : 'Never'}<br>
-                            <strong>Status:</strong> Active
-                        `;
-                        document.getElementById('copyLightroomBtn').style.display = 'block';
-                        document.getElementById('revokeLightroomBtn').style.display = 'block';
-                    }
+                    console.log('API keys received:', apiKeys); // Debug log
+                    renderApiKeys(apiKeys);
+                } else {
+                    const errorText = await response.text();
+                    console.error('Failed to load API keys:', response.status, errorText);
+                    document.getElementById('existingApiKeys').innerHTML = `
+                        <div class="integration-card">
+                            <p class="text-muted">Error loading API keys: ${response.status}</p>
+                        </div>
+                    `;
                 }
             } catch (error) {
                 console.error('Error loading API keys:', error);
+                document.getElementById('existingApiKeys').innerHTML = `
+                    <div class="integration-card">
+                        <p class="text-muted">Error loading API keys: ${error.message}</p>
+                    </div>
+                `;
             }
         }
 
-        function updateLightroomApiKeyStatus(status) {
-            const statusEl = document.getElementById('lightroomApiKeyStatus');
-            statusEl.className = 'status-badge';
+        function renderApiKeys(apiKeys) {
+            const container = document.getElementById('existingApiKeys');
             
-            if (status === 'active') {
-                statusEl.classList.add('status-connected');
-                statusEl.textContent = 'Active';
-            } else {
-                statusEl.classList.add('status-disconnected');
-                statusEl.textContent = 'No Key';
+            console.log('Rendering API keys:', apiKeys); // Debug log
+            
+            if (!apiKeys || apiKeys.length === 0) {
+                container.innerHTML = `
+                    <div class="integration-card">
+                        <p class="text-muted">No API keys created yet. Use the form above to generate your first API key.</p>
+                    </div>
+                `;
+                return;
             }
+
+            container.innerHTML = apiKeys.map(key => {
+                // Handle legacy keys that might not have a name field
+                const keyName = key.name || (key.integration_type ? 
+                    key.integration_type.charAt(0).toUpperCase() + key.integration_type.slice(1) : 
+                    'Unnamed API Key');
+                
+                return `
+                    <div class="integration-card">
+                        <div class="integration-header">
+                            <div class="integration-title">
+                                <span>🔑</span>
+                                <span>${keyName}</span>
+                            </div>
+                            <span class="status-badge status-connected">Active</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">API Key</label>
+                            <div class="flex gap-2">
+                                <input type="password" class="form-input" readonly value="${key.masked_key || '••••••••••••••••••••••••••••••••'}">
+                                <button class="btn btn-secondary" onclick="copyApiKey('${key.masked_key || ''}', '${keyName}')">📋 Copy</button>
+                                <button class="btn btn-danger" onclick="revokeApiKey('${key.id}', '${keyName}')">🗑️ Revoke</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Usage Information</label>
+                            <div class="text-sm text-muted">
+                                <strong>Created:</strong> ${key.created_at ? new Date(key.created_at).toLocaleDateString() : 'Unknown'}<br>
+                                <strong>Last Used:</strong> ${key.last_used ? new Date(key.last_used).toLocaleDateString() : 'Never'}<br>
+                                <strong>Type:</strong> ${key.integration_type || 'general'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
-        async function generateLightroomApiKey() {
-            if (!confirm('Generate a new API key? This will revoke any existing key.')) return;
+        async function createNewApiKey() {
+            const nameInput = document.getElementById('newApiKeyName');
+            const name = nameInput.value.trim();
+            
+            if (!name) {
+                alert('❌ Please enter a name for your API key');
+                return;
+            }
             
             try {
-                const response = await fetch('/api/settings/api-keys/lightroom', {
+                const response = await fetch('/api/settings/api-keys', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': 'Bearer ' + localStorage.getItem('auth_token')
-                    }
+                    },
+                    body: JSON.stringify({ name })
                 });
                 
                 const result = await response.json();
                 if (result.success) {
-                    updateLightroomApiKeyStatus('active');
-                    document.getElementById('lightroomApiKey').value = result.apiKey;
-                    document.getElementById('lightroomApiKey').type = 'text';
-                    document.getElementById('lightroomApiKeyInfo').innerHTML = `
-                        <strong>Created:</strong> ${new Date().toLocaleDateString()}<br>
-                        <strong>Last Used:</strong> Never<br>
-                        <strong>Status:</strong> Active<br>
-                        <span style="color: var(--warning-color);">⚠️ Copy this key now - it won't be shown again!</span>
-                    `;
-                    document.getElementById('copyLightroomBtn').style.display = 'block';
-                    document.getElementById('revokeLightroomBtn').style.display = 'block';
-                    
                     // Auto-copy to clipboard
                     navigator.clipboard.writeText(result.apiKey);
-                    alert('✅ API key generated and copied to clipboard!');
+                    alert(`✅ API key "${name}" generated and copied to clipboard!\n\n⚠️ Make sure to save this key - it won't be shown again!`);
+                    
+                    // Clear the input and reload keys
+                    nameInput.value = '';
+                    loadApiKeys();
                 } else {
                     alert('❌ Failed to generate API key: ' + result.error);
                 }
@@ -1120,45 +1155,40 @@
             }
         }
 
-        async function copyLightroomApiKey() {
-            const keyInput = document.getElementById('lightroomApiKey');
-            
-            if (keyInput.value.includes('••••')) {
-                alert('❌ Cannot copy masked key. Generate a new key to see the full value.');
+        async function copyApiKey(maskedKey, name) {
+            if (maskedKey.includes('...')) {
+                alert(`❌ Cannot copy masked key for "${name}". The full key was only shown when first generated.`);
                 return;
             }
             
             try {
-                await navigator.clipboard.writeText(keyInput.value);
-                alert('✅ API key copied to clipboard!');
+                await navigator.clipboard.writeText(maskedKey);
+                alert(`✅ API key "${name}" copied to clipboard!`);
             } catch (error) {
-                alert('❌ Failed to copy to clipboard. Please copy manually.');
-                keyInput.select();
+                alert(`❌ Failed to copy "${name}" API key to clipboard.`);
             }
         }
 
-        async function revokeLightroomApiKey() {
-            if (!confirm('Are you sure you want to revoke this API key? This will disconnect any applications using it.')) return;
+        async function revokeApiKey(keyId, name) {
+            if (!confirm(`Are you sure you want to revoke the API key "${name}"? This will disconnect any applications using it.`)) return;
             
             try {
-                const response = await fetch('/api/settings/api-keys/lightroom', {
+                const response = await fetch(`/api/settings/api-keys/id/${keyId}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
                 });
                 
                 if (response.ok) {
-                    updateLightroomApiKeyStatus('inactive');
-                    document.getElementById('lightroomApiKey').value = '';
-                    document.getElementById('lightroomApiKey').placeholder = 'Click \'Generate\' to create an API key';
-                    document.getElementById('lightroomApiKeyInfo').textContent = 'No API key generated yet';
-                    document.getElementById('copyLightroomBtn').style.display = 'none';
-                    document.getElementById('revokeLightroomBtn').style.display = 'none';
-                    alert('✅ API key revoked successfully!');
+                    alert(`✅ API key "${name}" revoked successfully!`);
+                    loadApiKeys(); // Reload the keys list
                 } else {
-                    alert('❌ Failed to revoke API key');
+                    const errorText = await response.text();
+                    console.error('Failed to revoke API key:', response.status, errorText);
+                    alert(`❌ Failed to revoke API key "${name}": ${response.status}`);
                 }
             } catch (error) {
-                alert('❌ Failed to revoke API key: ' + error.message);
+                console.error('Error revoking API key:', error);
+                alert(`❌ Failed to revoke API key "${name}": ` + error.message);
             }
         }
 
