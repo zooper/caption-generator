@@ -4202,15 +4202,21 @@ app.post('/api/user/settings/test-instagram', authenticateToken, async (c) => {
         const settings = await database.getUserSettings(user.id, 'social');
         let instagramAccessToken = null;
         
+        console.log(`Debug: Found ${settings.length} social settings for user ${user.id}`);
+        
         settings.forEach(setting => {
+            console.log(`Debug: Setting ${setting.setting_key} = ${setting.setting_value ? 'EXISTS' : 'NULL'}`);
             if (setting.setting_key === 'instagram_access_token') {
                 instagramAccessToken = setting.setting_value;
             }
         });
         
         if (!instagramAccessToken) {
+            console.log('Debug: No Instagram access token found');
             return c.json({ error: 'Instagram not connected' }, 400);
         }
+        
+        console.log('Debug: Instagram access token found, testing connection...');
         
         // Test Instagram connection by getting account info
         const testUrl = `https://graph.facebook.com/me?access_token=${instagramAccessToken}`;
