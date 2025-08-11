@@ -694,7 +694,7 @@ class D1Database {
                     sp.id, sp.user_id, sp.image_id, sp.caption_id, 
                     sp.caption, sp.hashtags, sp.platforms, sp.scheduled_time, 
                     sp.status, sp.error_message, sp.attempts, sp.created_at, sp.updated_at, sp.posted_at,
-                    ui.filename, ui.mime_type, 
+                    ui.filename, ui.mime_type, ui.r2_key,
                     ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
                 FROM scheduled_posts sp
                 LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
@@ -830,7 +830,7 @@ class D1Database {
             await this.ensureScheduledPostsTable();
             
             const stmt = this.db.prepare(`
-                SELECT sp.*, ui.filename, ui.mime_type, ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
+                SELECT sp.*, ui.filename, ui.mime_type, ui.r2_key, ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
                 FROM scheduled_posts sp
                 LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
                 LEFT JOIN caption_history ch ON sp.caption_id = ch.id
@@ -6100,17 +6100,21 @@ app.put('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
 app.get('/api/images/:imageId', async (c) => {
     try {
         const imageId = c.req.param('imageId');
-        console.log('Serving image:', imageId);
+        console.log('Serving image for ID:', imageId);
         
         if (!c.env.R2_BUCKET) {
             console.error('R2 storage not configured');
             return c.text('R2 storage not configured', 500);
         }
         
-        const imageObject = await c.env.R2_BUCKET.get(`images/${imageId}`);
+        // The imageId parameter might already include the full R2 key (e.g., "images/1/timestamp-hash.jpg")
+        // or it might be just a bare ID that needs the images/ prefix
+        const r2Key = imageId.startsWith('images/') ? imageId : `images/${imageId}`;
+        console.log('Using R2 key:', r2Key);
+        const imageObject = await c.env.R2_BUCKET.get(r2Key);
         
         if (!imageObject) {
-            console.error('Image not found in R2:', imageId);
+            console.error('Image not found in R2 using key:', r2Key);
             return c.text('Image not found', 404);
         }
         

@@ -2504,7 +2504,7 @@
                         return `
                         <div class="uploaded-image-card">
                             <div class="uploaded-image-preview" style="height: 120px; ${post.image_id ? 
-                                `background-image: url('/api/images/${post.image_id}'); background-size: cover; background-position: center; position: relative;` :
+                                `background-image: url('/api/uploaded-images/${post.image_id}/data'); background-size: cover; background-position: center; position: relative;` :
                                 'background: linear-gradient(135deg, #405de6 0%, #fd1d1d 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px;'
                             }">
                                 ${post.image_id ? 
