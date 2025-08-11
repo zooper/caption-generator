@@ -6632,16 +6632,72 @@ async function postToMastodonCron(content, imageData, settings, env) {
 }
 
 async function postToPixelfedCron(content, imageData, settings, env) {
-    // Similar implementation for Pixelfed
-    // Using their API format
     try {
         const instance = settings.instance;
         const token = settings.token;
         
-        // Pixelfed posting logic here
-        // This would be similar to Mastodon but with Pixelfed's API
+        let mediaId = null;
         
-        return true; // Placeholder
+        // Upload image if provided
+        if (imageData) {
+            // Convert imageData to buffer (handle both base64 strings and ArrayBuffer)
+            let imageBuffer;
+            if (typeof imageData === 'string') {
+                imageBuffer = Uint8Array.from(atob(imageData), c => c.charCodeAt(0));
+            } else {
+                imageBuffer = new Uint8Array(imageData);
+            }
+            
+            const formData = new FormData();
+            formData.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }));
+            
+            const mediaResponse = await fetch(`${instance}/api/v1/media`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                body: formData
+            });
+            
+            if (mediaResponse.ok) {
+                const mediaResult = await mediaResponse.json();
+                mediaId = mediaResult.id;
+            } else {
+                const errorText = await mediaResponse.text();
+                console.error('Failed to upload image to Pixelfed:', mediaResponse.status, errorText);
+                return false;
+            }
+        }
+        
+        // Create the post
+        const postData = {
+            status: content,
+            visibility: 'public'
+        };
+        
+        if (mediaId) {
+            postData.media_ids = [mediaId];
+        }
+        
+        const postResponse = await fetch(`${instance}/api/v1/statuses`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(postData)
+        });
+        
+        if (postResponse.ok) {
+            const postResult = await postResponse.json();
+            console.log('Successfully posted to Pixelfed:', postResult.url);
+            return true;
+        } else {
+            const errorText = await postResponse.text();
+            console.error('Failed to create post on Pixelfed:', postResponse.status, errorText);
+            return false;
+        }
+        
     } catch (error) {
         console.error('Error posting to Pixelfed:', error);
         return false;
@@ -6835,7 +6891,7 @@ async function handleScheduledPosts(env) {
                         switch (platform) {
                             case 'mastodon':
                                 if (platformSettings.mastodon?.instance && platformSettings.mastodon?.token) {
-                                    platformSuccess = await postToMastodonCron(content, imageData, platformSettings.mastodon, env);
+                                    platformSuccess = await postToMastodonCron(content.combinedContent, imageData, platformSettings.mastodon, env);
                                 } else {
                                     errorMessage = 'Mastodon not configured';
                                 }
@@ -6843,7 +6899,7 @@ async function handleScheduledPosts(env) {
                                 
                             case 'pixelfed':
                                 if (platformSettings.pixelfed?.instance && platformSettings.pixelfed?.token) {
-                                    platformSuccess = await postToPixelfedCron(content, imageData, platformSettings.pixelfed, env);
+                                    platformSuccess = await postToPixelfedCron(content.combinedContent, imageData, platformSettings.pixelfed, env);
                                 } else {
                                     errorMessage = 'Pixelfed not configured';
                                 }
