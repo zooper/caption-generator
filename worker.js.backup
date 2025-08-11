@@ -77,7 +77,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 13;
+        this.CURRENT_SCHEMA_VERSION = 12;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -147,13 +147,6 @@ class D1Database {
                 console.log('Running migration: Add custom prompts table (v12)');
                 await this.migration_v12();
                 await this.setSchemaVersion(12);
-            }
-            
-            // Migration to version 13: Add file_hash and source columns to uploaded_images
-            if (fromVersion < 13) {
-                console.log('Running migration: Add file_hash and source columns (v13)');
-                await this.migration_v13();
-                await this.setSchemaVersion(13);
             }
         } catch (error) {
             console.error('Migration failed:', error);
@@ -510,61 +503,55 @@ class D1Database {
     // Scheduled posts table
     async ensureScheduledPostsTable() {
         try {
-            // Check if table exists and has correct schema
+            // Check if table exists first
             const tableExists = await this.db.prepare(`
                 SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_posts'
             `).first();
             
-            if (tableExists) {
-                // Check if table has the correct column structure
-                const columns = await this.db.prepare(`
-                    PRAGMA table_info(scheduled_posts)
-                `).all();
-                
-                const hasCorrectSchema = columns.results?.some(col => col.name === 'caption');
-                
-                if (!hasCorrectSchema) {
-                    // Drop and recreate with correct schema for development
-                    console.log('Updating scheduled_posts table schema...');
-                    await this.db.prepare('DROP TABLE IF EXISTS scheduled_posts').run();
-                }
-            }
-            
-            // Create table if it doesn't exist or was just dropped
-            const tableExistsNow = await this.db.prepare(`
-                SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_posts'
-            `).first();
-            
-            if (!tableExistsNow) {
-                // Create table matching schema.sql
+            if (!tableExists) {
+                // Create table with timezone column
                 const stmt = this.db.prepare(`
                     CREATE TABLE scheduled_posts (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER NOT NULL,
-                        image_id TEXT,
+                        image_id INTEGER,
                         caption_id INTEGER,
-                        caption TEXT NOT NULL,
-                        hashtags TEXT,
+                        custom_caption TEXT,
+                        custom_hashtags TEXT,
                         platforms TEXT NOT NULL,
                         scheduled_time DATETIME NOT NULL,
+                        timezone TEXT,
                         status TEXT DEFAULT 'pending',
-                        error_message TEXT,
                         attempts INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        posted_at DATETIME,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        posted_at DATETIME,
-                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-                        FOREIGN KEY (caption_id) REFERENCES caption_history (id) ON DELETE SET NULL
+                        FOREIGN KEY (user_id) REFERENCES users(id),
+                        FOREIGN KEY (image_id) REFERENCES uploaded_images(id),
+                        FOREIGN KEY (caption_id) REFERENCES caption_history(id)
                     )
                 `);
                 await stmt.run();
-                console.log('Created scheduled_posts table with correct schema');
+            } else {
+                // Check if timezone column exists, add it if it doesn't
+                const columnExists = await this.db.prepare(`
+                    PRAGMA table_info(scheduled_posts)
+                `).all();
+                
+                const hasTimezone = columnExists.results?.some(col => col.name === 'timezone');
+                
+                if (!hasTimezone) {
+                    const alterStmt = this.db.prepare(`
+                        ALTER TABLE scheduled_posts ADD COLUMN timezone TEXT
+                    `);
+                    await alterStmt.run();
+                }
             }
         } catch (error) {
             console.error('Error ensuring scheduled_posts table:', error);
         }
     }
-
     async getAllSystemSettings() {
         try {
             // Ensure table exists first
@@ -644,38 +631,16 @@ class D1Database {
         try {
             await this.ensureScheduledPostsTable();
             
-            // Ensure we have a caption - use custom caption, or get from caption history, or provide default
-            let finalCaption = customCaption;
-            let finalHashtags = customHashtags;
-            
-            if (!finalCaption && captionId) {
-                // Get caption from caption history
-                const captionHistory = await this.db.prepare(`
-                    SELECT caption, hashtags FROM caption_history WHERE id = ?
-                `).bind(captionId).first();
-                
-                if (captionHistory) {
-                    finalCaption = captionHistory.caption;
-                    if (!finalHashtags) {
-                        finalHashtags = captionHistory.hashtags;
-                    }
-                }
-            }
-            
-            // If still no caption, provide a default
-            if (!finalCaption) {
-                finalCaption = 'Scheduled post';
-            }
-            
             const stmt = this.db.prepare(`
                 INSERT INTO scheduled_posts (
-                    user_id, image_id, caption_id, caption, hashtags, platforms, scheduled_time
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    user_id, image_id, caption_id, custom_caption, custom_hashtags,
+                    platforms, scheduled_time, timezone
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             `);
             
             const result = await stmt.bind(
-                userId, imageId, captionId, finalCaption, finalHashtags,
-                JSON.stringify(platforms), scheduledTime
+                userId, imageId, captionId, customCaption, customHashtags,
+                JSON.stringify(platforms), scheduledTime, timezone
             ).run();
             
             return result.meta.last_row_id;
@@ -690,12 +655,7 @@ class D1Database {
             await this.ensureScheduledPostsTable();
             
             let query = `
-                SELECT 
-                    sp.id, sp.user_id, sp.image_id, sp.caption_id, 
-                    sp.caption, sp.hashtags, sp.platforms, sp.scheduled_time, 
-                    sp.status, sp.error_message, sp.attempts, sp.created_at, sp.updated_at, sp.posted_at,
-                    ui.filename, ui.mime_type, ui.r2_key,
-                    ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
+                SELECT sp.*, ui.filename, ui.mime_type, ch.caption, ch.hashtags, ch.style
                 FROM scheduled_posts sp
                 LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
                 LEFT JOIN caption_history ch ON sp.caption_id = ch.id
@@ -730,7 +690,7 @@ class D1Database {
                 LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
                 LEFT JOIN caption_history ch ON sp.caption_id = ch.id
                 WHERE sp.status = 'pending' 
-                AND datetime(sp.scheduled_time) <= datetime('now')
+                AND sp.scheduled_time <= datetime('now')
                 ORDER BY sp.scheduled_time ASC
             `);
             
@@ -786,33 +746,33 @@ class D1Database {
     async getUserSocialSettings(userId) {
         try {
             const stmt = this.db.prepare(`
-                SELECT setting_key, setting_value, encrypted 
+                SELECT setting_name, setting_value, is_encrypted 
                 FROM user_settings 
-                WHERE user_id = ? AND integration_type = 'social'
+                WHERE user_id = ? AND setting_category = 'social'
             `);
             const results = await stmt.bind(userId).all();
             const settings = {};
             
             if (results.results) {
                 for (const row of results.results) {
-                    const value = row.encrypted ? this.decryptValue(row.setting_value) : row.setting_value;
+                    const value = row.is_encrypted ? this.decryptValue(row.setting_value) : row.setting_value;
                     
                     // Group settings by platform
-                    if (row.setting_key.startsWith('mastodon_')) {
+                    if (row.setting_name.startsWith('mastodon_')) {
                         if (!settings.mastodon) settings.mastodon = {};
-                        const key = row.setting_key.replace('mastodon_', '');
+                        const key = row.setting_name.replace('mastodon_', '');
                         settings.mastodon[key] = value;
-                    } else if (row.setting_key.startsWith('pixelfed_')) {
+                    } else if (row.setting_name.startsWith('pixelfed_')) {
                         if (!settings.pixelfed) settings.pixelfed = {};
-                        const key = row.setting_key.replace('pixelfed_', '');
+                        const key = row.setting_name.replace('pixelfed_', '');
                         settings.pixelfed[key] = value;
-                    } else if (row.setting_key.startsWith('instagram_')) {
+                    } else if (row.setting_name.startsWith('instagram_')) {
                         if (!settings.instagram) settings.instagram = {};
-                        const key = row.setting_key.replace('instagram_', '');
+                        const key = row.setting_name.replace('instagram_', '');
                         settings.instagram[key] = value;
-                    } else if (row.setting_key.startsWith('linkedin_')) {
+                    } else if (row.setting_name.startsWith('linkedin_')) {
                         if (!settings.linkedin) settings.linkedin = {};
-                        const key = row.setting_key.replace('linkedin_', '');
+                        const key = row.setting_name.replace('linkedin_', '');
                         settings.linkedin[key] = value;
                     }
                 }
@@ -830,7 +790,7 @@ class D1Database {
             await this.ensureScheduledPostsTable();
             
             const stmt = this.db.prepare(`
-                SELECT sp.*, ui.filename, ui.mime_type, ui.r2_key, ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
+                SELECT sp.*, ui.filename, ui.mime_type, ch.caption as original_caption, ch.hashtags as original_hashtags, ch.style
                 FROM scheduled_posts sp
                 LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
                 LEFT JOIN caption_history ch ON sp.caption_id = ch.id
@@ -851,14 +811,12 @@ class D1Database {
             
             const stmt = this.db.prepare(`
                 UPDATE scheduled_posts 
-                SET scheduled_time = ?, caption = ?, hashtags = ?, status = 'pending', updated_at = datetime('now')
-                WHERE id = ? AND user_id = ? AND status IN ('pending', 'failed')
+                SET scheduled_time = ?, caption = ?, hashtags = ?, updated_at = datetime('now')
+                WHERE id = ? AND user_id = ? AND status = 'pending'
             `);
             
-            const result = await stmt.bind(scheduledTime, caption, hashtags, parseInt(postId), userId).run();
-            
-            // In D1, changes count is in result.meta.changes
-            return result.meta?.changes > 0 || false;
+            const result = await stmt.bind(scheduledTime, caption, hashtags, postId, userId).run();
+            return result.changes > 0;
         } catch (error) {
             console.error('Error updating scheduled post:', error);
             return false;
@@ -881,13 +839,13 @@ class D1Database {
                     CREATE TABLE user_settings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER NOT NULL,
-                        integration_type TEXT NOT NULL,
+                        category TEXT NOT NULL,
                         setting_key TEXT NOT NULL,
                         setting_value TEXT NOT NULL,
                         encrypted BOOLEAN DEFAULT 0,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(user_id, integration_type, setting_key),
+                        UNIQUE(user_id, category, setting_key),
                         FOREIGN KEY (user_id) REFERENCES users(id)
                     )
                 `);
@@ -1021,6 +979,12 @@ class D1Database {
                     placeholders.push("datetime('now')");
                 }
                 
+                // Handle the integration_type column that seems to be NOT NULL
+                if (columns.includes('integration_type')) {
+                    insertColumns.push('integration_type');
+                    insertValues.push(settingKey.split('_')[0]); // e.g., 'mastodon' from 'mastodon_token'
+                    placeholders.push('?');
+                }
                 
                 const insertSQL = `
                     INSERT INTO user_settings (${insertColumns.join(', ')}) 
@@ -1209,31 +1173,6 @@ class D1Database {
             await stmt.run();
         } catch (error) {
             console.error('Migration v12 failed:', error);
-        }
-    }
-
-    // Database migration for image library columns (v13)
-    async migration_v13() {
-        try {
-            // Add file_hash column to uploaded_images table
-            await this.db.prepare(`
-                ALTER TABLE uploaded_images ADD COLUMN file_hash TEXT
-            `).run();
-            
-            // Add source column to uploaded_images table  
-            await this.db.prepare(`
-                ALTER TABLE uploaded_images ADD COLUMN source TEXT DEFAULT 'lightroom'
-            `).run();
-            
-            // Add location column to uploaded_images table
-            await this.db.prepare(`
-                ALTER TABLE uploaded_images ADD COLUMN location TEXT
-            `).run();
-            
-            console.log('Migration v13 completed: Added file_hash, source, and location columns');
-        } catch (error) {
-            console.error('Migration v13 failed:', error);
-            // Some columns might already exist, so we'll continue
         }
     }
 
@@ -4196,60 +4135,31 @@ app.post('/api/user/settings/test-instagram', authenticateToken, async (c) => {
         const settings = await database.getUserSettings(user.id, 'social');
         let instagramAccessToken = null;
         
-        console.log(`Debug: Found ${settings.length} social settings for user ${user.id}`);
-        
         settings.forEach(setting => {
-            console.log(`Debug: Setting ${setting.setting_key} = ${setting.setting_value ? 'EXISTS' : 'NULL'}`);
             if (setting.setting_key === 'instagram_access_token') {
                 instagramAccessToken = setting.setting_value;
             }
         });
         
         if (!instagramAccessToken) {
-            console.log('Debug: No Instagram access token found');
             return c.json({ error: 'Instagram not connected' }, 400);
         }
         
-        console.log('Debug: Instagram access token found, testing connection...');
-        
         // Test Instagram connection by getting account info
-        // For Instagram Business API, we need to get the business account ID first
-        let testUrl, testResponse;
+        const testUrl = `https://graph.facebook.com/me?access_token=${instagramAccessToken}`;
+        const response = await fetch(testUrl);
         
-        // First try Instagram Basic Display API
-        testUrl = `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${instagramAccessToken}`;
-        testResponse = await fetch(testUrl);
-        
-        if (testResponse.ok) {
-            const data = await testResponse.json();
+        if (response.ok) {
+            const data = await response.json();
             return c.json({ 
                 success: true, 
                 message: 'Instagram connection test successful',
-                account: {
-                    id: data.id,
-                    username: data.username,
-                    account_type: data.account_type || 'BUSINESS'
-                }
+                accounts: data.data?.length || 0
             });
         } else {
-            // If Basic Display fails, try Facebook Graph API for business accounts
-            testUrl = `https://graph.facebook.com/me/accounts?access_token=${instagramAccessToken}`;
-            testResponse = await fetch(testUrl);
-            
-            if (testResponse.ok) {
-                const fbData = await testResponse.json();
-                return c.json({ 
-                    success: true, 
-                    message: 'Instagram connection test successful (via Facebook)',
-                    accounts: fbData.data?.length || 0
-                });
-            } else {
-                const errorText = await testResponse.text();
-                console.error('Instagram test failed:', errorText);
-                return c.json({ 
-                    error: `Failed to verify Instagram credentials: ${testResponse.status} - ${errorText}` 
-                }, 400);
-            }
+            return c.json({ 
+                error: 'Failed to verify Instagram credentials: ' + response.status 
+            }, 400);
         }
         
     } catch (error) {
@@ -4355,28 +4265,11 @@ app.get('/auth/instagram/callback', async (c) => {
                     console.log('Token exchange successful');
                     const accessToken = tokenData.access_token;
                     
-                    // Step 0: Exchange short-lived token for long-lived token
-                    console.log('Exchanging for long-lived Instagram token...');
-                    const longLivedTokenResponse = await fetch(`https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${c.env.INSTAGRAM_APP_SECRET}&access_token=${accessToken}`);
-                    
-                    let finalAccessToken = accessToken;
-                    let tokenExpiresIn = 3600; // Default 1 hour for short-lived tokens
-                    
-                    if (longLivedTokenResponse.ok) {
-                        const longLivedData = await longLivedTokenResponse.json();
-                        console.log('Long-lived token exchange successful, expires in:', longLivedData.expires_in, 'seconds');
-                        finalAccessToken = longLivedData.access_token;
-                        tokenExpiresIn = longLivedData.expires_in; // Usually 60 days (5184000 seconds)
-                    } else {
-                        const errorData = await longLivedTokenResponse.text();
-                        console.warn('Long-lived token exchange failed, using short-lived token:', errorData);
-                    }
-                    
                     // For Instagram Business API, we need to get the Instagram Business Account ID
                     // This is different from the personal Instagram account ID
                     
                     // Step 1: Get user's connected accounts
-                    const pagesResponse = await fetch(`https://graph.facebook.com/me/accounts?access_token=${finalAccessToken}`);
+                    const pagesResponse = await fetch(`https://graph.facebook.com/me/accounts?access_token=${accessToken}`);
                     
                     let instagramBusinessAccountId = null;
                     let instagramUsername = 'Unknown';
@@ -4389,14 +4282,14 @@ app.get('/auth/instagram/callback', async (c) => {
                         // Step 2: Find Instagram Business Account connected to the Facebook page
                         for (const page of pagesData.data || []) {
                             try {
-                                const igAccountResponse = await fetch(`https://graph.facebook.com/${page.id}?fields=instagram_business_account&access_token=${finalAccessToken}`);
+                                const igAccountResponse = await fetch(`https://graph.facebook.com/${page.id}?fields=instagram_business_account&access_token=${accessToken}`);
                                 if (igAccountResponse.ok) {
                                     const igAccountData = await igAccountResponse.json();
                                     if (igAccountData.instagram_business_account) {
                                         instagramBusinessAccountId = igAccountData.instagram_business_account.id;
                                         
                                         // Get Instagram account details
-                                        const igDetailsResponse = await fetch(`https://graph.facebook.com/${instagramBusinessAccountId}?fields=username,account_type&access_token=${finalAccessToken}`);
+                                        const igDetailsResponse = await fetch(`https://graph.facebook.com/${instagramBusinessAccountId}?fields=username,account_type&access_token=${accessToken}`);
                                         if (igDetailsResponse.ok) {
                                             const igDetailsData = await igDetailsResponse.json();
                                             instagramUsername = igDetailsData.username || 'Unknown';
@@ -4413,7 +4306,7 @@ app.get('/auth/instagram/callback', async (c) => {
                     
                     // Fallback: try to get personal Instagram account info if no business account found
                     if (!instagramBusinessAccountId) {
-                        const userResponse = await fetch(`https://graph.instagram.com/me?fields=id,username,account_type&access_token=${finalAccessToken}`);
+                        const userResponse = await fetch(`https://graph.instagram.com/me?fields=id,username,account_type&access_token=${accessToken}`);
                         if (userResponse.ok) {
                             const userData = await userResponse.json();
                             instagramBusinessAccountId = userData.id;
@@ -4448,14 +4341,8 @@ app.get('/auth/instagram/callback', async (c) => {
                         
                         if (userId) {
                             try {
-                                // Calculate token expiration date
-                                const expiresAt = new Date(Date.now() + (tokenExpiresIn * 1000)).toISOString();
-                                
-                                // Save Instagram access token (long-lived)
-                                await database.setUserSetting(userId, 'social', 'instagram_access_token', finalAccessToken, true);
-                                
-                                // Save token expiration date
-                                await database.setUserSetting(userId, 'social', 'instagram_token_expires_at', expiresAt, false);
+                                // Save Instagram access token
+                                await database.setUserSetting(userId, 'social', 'instagram_access_token', accessToken, true);
                                 
                                 // Save Instagram Business Account ID (this is what we need for posting)
                                 await database.setUserSetting(userId, 'social', 'instagram_account_id', instagramBusinessAccountId, false);
@@ -4477,8 +4364,6 @@ app.get('/auth/instagram/callback', async (c) => {
                                 <p>Your Instagram business account @${instagramUsername} is now connected.</p>
                                 <p>Account Type: ${instagramAccountType}</p>
                                 <p>Business Account ID: ${instagramBusinessAccountId}</p>
-                                <p>Token Type: ${tokenExpiresIn > 86400 ? 'Long-lived (60 days)' : 'Short-lived (1 hour)'}</p>
-                                <p>Expires: ${new Date(Date.now() + (tokenExpiresIn * 1000)).toLocaleDateString()}</p>
                                 <p>Redirecting you back to settings...</p>
                                 
                                 <script>
@@ -4730,156 +4615,6 @@ app.post('/api/user/post/instagram', authenticateToken, async (c) => {
         return c.json({ error: 'Failed to post to Instagram: ' + error.message }, 500);
     }
 });
-
-// Instagram token refresh function
-async function refreshInstagramToken(accessToken, env) {
-    try {
-        console.log('Refreshing Instagram long-lived token...');
-        
-        // Refresh the long-lived token (extends expiration by another 60 days)
-        const refreshResponse = await fetch(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${accessToken}`);
-        
-        if (refreshResponse.ok) {
-            const refreshData = await refreshResponse.json();
-            console.log('Token refresh successful, new expiration:', refreshData.expires_in, 'seconds');
-            
-            return {
-                success: true,
-                access_token: refreshData.access_token,
-                expires_in: refreshData.expires_in,
-                expires_at: new Date(Date.now() + (refreshData.expires_in * 1000)).toISOString()
-            };
-        } else {
-            const errorData = await refreshResponse.text();
-            console.error('Token refresh failed:', errorData);
-            
-            return {
-                success: false,
-                error: errorData
-            };
-        }
-    } catch (error) {
-        console.error('Token refresh error:', error);
-        return {
-            success: false,
-            error: error.message
-        };
-    }
-}
-
-// Check and refresh Instagram tokens that are nearing expiration
-async function checkAndRefreshInstagramTokens(database, env) {
-    const result = {
-        usersChecked: 0,
-        tokensRefreshed: 0,
-        tokensExpiringSoon: 0,
-        errors: [],
-        details: []
-    };
-    
-    try {
-        console.log('Checking Instagram tokens for expiration...');
-        
-        // Get all users with Instagram tokens
-        const stmt = database.db.prepare(`
-            SELECT DISTINCT user_id 
-            FROM user_settings 
-            WHERE integration_type = 'social' 
-            AND setting_key = 'instagram_access_token'
-            AND setting_value IS NOT NULL 
-            AND setting_value != ''
-        `);
-        
-        const users = await stmt.all();
-        const userList = users.results || [];
-        
-        console.log(`Found ${userList.length} users with Instagram tokens`);
-        result.usersChecked = userList.length;
-        
-        for (const userRow of userList) {
-            const userId = userRow.user_id;
-            
-            try {
-                // Get user's Instagram settings
-                const settings = await database.getUserSettings(userId, 'social');
-                let accessToken = null;
-                let expiresAt = null;
-                
-                settings.forEach(setting => {
-                    if (setting.setting_key === 'instagram_access_token') {
-                        accessToken = setting.setting_value;
-                    } else if (setting.setting_key === 'instagram_token_expires_at') {
-                        expiresAt = setting.setting_value;
-                    }
-                });
-                
-                if (!accessToken || !expiresAt) {
-                    console.log(`User ${userId}: Missing token or expiration date, skipping`);
-                    result.details.push({ userId, status: 'skipped', reason: 'Missing token or expiration date' });
-                    continue;
-                }
-                
-                const expirationDate = new Date(expiresAt);
-                const now = new Date();
-                const daysUntilExpiration = (expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-                
-                console.log(`User ${userId}: Token expires in ${daysUntilExpiration.toFixed(1)} days`);
-                
-                // Refresh if token expires within 7 days
-                if (daysUntilExpiration <= 7) {
-                    result.tokensExpiringSoon++;
-                    console.log(`User ${userId}: Refreshing token (expires soon)`);
-                    
-                    const refreshResult = await refreshInstagramToken(accessToken, env);
-                    
-                    if (refreshResult.success) {
-                        // Update token and expiration date in database
-                        await database.setUserSetting(userId, 'social', 'instagram_access_token', refreshResult.access_token, true);
-                        await database.setUserSetting(userId, 'social', 'instagram_token_expires_at', refreshResult.expires_at, false);
-                        
-                        result.tokensRefreshed++;
-                        console.log(`User ${userId}: Token refreshed successfully, new expiration: ${refreshResult.expires_at}`);
-                        result.details.push({ 
-                            userId, 
-                            status: 'refreshed', 
-                            oldExpiration: expiresAt,
-                            newExpiration: refreshResult.expires_at,
-                            daysUntilExpiration: daysUntilExpiration.toFixed(1)
-                        });
-                    } else {
-                        console.error(`User ${userId}: Token refresh failed:`, refreshResult.error);
-                        result.errors.push(`User ${userId}: ${refreshResult.error}`);
-                        result.details.push({ 
-                            userId, 
-                            status: 'failed', 
-                            error: refreshResult.error,
-                            daysUntilExpiration: daysUntilExpiration.toFixed(1)
-                        });
-                    }
-                } else {
-                    result.details.push({ 
-                        userId, 
-                        status: 'ok', 
-                        daysUntilExpiration: daysUntilExpiration.toFixed(1),
-                        expiresAt 
-                    });
-                }
-            } catch (error) {
-                console.error(`Error processing user ${userId}:`, error);
-                result.errors.push(`User ${userId}: ${error.message}`);
-                result.details.push({ userId, status: 'error', error: error.message });
-            }
-        }
-        
-        console.log('Instagram token check completed:', result);
-        return result;
-        
-    } catch (error) {
-        console.error('Error checking Instagram tokens:', error);
-        result.errors.push(`General error: ${error.message}`);
-        return result;
-    }
-}
 
 // Instagram webhook endpoints (required for Facebook app verification)
 // Public image serving endpoint for Instagram and other external services
@@ -5887,11 +5622,7 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     const usageResult = await database.incrementDailyUsage(user.id);
     
     // Include extracted data in response if available
-    const responseData = { 
-        content: responseContent,
-        captionHistoryId: captionHistoryId,
-        imageId: imageId
-    };
+    const responseData = { content: responseContent };
     if (extractedData) {
         if (extractedData.weatherData) responseData.weatherData = extractedData.weatherData;
         if (extractedData.locationName) responseData.locationName = extractedData.locationName;
@@ -6066,11 +5797,6 @@ app.put('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
         const { scheduledTime, caption, hashtags, timezone } = await c.req.json();
         const database = new D1Database(c.env.DB);
         
-        // Validate required fields
-        if (!scheduledTime) {
-            return c.json({ error: 'Scheduled time is required' }, 400);
-        }
-        
         // Validate scheduled time is in the future
         const scheduledDate = new Date(scheduledTime);
         if (scheduledDate <= new Date()) {
@@ -6088,66 +5814,11 @@ app.put('/api/scheduled-posts/:postId', authenticateToken, async (c) => {
         if (success) {
             return c.json({ success: true });
         } else {
-            return c.json({ error: 'Failed to update scheduled post - no matching post found or post is not pending' }, 400);
+            return c.json({ error: 'Failed to update scheduled post' }, 500);
         }
     } catch (error) {
         console.error('Error updating scheduled post:', error);
-        return c.json({ error: 'Failed to update scheduled post: ' + error.message }, 500);
-    }
-});
-
-// Serve images from R2 storage (public endpoint for displaying images)
-app.get('/api/images/:imageId', async (c) => {
-    try {
-        const imageId = c.req.param('imageId');
-        console.log('Serving image for ID:', imageId);
-        
-        if (!c.env.R2_BUCKET) {
-            console.error('R2 storage not configured');
-            return c.text('R2 storage not configured', 500);
-        }
-        
-        // The imageId parameter might already include the full R2 key (e.g., "images/1/timestamp-hash.jpg")
-        // or it might be just a bare ID that needs the images/ prefix
-        const r2Key = imageId.startsWith('images/') ? imageId : `images/${imageId}`;
-        console.log('Using R2 key:', r2Key);
-        const imageObject = await c.env.R2_BUCKET.get(r2Key);
-        
-        if (!imageObject) {
-            console.error('Image not found in R2 using key:', r2Key);
-            return c.text('Image not found', 404);
-        }
-        
-        console.log('Image found, serving:', imageId);
-        
-        const headers = new Headers();
-        headers.set('Content-Type', imageObject.httpMetadata?.contentType || 'image/jpeg');
-        headers.set('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-        headers.set('Access-Control-Allow-Origin', '*'); // Allow CORS for image serving
-        
-        return new Response(imageObject.body, { headers });
-    } catch (error) {
-        console.error('Error serving image:', error);
-        return c.text('Failed to serve image: ' + error.message, 500);
-    }
-});
-
-
-// Manual trigger for scheduled posts (for local testing)
-app.get('/api/trigger-scheduled-posts', authenticateToken, async (c) => {
-    try {
-        const user = c.get('user');
-        if (!user.isAdmin) {
-            return c.json({ error: 'Admin access required' }, 403);
-        }
-        
-        console.log('Manually triggering scheduled posts processing...');
-        await handleScheduledPosts(c.env);
-        
-        return c.json({ success: true, message: 'Scheduled posts processing triggered' });
-    } catch (error) {
-        console.error('Error triggering scheduled posts:', error);
-        return c.json({ error: 'Failed to trigger scheduled posts: ' + error.message }, 500);
+        return c.json({ error: 'Failed to update scheduled post' }, 500);
     }
 });
 
@@ -6354,71 +6025,6 @@ app.get('/test-worker', (c) => {
   return c.json({ message: 'Worker is running', timestamp: new Date().toISOString() });
 });
 
-// Instagram token refresh endpoint (can be called manually or via cron job)
-app.post('/api/maintenance/refresh-instagram-tokens', authenticateToken, async (c) => {
-    const user = c.get('user');
-    
-    // Only allow admins to trigger token refresh
-    if (!user || !user.isAdmin) {
-        return c.json({ error: 'Unauthorized' }, 401);
-    }
-
-    try {
-        const database = new D1Database(c.env.DB);
-        const refreshResult = await checkAndRefreshInstagramTokens(database, c.env);
-        
-        return c.json({
-            success: true,
-            message: 'Instagram token refresh completed',
-            ...refreshResult
-        });
-    } catch (error) {
-        console.error('Error in Instagram token refresh endpoint:', error);
-        return c.json({ 
-            error: 'Failed to refresh Instagram tokens',
-            details: error.message 
-        }, 500);
-    }
-});
-
-// Background maintenance endpoint (can be called by external cron services)
-app.get('/api/cron/maintenance', async (c) => {
-    try {
-        const database = new D1Database(c.env.DB);
-        const results = {
-            instagram_token_refresh: null,
-            timestamp: new Date().toISOString()
-        };
-
-        // Refresh Instagram tokens
-        try {
-            const refreshResult = await checkAndRefreshInstagramTokens(database, c.env);
-            results.instagram_token_refresh = {
-                success: true,
-                ...refreshResult
-            };
-        } catch (error) {
-            console.error('Instagram token refresh failed in cron job:', error);
-            results.instagram_token_refresh = {
-                success: false,
-                error: error.message
-            };
-        }
-
-        return c.json({
-            success: true,
-            message: 'Maintenance tasks completed',
-            results
-        });
-    } catch (error) {
-        console.error('Error in maintenance cron job:', error);
-        return c.json({ 
-            error: 'Maintenance tasks failed',
-            details: error.message 
-        }, 500);
-    }
-});
-
 // Static page routes - serve HTML files for main application pages
 // These routes serve the actual HTML pages (not API endpoints)
 
@@ -6434,129 +6040,101 @@ app.get('/admin/tiers', async (c) => {
   return c.redirect('/admin-tiers.html');
 });
 
-// Image Library API Endpoints
-app.get('/api/image-library', authenticateToken, async (c) => {
-    try {
-        const user = c.get('user');
-        const database = new D1Database(c.env.DB);
-        
-        const images = await database.getImageLibrary(user.id);
-        
-        return c.json({
-            success: true,
-            images: images
-        });
-    } catch (error) {
-        console.error('Error loading image library:', error);
-        return c.json({ error: 'Failed to load image library' }, 500);
-    }
-});
 
-app.get('/api/image-library/:id/captions', authenticateToken, async (c) => {
+// Cron trigger handler for processing scheduled posts
+async function handleScheduledPosts(env) {
     try {
-        const user = c.get('user');
-        const imageId = c.req.param('id');
-        const database = new D1Database(c.env.DB);
+        console.log('Processing scheduled posts...');
+        const database = new D1Database(env.DB);
         
-        const imageWithCaptions = await database.getImageWithCaptions(user.id, imageId);
+        // Get all pending scheduled posts that are due
+        const now = new Date().toISOString();
+        const duePosts = await database.getDueScheduledPosts(now);
         
-        if (!imageWithCaptions) {
-            return c.json({ error: 'Image not found' }, 404);
-        }
+        console.log(`Found ${duePosts.length} due posts to process`);
         
-        return c.json({
-            success: true,
-            image: imageWithCaptions.image,
-            captions: imageWithCaptions.captions
-        });
-    } catch (error) {
-        console.error('Error loading image captions:', error);
-        return c.json({ error: 'Failed to load image captions' }, 500);
-    }
-});
-
-app.get('/api/image-library/:id/preview', authenticateToken, async (c) => {
-    try {
-        const user = c.get('user');
-        const imageId = c.req.param('id');
-        const database = new D1Database(c.env.DB);
-        
-        // Get image details
-        const imageData = await database.getImageWithCaptions(user.id, imageId);
-        
-        if (!imageData || !imageData.image) {
-            return c.json({ error: 'Image not found' }, 404);
-        }
-        
-        const image = imageData.image;
-        
-        // Get image from R2 if available
-        if (c.env.R2_BUCKET && image.r2_key) {
+        for (const post of duePosts) {
             try {
-                const r2Object = await c.env.R2_BUCKET.get(image.r2_key);
-                if (r2Object) {
-                    const headers = new Headers();
-                    headers.set('Content-Type', image.mime_type || 'image/jpeg');
-                    headers.set('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-                    
-                    return new Response(r2Object.body, { headers });
+                console.log(`Processing post ${post.id} scheduled for ${post.scheduled_time}`);
+                
+                // Mark as in progress
+                await database.updateScheduledPostStatus(post.id, 'processing', null);
+                
+                // Get the image data if needed
+                let imageData = null;
+                if (post.image_id) {
+                    const imageResponse = await env.R2_BUCKET.get(post.r2_key);
+                    if (imageResponse) {
+                        const arrayBuffer = await imageResponse.arrayBuffer();
+                        imageData = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+                    }
                 }
-            } catch (r2Error) {
-                console.error('Error fetching from R2:', r2Error);
+                
+                // Get user's social media settings
+                const userSettings = await database.getUserSocialSettings(post.user_id);
+                
+                // Parse platforms
+                let platforms;
+                try {
+                    platforms = JSON.parse(post.platforms);
+                } catch (e) {
+                    platforms = post.platforms.split(',');
+                }
+                
+                // Process each platform
+                let allSuccess = true;
+                let errorMessages = [];
+                
+                for (const platform of platforms) {
+                    try {
+                        const success = await postToSocialMedia(
+                            platform,
+                            post,
+                            imageData,
+                            userSettings[platform],
+                            env
+                        );
+                        
+                        if (!success) {
+                            allSuccess = false;
+                            errorMessages.push(`Failed to post to ${platform}`);
+                        }
+                    } catch (error) {
+                        console.error(`Error posting to ${platform}:`, error);
+                        allSuccess = false;
+                        errorMessages.push(`${platform}: ${error.message}`);
+                    }
+                }
+                
+                // Update post status based on results
+                if (allSuccess) {
+                    await database.updateScheduledPostStatus(post.id, 'posted', null);
+                    console.log(`Successfully posted to all platforms for post ${post.id}`);
+                } else {
+                    await database.updateScheduledPostStatus(
+                        post.id, 
+                        'failed', 
+                        errorMessages.join('; ')
+                    );
+                    console.error(`Failed to post ${post.id}:`, errorMessages.join('; '));
+                }
+                
+            } catch (error) {
+                console.error(`Error processing post ${post.id}:`, error);
+                await database.updateScheduledPostStatus(
+                    post.id, 
+                    'failed', 
+                    `Processing error: ${error.message}`
+                );
             }
         }
         
-        // Fallback to placeholder or error
-        return c.json({ error: 'Image data not available' }, 404);
+        console.log('Finished processing scheduled posts');
+        
     } catch (error) {
-        console.error('Error loading image preview:', error);
-        return c.json({ error: 'Failed to load image preview' }, 500);
+        console.error('Error in handleScheduledPosts:', error);
     }
-});
-
-app.delete('/api/image-library/:id', authenticateToken, async (c) => {
-    try {
-        const user = c.get('user');
-        const imageId = c.req.param('id');
-        const database = new D1Database(c.env.DB);
-        
-        // Get image details first to get R2 key
-        const imageData = await database.getImageWithCaptions(user.id, imageId);
-        
-        if (!imageData || !imageData.image) {
-            return c.json({ error: 'Image not found' }, 404);
-        }
-        
-        const image = imageData.image;
-        
-        // Delete from database first
-        const deleted = await database.deleteImageLibraryEntry(user.id, imageId);
-        
-        if (!deleted) {
-            return c.json({ error: 'Failed to delete image from database' }, 500);
-        }
-        
-        // Delete from R2 if exists
-        if (c.env.R2_BUCKET && image.r2_key) {
-            try {
-                await c.env.R2_BUCKET.delete(image.r2_key);
-            } catch (r2Error) {
-                console.error('Error deleting from R2:', r2Error);
-                // Don't fail the request if R2 deletion fails
-            }
-        }
-        
-        return c.json({
-            success: true,
-            message: 'Image deleted successfully'
-        });
-    } catch (error) {
-        console.error('Error deleting image:', error);
-        return c.json({ error: 'Failed to delete image' }, 500);
-    }
-});
-
-
+}
 
 // Helper function to post to social media platforms
 async function postToSocialMedia(platform, post, imageData, platformSettings, env) {
@@ -6636,72 +6214,16 @@ async function postToMastodonCron(content, imageData, settings, env) {
 }
 
 async function postToPixelfedCron(content, imageData, settings, env) {
+    // Similar implementation for Pixelfed
+    // Using their API format
     try {
         const instance = settings.instance;
         const token = settings.token;
         
-        let mediaId = null;
+        // Pixelfed posting logic here
+        // This would be similar to Mastodon but with Pixelfed's API
         
-        // Upload image if provided
-        if (imageData) {
-            // Convert imageData to buffer (handle both base64 strings and ArrayBuffer)
-            let imageBuffer;
-            if (typeof imageData === 'string') {
-                imageBuffer = Uint8Array.from(atob(imageData), c => c.charCodeAt(0));
-            } else {
-                imageBuffer = new Uint8Array(imageData);
-            }
-            
-            const formData = new FormData();
-            formData.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }));
-            
-            const mediaResponse = await fetch(`${instance}/api/v1/media`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                },
-                body: formData
-            });
-            
-            if (mediaResponse.ok) {
-                const mediaResult = await mediaResponse.json();
-                mediaId = mediaResult.id;
-            } else {
-                const errorText = await mediaResponse.text();
-                console.error('Failed to upload image to Pixelfed:', mediaResponse.status, errorText);
-                return false;
-            }
-        }
-        
-        // Create the post
-        const postData = {
-            status: content,
-            visibility: 'public'
-        };
-        
-        if (mediaId) {
-            postData.media_ids = [mediaId];
-        }
-        
-        const postResponse = await fetch(`${instance}/api/v1/statuses`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(postData)
-        });
-        
-        if (postResponse.ok) {
-            const postResult = await postResponse.json();
-            console.log('Successfully posted to Pixelfed:', postResult.url);
-            return true;
-        } else {
-            const errorText = await postResponse.text();
-            console.error('Failed to create post on Pixelfed:', postResponse.status, errorText);
-            return false;
-        }
-        
+        return true; // Placeholder
     } catch (error) {
         console.error('Error posting to Pixelfed:', error);
         return false;
@@ -6709,293 +6231,28 @@ async function postToPixelfedCron(content, imageData, settings, env) {
 }
 
 async function postToInstagramCron(content, imageData, settings, env) {
-    // Instagram Business API implementation - copied from working manual posting
+    // Instagram Business API implementation
     try {
-        const instagramAccessToken = settings.access_token;
-        const instagramAccountId = settings.account_id;
+        const accessToken = settings.access_token;
+        const businessAccountId = settings.business_account_id;
         
-        console.log('Posting to Instagram via scheduled post...');
-        console.log('Caption:', content.combinedContent.substring(0, 100) + '...');
+        // Instagram posting logic here
+        // This would use Instagram's Business API
         
-        if (!instagramAccessToken) {
-            console.error('No Instagram access token found');
-            return false;
-        }
-        
-        if (!instagramAccountId) {
-            console.error('No Instagram account ID found');
-            return false;
-        }
-        
-        if (!imageData) {
-            console.error('No image data provided');
-            return false;
-        }
-        
-        // Convert imageData to buffer if it's base64
-        let imageBuffer;
-        if (typeof imageData === 'string') {
-            imageBuffer = Buffer.from(imageData, 'base64');
-        } else {
-            imageBuffer = imageData;
-        }
-        
-        // Upload image to Instagram posts folder for public access
-        const imageKey = `instagram-posts/${Date.now()}-scheduled.jpg`;
-        
-        await env.R2_BUCKET.put(imageKey, imageBuffer, {
-            httpMetadata: {
-                contentType: 'image/jpeg'
-            }
-        });
-        
-        // For Instagram posting, we need a publicly accessible URL
-        const publicImageUrl = `https://ai-caption-studio.jonsson.workers.dev/public-image/${imageKey}`;
-        
-        // Wait a moment to ensure image is fully available
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Step 2: Create Instagram media container
-        const containerResponse = await fetch(`https://graph.instagram.com/${instagramAccountId}/media`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                image_url: publicImageUrl,
-                caption: content.combinedContent,
-                access_token: instagramAccessToken
-            })
-        });
-        
-        if (!containerResponse.ok) {
-            const errorData = await containerResponse.json();
-            console.error('Failed to create Instagram media container:', errorData);
-            await env.R2_BUCKET.delete(imageKey); // Clean up
-            return false;
-        }
-        
-        const containerData = await containerResponse.json();
-        const containerId = containerData.id;
-        
-        // Step 3: Publish the container
-        const publishResponse = await fetch(`https://graph.instagram.com/${instagramAccountId}/media_publish`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                creation_id: containerId,
-                access_token: instagramAccessToken
-            })
-        });
-        
-        if (publishResponse.ok) {
-            const publishData = await publishResponse.json();
-            console.log('Successfully posted to Instagram:', publishData.id);
-            
-            // Clean up temporary image after successful post
-            await env.R2_BUCKET.delete(imageKey);
-            
-            return true;
-        } else {
-            const errorData = await publishResponse.json();
-            console.error('Failed to publish Instagram post:', errorData);
-            await env.R2_BUCKET.delete(imageKey); // Clean up
-            return false;
-        }
-        
+        return true; // Placeholder
     } catch (error) {
-        console.error('Error posting to Instagram in scheduled post:', error);
+        console.error('Error posting to Instagram:', error);
         return false;
     }
 }
 
-// Scheduled posts execution handler
-async function handleScheduledPosts(env) {
-    try {
-        console.log('Processing scheduled posts...');
-        const database = new D1Database(env.DB);
-        
-        // Get all pending scheduled posts that are due
-        const duePosts = await database.getPendingScheduledPosts();
-        
-        console.log(`Found ${duePosts.length} posts to process`);
-        
-        for (const post of duePosts) {
-            try {
-                // Update status to processing
-                await database.updateScheduledPostStatus(post.id, 'processing');
-                
-                // Get user's social media settings using the same method as manual posting
-                const allSettings = await database.getUserSettings(post.user_id, 'social');
-                
-                // Build platform-specific settings the same way manual posting does
-                const platformSettings = {
-                    instagram: {},
-                    mastodon: {},
-                    pixelfed: {}
-                };
-                
-                allSettings.forEach(setting => {
-                    if (setting.setting_key === 'instagram_access_token') {
-                        platformSettings.instagram.access_token = setting.setting_value;
-                    } else if (setting.setting_key === 'instagram_account_id') {
-                        platformSettings.instagram.account_id = setting.setting_value;
-                    } else if (setting.setting_key === 'mastodon_token') {
-                        platformSettings.mastodon.token = setting.setting_value;
-                    } else if (setting.setting_key === 'mastodon_instance') {
-                        platformSettings.mastodon.instance = setting.setting_value;
-                    } else if (setting.setting_key === 'pixelfed_token') {
-                        platformSettings.pixelfed.token = setting.setting_value;
-                    } else if (setting.setting_key === 'pixelfed_instance') {
-                        platformSettings.pixelfed.instance = setting.setting_value;
-                    }
-                });
-                
-                // Get image data if needed
-                let imageData = null;
-                if (post.r2_key && env.R2_BUCKET) {
-                    try {
-                        const imageObject = await env.R2_BUCKET.get(post.r2_key);
-                        if (imageObject) {
-                            imageData = await imageObject.arrayBuffer();
-                        }
-                    } catch (error) {
-                        console.error(`Failed to get image with R2 key ${post.r2_key}:`, error);
-                    }
-                }
-                
-                // Prepare content
-                const content = {
-                    caption: post.caption,
-                    hashtags: post.hashtags,
-                    combinedContent: post.caption + (post.hashtags ? '\n\n' + post.hashtags : '')
-                };
-                
-                // Parse platforms from JSON string
-                let platforms = [];
-                try {
-                    console.log(`Raw platforms field for post ${post.id}:`, post.platforms);
-                    platforms = JSON.parse(post.platforms);
-                    console.log(`Parsed platforms for post ${post.id}:`, platforms);
-                } catch (e) {
-                    console.error(`Failed to parse platforms for post ${post.id}:`, e);
-                    platforms = [post.platforms]; // Fallback to treat as single platform
-                }
-                
-                // Post to each specified platform
-                let success = false;
-                let errorMessage = null;
-                
-                for (const platform of platforms) {
-                    try {
-                        let platformSuccess = false;
-                        
-                        switch (platform) {
-                            case 'mastodon':
-                                if (platformSettings.mastodon?.instance && platformSettings.mastodon?.token) {
-                                    platformSuccess = await postToMastodonCron(content.combinedContent, imageData, platformSettings.mastodon, env);
-                                } else {
-                                    errorMessage = 'Mastodon not configured';
-                                }
-                                break;
-                                
-                            case 'pixelfed':
-                                if (platformSettings.pixelfed?.instance && platformSettings.pixelfed?.token) {
-                                    platformSuccess = await postToPixelfedCron(content.combinedContent, imageData, platformSettings.pixelfed, env);
-                                } else {
-                                    errorMessage = 'Pixelfed not configured';
-                                }
-                                break;
-                                
-                            case 'instagram':
-                                if (platformSettings.instagram?.access_token) {
-                                    platformSuccess = await postToInstagramCron(content, imageData, platformSettings.instagram, env);
-                                } else {
-                                    errorMessage = 'Instagram not configured - no access token found';
-                                }
-                                break;
-                                
-                            default:
-                                errorMessage = `Unsupported platform: ${platform}`;
-                        }
-                        
-                        if (platformSuccess) {
-                            success = true;
-                            console.log(`Successfully posted scheduled post ${post.id} to ${platform}`);
-                        } else {
-                            console.error(`Failed to post scheduled post ${post.id} to ${platform}: ${errorMessage}`);
-                            console.log(`Debug: errorMessage value:`, JSON.stringify(errorMessage));
-                        }
-                        
-                    } catch (platformError) {
-                        console.error(`Error posting to ${platform} for post ${post.id}:`, platformError);
-                        errorMessage = platformError.message;
-                    }
-                }
-                
-                // Update status based on result
-                if (success) {
-                    await database.updateScheduledPostStatus(post.id, 'completed');
-                    console.log(`Successfully posted scheduled post ${post.id} to ${post.platform}`);
-                } else {
-                    const finalErrorMessage = errorMessage || 'Post failed';
-                    console.log(`Debug: About to update post ${post.id} with error:`, JSON.stringify(finalErrorMessage));
-                    await database.updateScheduledPostStatus(post.id, 'failed', finalErrorMessage);
-                    console.error(`Failed to post scheduled post ${post.id}: ${finalErrorMessage}`);
-                }
-                
-            } catch (error) {
-                console.error(`Error processing scheduled post ${post.id}:`, error);
-                await database.updateScheduledPostStatus(post.id, 'failed', error.message);
-            }
-        }
-        
-        console.log('Finished processing scheduled posts');
-        
-    } catch (error) {
-        console.error('Error in handleScheduledPosts:', error);
-    }
-}
-
-// Handle Instagram token refresh scheduled job
-async function handleInstagramTokenRefresh(env) {
-    try {
-        console.log('Starting scheduled Instagram token refresh job');
-        const database = new D1Database(env.DB);
-        const refreshResult = await checkAndRefreshInstagramTokens(database, env);
-        
-        console.log('Scheduled Instagram token refresh completed:', refreshResult);
-        
-        // Optionally, you could send an admin notification here if needed
-        if (refreshResult.errors?.length > 0) {
-            console.error('Instagram token refresh had errors:', refreshResult.errors);
-        }
-        
-        return refreshResult;
-    } catch (error) {
-        console.error('Scheduled Instagram token refresh failed:', error);
-        // You could add error notification logic here
-        throw error;
-    }
-}
 
 // Export the main app and the scheduled event handler
 export default {
     fetch: app.fetch,
     scheduled: async (event, env, ctx) => {
-        // Handle different cron triggers
-        switch (event.cron) {
-            case '*/1 * * * *': // Scheduled posts processing every minute
-                ctx.waitUntil(handleScheduledPosts(env));
-                break;
-            case '0 6 * * *': // Instagram token refresh daily at 6 AM UTC
-                ctx.waitUntil(handleInstagramTokenRefresh(env));
-                break;
-            default:
-                console.log('Unknown scheduled event:', event.cron);
-        }
+        // This runs when the cron trigger fires
+        ctx.waitUntil(handleScheduledPosts(env));
     }
 };
 
