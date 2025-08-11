@@ -28,17 +28,16 @@ SMTP_FROM_EMAIL = "no-reply@jonsson.io"
 SMTP_FROM_NAME = "AI Caption Studio"
 ADMIN_EMAIL = "tomas@jonsson.io"
 
-# Cron trigger for processing scheduled posts
+# Cron triggers for scheduled events
 [triggers]
-crons = ["*/1 * * * *"]  # Run every 1 minute
+crons = [
+    "*/1 * * * *",    # Scheduled posts processing (every minute)
+    "0 6 * * *"       # Instagram token refresh (daily at 6 AM UTC)
+]
 
 # Required secrets (set with `wrangler secret put <NAME>`):
 # - JWT_SECRET
 # - OPENAI_API_KEY  
 # - SMTP_PASSWORD (Resend API key)
 # - OPENWEATHER_API_KEY
-
-# Scheduled events (cron jobs)
-[[triggers.crons]]
-cron = "0 6 * * *"  # Daily at 6 AM UTC
-name = "instagram-token-refresh"
+# - INSTAGRAM_APP_SECRET (for long-lived tokens)
