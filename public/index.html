@@ -2155,12 +2155,7 @@
                     return;
                 }
                 
-                // Check if scheduled time is on a 5-minute interval
-                const minutes = scheduledTime.getMinutes();
-                if (minutes % 5 !== 0) {
-                    showWarning('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.). This is because scheduled posts are processed every 5 minutes.', '5-Minute Interval Required');
-                    return;
-                }
+                // No interval restrictions - posts are processed every minute
                 
                 // Get selected platforms
                 const selectedPlatforms = [];
@@ -2518,10 +2513,10 @@
                                 </div>
                                 <div class="uploaded-image-actions">
                                     <button class="uploaded-image-btn secondary" onclick="viewScheduledPost('${post.id}')">👁️ View</button>
-                                    ${post.status === 'pending' ? `
+                                    ${post.status === 'pending' || post.status === 'failed' ? `
                                         <button class="uploaded-image-btn primary" onclick="editScheduledPost('${post.id}')">✏️ Edit</button>
-                                        <button class="uploaded-image-btn danger" onclick="deleteScheduledPost('${post.id}')">🗑️ Delete</button>
                                     ` : ''}
+                                    <button class="uploaded-image-btn danger" onclick="deleteScheduledPost('${post.id}')">🗑️ Delete</button>
                                 </div>
                             </div>
                         </div>
@@ -2782,12 +2777,7 @@
                     return;
                 }
                 
-                // Check if scheduled time is on a 5-minute interval
-                const minutes = scheduledTime.getMinutes();
-                if (minutes % 5 !== 0) {
-                    showWarning('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.). This is because scheduled posts are processed every 5 minutes.', '5-Minute Interval Required');
-                    return;
-                }
+                // No interval restrictions - posts are processed every minute
                 
                 try {
                     const token = localStorage.getItem('auth_token');
@@ -2942,13 +2932,9 @@
                 `;
             }).join('');
             
-            // Set default schedule time to 30 minutes from now, rounded to 5-minute interval
+            // Set default schedule time to 30 minutes from now
             const now = new Date();
             now.setMinutes(now.getMinutes() + 30);
-            // Round to nearest 5-minute interval
-            const minutes = now.getMinutes();
-            const roundedMinutes = Math.ceil(minutes / 5) * 5;
-            now.setMinutes(roundedMinutes);
             now.setSeconds(0);
             now.setMilliseconds(0);
             const defaultDateTime = formatDateTimeLocal(now);
@@ -3019,12 +3005,7 @@
                     return;
                 }
                 
-                // Check if scheduled time is on a 5-minute interval
-                const minutes = scheduledTime.getMinutes();
-                if (minutes % 5 !== 0) {
-                    showWarning('Scheduled time must be on a 5-minute interval (e.g., 2:20 PM, 2:25 PM, etc.). This is because scheduled posts are processed every 5 minutes.', '5-Minute Interval Required');
-                    return;
-                }
+                // No interval restrictions - posts are processed every minute
                 
                 // Get selected platforms
                 const selectedPlatforms = [];
@@ -4072,13 +4053,9 @@
         function initializeDefaultScheduleTime() {
             const scheduleInput = document.getElementById('scheduleDateTime');
             if (scheduleInput && !scheduleInput.value) {
-                // Set default to 30 minutes from now, rounded to 5-minute interval
+                // Set default to 30 minutes from now
                 const now = new Date();
                 now.setMinutes(now.getMinutes() + 30);
-                // Round to nearest 5-minute interval  
-                const minutes = now.getMinutes();
-                const roundedMinutes = Math.ceil(minutes / 5) * 5;
-                now.setMinutes(roundedMinutes);
                 now.setSeconds(0);
                 now.setMilliseconds(0);
                 scheduleInput.value = formatDateTimeLocal(now);

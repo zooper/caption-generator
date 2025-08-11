@@ -724,17 +724,27 @@ class D1Database {
         try {
             await this.ensureScheduledPostsTable();
             
+            // Debug: First check all pending posts regardless of time
+            const debugStmt = this.db.prepare(`
+                SELECT sp.id, sp.status, sp.scheduled_time, datetime('now') as current_time, sp.user_id
+                FROM scheduled_posts sp
+                WHERE sp.status = 'pending'
+            `);
+            const debugResult = await debugStmt.all();
+            console.log('Debug - All pending posts:', debugResult.results || []);
+            
             const stmt = this.db.prepare(`
                 SELECT sp.*, ui.filename, ui.mime_type, ui.r2_key, ch.caption, ch.hashtags
                 FROM scheduled_posts sp
                 LEFT JOIN uploaded_images ui ON sp.image_id = ui.id
                 LEFT JOIN caption_history ch ON sp.caption_id = ch.id
                 WHERE sp.status = 'pending' 
-                AND sp.scheduled_time <= datetime('now')
+                AND datetime(sp.scheduled_time) <= datetime('now')
                 ORDER BY sp.scheduled_time ASC
             `);
             
             const result = await stmt.all();
+            console.log('Debug - Posts due for processing:', result.results || []);
             return result.results || [];
         } catch (error) {
             console.error('Error getting pending scheduled posts:', error);
@@ -851,8 +861,8 @@ class D1Database {
             
             const stmt = this.db.prepare(`
                 UPDATE scheduled_posts 
-                SET scheduled_time = ?, caption = ?, hashtags = ?, updated_at = datetime('now')
-                WHERE id = ? AND user_id = ? AND status = 'pending'
+                SET scheduled_time = ?, caption = ?, hashtags = ?, status = 'pending', updated_at = datetime('now')
+                WHERE id = ? AND user_id = ? AND status IN ('pending', 'failed')
             `);
             
             const result = await stmt.bind(scheduledTime, caption, hashtags, parseInt(postId), userId).run();
@@ -4219,20 +4229,43 @@ app.post('/api/user/settings/test-instagram', authenticateToken, async (c) => {
         console.log('Debug: Instagram access token found, testing connection...');
         
         // Test Instagram connection by getting account info
-        const testUrl = `https://graph.facebook.com/me?access_token=${instagramAccessToken}`;
-        const response = await fetch(testUrl);
+        // For Instagram Business API, we need to get the business account ID first
+        let testUrl, testResponse;
         
-        if (response.ok) {
-            const data = await response.json();
+        // First try Instagram Basic Display API
+        testUrl = `https://graph.instagram.com/me?fields=id,username,account_type&access_token=${instagramAccessToken}`;
+        testResponse = await fetch(testUrl);
+        
+        if (testResponse.ok) {
+            const data = await testResponse.json();
             return c.json({ 
                 success: true, 
                 message: 'Instagram connection test successful',
-                accounts: data.data?.length || 0
+                account: {
+                    id: data.id,
+                    username: data.username,
+                    account_type: data.account_type || 'BUSINESS'
+                }
             });
         } else {
-            return c.json({ 
-                error: 'Failed to verify Instagram credentials: ' + response.status 
-            }, 400);
+            // If Basic Display fails, try Facebook Graph API for business accounts
+            testUrl = `https://graph.facebook.com/me/accounts?access_token=${instagramAccessToken}`;
+            testResponse = await fetch(testUrl);
+            
+            if (testResponse.ok) {
+                const fbData = await testResponse.json();
+                return c.json({ 
+                    success: true, 
+                    message: 'Instagram connection test successful (via Facebook)',
+                    accounts: fbData.data?.length || 0
+                });
+            } else {
+                const errorText = await testResponse.text();
+                console.error('Instagram test failed:', errorText);
+                return c.json({ 
+                    error: `Failed to verify Instagram credentials: ${testResponse.status} - ${errorText}` 
+                }, 400);
+            }
         }
         
     } catch (error) {
@@ -6664,17 +6697,18 @@ async function handleScheduledPosts(env) {
                 
                 // Get user's social media settings
                 const socialSettings = await database.getUserSocialSettings(post.user_id);
+                console.log(`Social settings for user ${post.user_id}:`, JSON.stringify(socialSettings, null, 2));
                 
                 // Get image data if needed
                 let imageData = null;
-                if (post.image_id && env.R2_BUCKET) {
+                if (post.r2_key && env.R2_BUCKET) {
                     try {
-                        const imageObject = await env.R2_BUCKET.get(`images/${post.image_id}`);
+                        const imageObject = await env.R2_BUCKET.get(post.r2_key);
                         if (imageObject) {
                             imageData = await imageObject.arrayBuffer();
                         }
                     } catch (error) {
-                        console.error(`Failed to get image ${post.image_id}:`, error);
+                        console.error(`Failed to get image with R2 key ${post.r2_key}:`, error);
                     }
                 }
                 
@@ -6685,37 +6719,65 @@ async function handleScheduledPosts(env) {
                     combinedContent: post.caption + (post.hashtags ? '\n\n' + post.hashtags : '')
                 };
                 
-                // Post to the specified platform
+                // Parse platforms from JSON string
+                let platforms = [];
+                try {
+                    console.log(`Raw platforms field for post ${post.id}:`, post.platforms);
+                    platforms = JSON.parse(post.platforms);
+                    console.log(`Parsed platforms for post ${post.id}:`, platforms);
+                } catch (e) {
+                    console.error(`Failed to parse platforms for post ${post.id}:`, e);
+                    platforms = [post.platforms]; // Fallback to treat as single platform
+                }
+                
+                // Post to each specified platform
                 let success = false;
                 let errorMessage = null;
                 
-                switch (post.platform) {
-                    case 'mastodon':
-                        if (socialSettings.mastodon?.instance && socialSettings.mastodon?.token) {
-                            success = await postToMastodonCron(content, imageData, socialSettings.mastodon, env);
-                        } else {
-                            errorMessage = 'Mastodon not configured';
-                        }
-                        break;
+                for (const platform of platforms) {
+                    try {
+                        let platformSuccess = false;
                         
-                    case 'pixelfed':
-                        if (socialSettings.pixelfed?.instance && socialSettings.pixelfed?.token) {
-                            success = await postToPixelfedCron(content, imageData, socialSettings.pixelfed, env);
-                        } else {
-                            errorMessage = 'Pixelfed not configured';
+                        switch (platform) {
+                            case 'mastodon':
+                                if (socialSettings.mastodon?.instance && socialSettings.mastodon?.token) {
+                                    platformSuccess = await postToMastodonCron(content, imageData, socialSettings.mastodon, env);
+                                } else {
+                                    errorMessage = 'Mastodon not configured';
+                                }
+                                break;
+                                
+                            case 'pixelfed':
+                                if (socialSettings.pixelfed?.instance && socialSettings.pixelfed?.token) {
+                                    platformSuccess = await postToPixelfedCron(content, imageData, socialSettings.pixelfed, env);
+                                } else {
+                                    errorMessage = 'Pixelfed not configured';
+                                }
+                                break;
+                                
+                            case 'instagram':
+                                if (socialSettings.instagram?.access_token) {
+                                    platformSuccess = await postToInstagramCron(content, imageData, socialSettings.instagram, env);
+                                } else {
+                                    errorMessage = 'Instagram not configured';
+                                }
+                                break;
+                                
+                            default:
+                                errorMessage = `Unsupported platform: ${platform}`;
                         }
-                        break;
                         
-                    case 'instagram':
-                        if (socialSettings.instagram?.access_token) {
-                            success = await postToInstagramCron(content, imageData, socialSettings.instagram, env);
+                        if (platformSuccess) {
+                            success = true;
+                            console.log(`Successfully posted scheduled post ${post.id} to ${platform}`);
                         } else {
-                            errorMessage = 'Instagram not configured';
+                            console.error(`Failed to post scheduled post ${post.id} to ${platform}: ${errorMessage}`);
                         }
-                        break;
                         
-                    default:
-                        errorMessage = `Unsupported platform: ${post.platform}`;
+                    } catch (platformError) {
+                        console.error(`Error posting to ${platform} for post ${post.id}:`, platformError);
+                        errorMessage = platformError.message;
+                    }
                 }
                 
                 // Update status based on result
