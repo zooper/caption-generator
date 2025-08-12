@@ -467,6 +467,32 @@ app.post('/api/lightroom/generate-caption', authenticateApiKey, async (req, res)
     }
 });
 
+// Check for duplicate images by hash (Lightroom plugin endpoint)
+app.get('/api/lightroom/check-duplicate', authenticateApiKey, async (req, res) => {
+    try {
+        const { hash } = req.query;
+        
+        if (!hash || typeof hash !== 'string') {
+            return res.status(400).json({ 
+                error: 'Hash parameter is required' 
+            });
+        }
+        
+        // In development environment, we don't store image hashes persistently
+        // Always return false for now - this could be enhanced later to use a proper image storage table
+        res.json({ 
+            exists: false,
+            message: 'Development environment - no persistent image storage'
+        });
+        
+    } catch (error) {
+        console.error('Duplicate check error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error during duplicate check' 
+        });
+    }
+});
+
 app.post('/api/generate-caption', authenticateToken, async (req, res) => {
     const startTime = Date.now();
     const queryId = uuidv4();
