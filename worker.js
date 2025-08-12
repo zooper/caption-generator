@@ -3682,6 +3682,47 @@ app.delete('/api/uploaded-images/:imageId', authenticateToken, async (c) => {
     }
 });
 
+// Check for duplicate images by hash (Lightroom plugin endpoint)
+app.get('/api/lightroom/check-duplicate', authenticateApiKey, async (c) => {
+    try {
+        const hash = c.req.query('hash');
+        
+        if (!hash || typeof hash !== 'string') {
+            return c.json({ 
+                error: 'Hash parameter is required' 
+            }, 400);
+        }
+        
+        // Initialize database
+        const database = new D1Database(c.env.DB);
+        await database.ensureInitialized();
+        
+        // Get user from authentication
+        const user = c.get('user');
+        
+        // Check if image with this hash exists for the user
+        const existingImage = await database.getImageByHash(user.id, hash);
+        
+        if (existingImage) {
+            return c.json({
+                exists: true,
+                id: existingImage.id,
+                filename: existingImage.filename || existingImage.original_filename || 'Unknown'
+            });
+        } else {
+            return c.json({
+                exists: false
+            });
+        }
+        
+    } catch (error) {
+        console.error('Duplicate check error:', error);
+        return c.json({ 
+            error: 'Internal server error during duplicate check' 
+        }, 500);
+    }
+});
+
 // Download endpoints
 app.get('/api/download/lightroom-plugin', async (c) => {
     try {
