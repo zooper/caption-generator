@@ -6753,6 +6753,22 @@ async function postToPixelfedCron(content, imageData, settings, env) {
         const instance = settings.instance;
         const token = settings.token;
         
+        // Handle content parameter - can be object or string
+        let postContent = '';
+        if (typeof content === 'object' && content !== null) {
+            postContent = content.combinedContent || content.caption || '';
+        } else if (typeof content === 'string') {
+            postContent = content;
+        }
+        
+        // Ensure we have content to post
+        if (!postContent || postContent.trim() === '' || postContent === 'null') {
+            console.error('No valid content provided for Pixelfed post');
+            return false;
+        }
+        
+        console.log('Pixelfed posting content:', postContent.substring(0, 100) + '...');
+        
         let mediaId = null;
         
         // Upload image if provided
@@ -6788,7 +6804,7 @@ async function postToPixelfedCron(content, imageData, settings, env) {
         
         // Create the post
         const postData = {
-            status: content,
+            status: postContent,
             visibility: 'public'
         };
         
@@ -6827,8 +6843,22 @@ async function postToInstagramCron(content, imageData, settings, env) {
         const instagramAccessToken = settings.access_token;
         const instagramAccountId = settings.account_id;
         
+        // Handle content parameter - should be object with combinedContent
+        let postContent = '';
+        if (typeof content === 'object' && content !== null) {
+            postContent = content.combinedContent || content.caption || '';
+        } else if (typeof content === 'string') {
+            postContent = content;
+        }
+        
+        // Ensure we have content to post
+        if (!postContent || postContent.trim() === '' || postContent === 'null') {
+            console.error('No valid content provided for Instagram post');
+            return false;
+        }
+        
         console.log('Posting to Instagram via scheduled post...');
-        console.log('Caption:', content.combinedContent.substring(0, 100) + '...');
+        console.log('Caption:', postContent.substring(0, 100) + '...');
         
         if (!instagramAccessToken) {
             console.error('No Instagram access token found');
@@ -6876,7 +6906,7 @@ async function postToInstagramCron(content, imageData, settings, env) {
             },
             body: JSON.stringify({
                 image_url: publicImageUrl,
-                caption: content.combinedContent,
+                caption: postContent,
                 access_token: instagramAccessToken
             })
         });
@@ -6979,12 +7009,31 @@ async function handleScheduledPosts(env) {
                     }
                 }
                 
-                // Prepare content
+                // Prepare content with debugging and null safety
+                console.log(`Post ${post.id} raw data - caption: "${post.caption}", hashtags: "${post.hashtags}"`);
+                
+                // Handle null values from database
+                const safeCaption = post.caption && post.caption !== 'null' ? post.caption : '';
+                const safeHashtags = post.hashtags && post.hashtags !== 'null' ? post.hashtags : '';
+                
+                // Hard fail if no caption - no fallback
+                if (!safeCaption || safeCaption.trim() === '') {
+                    console.error(`Scheduled post ${post.id} has no caption - failing post`);
+                    await database.updateScheduledPostStatus(post.id, 'failed', 'No caption provided');
+                    continue; // Skip to next post
+                }
+                
                 const content = {
-                    caption: post.caption,
-                    hashtags: post.hashtags,
-                    combinedContent: post.caption + (post.hashtags ? '\n\n' + post.hashtags : '')
+                    caption: safeCaption,
+                    hashtags: safeHashtags,
+                    combinedContent: safeCaption + (safeHashtags ? '\n\n' + safeHashtags : '')
                 };
+                
+                console.log(`Post ${post.id} prepared content:`, JSON.stringify({
+                    caption: content.caption,
+                    hashtags: content.hashtags,
+                    combinedContent: content.combinedContent?.substring(0, 100) + '...'
+                }));
                 
                 // Parse platforms from JSON string
                 let platforms = [];
@@ -7016,7 +7065,7 @@ async function handleScheduledPosts(env) {
                                 
                             case 'pixelfed':
                                 if (platformSettings.pixelfed?.instance && platformSettings.pixelfed?.token) {
-                                    platformSuccess = await postToPixelfedCron(content.combinedContent, imageData, platformSettings.pixelfed, env);
+                                    platformSuccess = await postToPixelfedCron(content, imageData, platformSettings.pixelfed, env);
                                 } else {
                                     errorMessage = 'Pixelfed not configured';
                                 }
