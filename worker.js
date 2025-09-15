@@ -5244,35 +5244,43 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                         
                         if (typeof dateStr === 'string') {
                             // Standard EXIF format: "2025:09:14 17:33:11"
-                            // Parse manually to avoid timezone interpretation
+                            // Parse components and store as plain object to avoid timezone issues
                             const match = dateStr.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
                             if (match) {
                                 const [, year, month, day, hour, minute, second] = match;
-                                // Create date with exact EXIF values - no timezone conversion
-                                parsedDate = new Date(
-                                    parseInt(year),
-                                    parseInt(month) - 1, // Month is 0-indexed in JS
-                                    parseInt(day),
-                                    parseInt(hour),
-                                    parseInt(minute),
-                                    parseInt(second)
-                                );
+                                // Store as plain object with EXIF components
+                                extractedData.photoDateTime = {
+                                    year: parseInt(year),
+                                    month: parseInt(month),
+                                    day: parseInt(day),
+                                    hour: parseInt(hour),
+                                    minute: parseInt(minute),
+                                    second: parseInt(second),
+                                    originalString: dateStr
+                                };
+                                extractedData.dateTimeSource = field;
+                                // Create formatted display string directly from components
+                                const displayTime = hour > 12 ? `${hour - 12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
+                                                  hour === 12 ? `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
+                                                  hour === 0 ? `12:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM` :
+                                                  `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM`;
+                                context.push(`Photo taken: ${month}/${day}/${year} ${displayTime}`);
+                                break;
                             } else {
                                 // Fallback to string parsing if format doesn't match
                                 dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
                                 parsedDate = new Date(dateStr);
+                                if (parsedDate && !isNaN(parsedDate.getTime())) {
+                                    extractedData.photoDateTime = parsedDate;
+                                    extractedData.dateTimeSource = field;
+                                    context.push('Photo taken: ' + formatDateWithTimezone(parsedDate, null, env));
+                                    break;
+                                }
                             }
                         } else if (dateStr instanceof Date) {
-                            parsedDate = dateStr;
-                        }
-                        
-                        if (parsedDate && !isNaN(parsedDate.getTime())) {
-                            // Store original EXIF timestamp - DO NOT convert to UTC
-                            // EXIF dates are local time where photo was taken
-                            extractedData.photoDateTime = parsedDate;
+                            extractedData.photoDateTime = dateStr;
                             extractedData.dateTimeSource = field;
-                            // Display in configured timezone for user context
-                            context.push('Photo taken: ' + formatDateWithTimezone(parsedDate, null, env));
+                            context.push('Photo taken: ' + formatDateWithTimezone(dateStr, null, env));
                             break;
                         }
                     } catch (error) {
@@ -5404,8 +5412,19 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
     
     // Add extracted technical data
     if (extractedData.photoDateTime) {
-        const photoDate = new Date(extractedData.photoDateTime);
-        context.push('Photo taken: ' + formatDateWithTimezone(photoDate, null, env));
+        if (typeof extractedData.photoDateTime === 'object' && extractedData.photoDateTime.year) {
+            // Handle new format with EXIF components
+            const { year, month, day, hour, minute, second } = extractedData.photoDateTime;
+            const displayTime = hour > 12 ? `${hour - 12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
+                              hour === 12 ? `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
+                              hour === 0 ? `12:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM` :
+                              `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM`;
+            context.push(`Photo taken: ${month}/${day}/${year} ${displayTime}`);
+        } else {
+            // Handle legacy format with Date object
+            const photoDate = new Date(extractedData.photoDateTime);
+            context.push('Photo taken: ' + formatDateWithTimezone(photoDate, null, env));
+        }
     }
     
     if (extractedData.cameraMake || extractedData.cameraModel) {
@@ -5673,7 +5692,7 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                     } else if (dateStr instanceof Date) {
                         parsedDate = dateStr;
                     }
-                    
+
                     if (parsedDate && !isNaN(parsedDate.getTime())) {
                         photoTimestamp = parsedDate.getTime();
                         dateSource = field;
