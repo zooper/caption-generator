@@ -2203,7 +2203,7 @@ async function sendMagicLinkEmail(email, loginUrl, env) {
 
     const html = await renderTemplate('login-email', {
         LOGIN_URL: loginUrl,
-        TIMESTAMP: new Date().toLocaleString()
+        TIMESTAMP: formatDateWithTimezone(new Date(), null, c.env)
     });
 
     const emailData = {
@@ -2854,7 +2854,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
                         <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
                         <p style="color: #666; font-size: 12px;">
                             Invited by: ${user.email}<br>
-                            Time: ${new Date().toLocaleString()}${tierInfo ? `<br>Assigned Tier: ${tierInfo.name}` : ''}
+                            Time: ${formatDateWithTimezone(new Date(), null, c.env)}${tierInfo ? `<br>Assigned Tier: ${tierInfo.name}` : ''}
                         </p>
                     </div>
                 `
@@ -2959,7 +2959,7 @@ app.post('/api/admin/invites/:token/resend', authenticateToken, requireAdmin, as
                     <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
                     <p style="color: #666; font-size: 12px;">
                         Resent by: ${user.email}<br>
-                        Time: ${new Date().toLocaleString()}
+                        Time: ${formatDateWithTimezone(new Date(), null, c.env)}
                     </p>
                 </div>
             `
@@ -5252,9 +5252,12 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                         }
                         
                         if (parsedDate && !isNaN(parsedDate.getTime())) {
-                            extractedData.photoDateTime = parsedDate.toISOString();
+                            // Store original EXIF timestamp - DO NOT convert to UTC
+                            // EXIF dates are local time where photo was taken
+                            extractedData.photoDateTime = parsedDate;
                             extractedData.dateTimeSource = field;
-                            context.push('Photo taken: ' + parsedDate.toLocaleDateString() + ' ' + parsedDate.toLocaleTimeString());
+                            // Display in configured timezone for user context
+                            context.push('Photo taken: ' + formatDateWithTimezone(parsedDate, null, env));
                             break;
                         }
                     } catch (error) {
@@ -5387,7 +5390,7 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
     // Add extracted technical data
     if (extractedData.photoDateTime) {
         const photoDate = new Date(extractedData.photoDateTime);
-        context.push('Photo taken: ' + photoDate.toLocaleDateString() + ' ' + photoDate.toLocaleTimeString());
+        context.push('Photo taken: ' + formatDateWithTimezone(photoDate, null, env));
     }
     
     if (extractedData.cameraMake || extractedData.cameraModel) {
@@ -5766,6 +5769,33 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
     }
 
     return null;
+}
+
+// Helper function to format dates with timezone awareness
+function formatDateWithTimezone(date, timezone = null, env = null) {
+    const targetTimezone = timezone || env?.DEFAULT_TIMEZONE || 'UTC';
+    try {
+        return new Date(date).toLocaleString('en-US', {
+            timeZone: targetTimezone,
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        });
+    } catch (error) {
+        // Fallback to UTC if timezone is invalid
+        return new Date(date).toLocaleString('en-US', {
+            timeZone: 'UTC',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        }) + ' UTC';
+    }
 }
 
 // Helper function to get user's connected social media accounts

@@ -27,6 +27,7 @@ SMTP_USER = "resend"
 SMTP_FROM_EMAIL = "no-reply@jonsson.io"
 SMTP_FROM_NAME = "AI Caption Studio"
 ADMIN_EMAIL = "tomas@jonsson.io"
+DEFAULT_TIMEZONE = "America/New_York"
 
 # Cron triggers for scheduled events
 [triggers]
