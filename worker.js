@@ -5244,11 +5244,18 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                         
                         if (typeof dateStr === 'string') {
                             // Standard EXIF format: "2025:09:14 17:33:11"
-                            // Parse components and store as plain object to avoid timezone issues
+                            // Simple parsing - no timezone complexity
                             const match = dateStr.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
                             if (match) {
                                 const [, year, month, day, hour, minute, second] = match;
-                                // Store as plain object with EXIF components
+                                const hourNum = parseInt(hour);
+
+                                // Simple 12-hour format conversion
+                                const hour12 = hourNum > 12 ? hourNum - 12 : (hourNum === 0 ? 12 : hourNum);
+                                const ampm = hourNum >= 12 ? 'PM' : 'AM';
+                                const displayTime = `${hour12}:${minute}:${second} ${ampm}`;
+
+                                // Store components for weather API
                                 extractedData.photoDateTime = {
                                     year: parseInt(year),
                                     month: parseInt(month),
@@ -5259,17 +5266,13 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                                     originalString: dateStr
                                 };
                                 extractedData.dateTimeSource = field;
-                                // Create formatted display string directly from components
-                                const displayTime = hour > 12 ? `${hour - 12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
-                                                  hour === 12 ? `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
-                                                  hour === 0 ? `12:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM` :
-                                                  `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM`;
+
+                                // Simple display format
                                 context.push(`Photo taken: ${month}/${day}/${year} ${displayTime}`);
                                 break;
                             } else {
-                                // Fallback to string parsing if format doesn't match
-                                dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
-                                parsedDate = new Date(dateStr);
+                                // Fallback for non-standard formats
+                                parsedDate = new Date(dateStr.replace(/:/g, '-').replace(/ /, 'T'));
                                 if (parsedDate && !isNaN(parsedDate.getTime())) {
                                     extractedData.photoDateTime = parsedDate;
                                     extractedData.dateTimeSource = field;
@@ -5309,20 +5312,6 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                     extractedData.gpsLongitude = lon;
                     
                     if (lat && lon && !isNaN(lat) && !isNaN(lon)) {
-                        // Get timezone from GPS coordinates for accurate EXIF date interpretation
-                        const photoTimezone = await getTimezoneFromGPS(lat, lon, env);
-                        extractedData.photoTimezone = photoTimezone;
-
-                        // If we have EXIF date components and GPS timezone, reformat the display
-                        if (extractedData.photoDateTime && extractedData.photoDateTime.year) {
-                            const formattedDate = formatEXIFDateTime(extractedData.photoDateTime, photoTimezone);
-                            // Update the context with timezone-aware formatting
-                            const contextIndex = context.findIndex(item => item.startsWith('Photo taken:'));
-                            if (contextIndex >= 0) {
-                                context[contextIndex] = `Photo taken: ${formattedDate}`;
-                            }
-                        }
-
                         const location = await reverseGeocode(lat, lon, zoomLevel);
                         if (location) {
                             context.push('Location: ' + location);
@@ -5427,10 +5416,16 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
     // Add extracted technical data
     if (extractedData.photoDateTime) {
         if (typeof extractedData.photoDateTime === 'object' && extractedData.photoDateTime.year) {
-            // Handle new format with EXIF components and GPS timezone
-            const timezone = extractedData.photoTimezone || 'UTC';
-            const formattedDate = formatEXIFDateTime(extractedData.photoDateTime, timezone);
-            context.push(`Photo taken: ${formattedDate}`);
+            // Handle EXIF components with simple formatting
+            const { year, month, day, hour, minute, second } = extractedData.photoDateTime;
+            const hourNum = parseInt(hour);
+
+            // Simple 12-hour format conversion
+            const hour12 = hourNum > 12 ? hourNum - 12 : (hourNum === 0 ? 12 : hourNum);
+            const ampm = hourNum >= 12 ? 'PM' : 'AM';
+            const displayTime = `${hour12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} ${ampm}`;
+
+            context.push(`Photo taken: ${month}/${day}/${year} ${displayTime}`);
         } else {
             // Handle legacy format with Date object
             const photoDate = new Date(extractedData.photoDateTime);
@@ -5831,83 +5826,6 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
     return null;
 }
 
-// Helper function to get timezone from GPS coordinates
-async function getTimezoneFromGPS(latitude, longitude, env) {
-    try {
-        // Use Google's timezone API if available, otherwise fall back to approximation
-        if (env.GOOGLE_TIMEZONE_API_KEY) {
-            const timestamp = Math.floor(Date.now() / 1000);
-            const url = `https://maps.googleapis.com/maps/api/timezone/json?location=${latitude},${longitude}&timestamp=${timestamp}&key=${env.GOOGLE_TIMEZONE_API_KEY}`;
-            const response = await fetch(url);
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === 'OK') {
-                    return data.timeZoneId;
-                }
-            }
-        }
-
-        // Fallback: approximate timezone based on longitude
-        // This is rough but better than nothing
-        const offsetHours = Math.round(longitude / 15);
-        const offsetMinutes = offsetHours * 60;
-
-        // Map to common timezone IDs based on coordinates
-        if (latitude >= 24.5 && latitude <= 49.4 && longitude >= -125 && longitude <= -66.9) {
-            // Continental US
-            if (longitude >= -90) return 'America/New_York';
-            if (longitude >= -105) return 'America/Chicago';
-            if (longitude >= -120) return 'America/Denver';
-            return 'America/Los_Angeles';
-        } else if (latitude >= 40.1 && latitude <= 41.3 && longitude >= -74.3 && longitude <= -73.7) {
-            // NYC area
-            return 'America/New_York';
-        }
-
-        // Default fallback
-        return 'UTC';
-    } catch (error) {
-        return 'UTC';
-    }
-}
-
-// Helper function to format EXIF date components with proper timezone
-function formatEXIFDateTime(exifComponents, timezone = 'UTC') {
-    const { year, month, day, hour, minute, second } = exifComponents;
-
-    // Always use manual formatting to avoid timezone interpretation issues in Cloudflare Workers
-    const displayTime = hour > 12 ? `${hour - 12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
-                      hour === 12 ? `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
-                      hour === 0 ? `12:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM` :
-                      `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM`;
-
-    // Format month names manually
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const monthName = monthNames[month - 1] || month;
-
-    return `${monthName} ${day}, ${year}, ${displayTime}`;
-}
-
-// Helper function to create timestamp from EXIF components in specific timezone
-function createTimestampFromEXIF(exifComponents, timezone = 'UTC') {
-    const { year, month, day, hour, minute, second } = exifComponents;
-
-    try {
-        // Create date string in ISO format for the timezone
-        const isoString = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}`;
-
-        // Parse in the specified timezone and get UTC timestamp
-        const tempDate = new Date(isoString);
-
-        // For now, return the timestamp as-is for weather API
-        // This maintains the original local time for weather lookup
-        return tempDate.getTime();
-    } catch (error) {
-        // Fallback
-        return new Date(year, month - 1, day, hour, minute, second).getTime();
-    }
-}
 
 // Helper function to format dates with timezone awareness
 function formatDateWithTimezone(date, timezone = null, env = null) {
