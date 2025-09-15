@@ -6176,7 +6176,18 @@ app.post('/api/generate-caption', authenticateToken, async (c) => {
     if (extractedData) {
         if (extractedData.weatherData) responseData.weatherData = extractedData.weatherData;
         if (extractedData.locationName) responseData.locationName = extractedData.locationName;
-        if (extractedData.photoDateTime) responseData.photoDateTime = extractedData.photoDateTime;
+        if (extractedData.photoDateTime) {
+            // For frontend display, convert components back to a readable format
+            if (typeof extractedData.photoDateTime === 'object' && extractedData.photoDateTime.year) {
+                const { year, month, day, hour, minute, second } = extractedData.photoDateTime;
+                const hour12 = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+                const ampm = hour >= 12 ? 'PM' : 'AM';
+                const displayTime = `${hour12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} ${ampm}`;
+                responseData.photoDateTime = `${month}/${day}/${year} ${displayTime}`;
+            } else {
+                responseData.photoDateTime = extractedData.photoDateTime;
+            }
+        }
         if (extractedData.cameraMake || extractedData.cameraModel) {
             responseData.cameraInfo = {
                 make: extractedData.cameraMake,
