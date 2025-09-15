@@ -5306,7 +5306,8 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
     }
     
     const contextString = context.length > 0 ? '\\n\\nAdditional Context:\\n' + context.join('\\n') : '';
-    
+
+
     // Define style-specific caption instructions
     const styleInstructions = {
         creative: {
@@ -5352,6 +5353,7 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         '   - IMPORTANT: Do NOT include any hashtags in the caption text\\n' +
         '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
+        (context.some(item => item.startsWith('Weather:')) ? '   - MUST use the exact weather data provided in context - do not make up different weather conditions\\n' : '') +
         '\\n2. MANDATORY: Generate EXACTLY ' + hashtagCount + ' hashtags - COUNT TO ' + hashtagCount + ':\\n' +
         '   - YOU MUST PROVIDE EXACTLY ' + hashtagCount + ' HASHTAGS - NO EXCEPTIONS\\n' +
         '   - COUNT: 1, 2, 3... up to ' + hashtagCount + ' - DO NOT STOP BEFORE ' + hashtagCount + '\\n' +
@@ -5515,6 +5517,7 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
         '   - IMPORTANT: Do NOT include any hashtags in the caption text\\n' +
         '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
+        (context.some(item => item.startsWith('Weather:')) ? '   - MUST use the exact weather data provided in context - do not make up different weather conditions\\n' : '') +
         '\\n2. MANDATORY: Generate EXACTLY ' + hashtagCount + ' hashtags - COUNT TO ' + hashtagCount + ':\\n' +
         '   - YOU MUST PROVIDE EXACTLY ' + hashtagCount + ' HASHTAGS - NO EXCEPTIONS\\n' +
         '   - COUNT: 1, 2, 3... up to ' + hashtagCount + ' - DO NOT STOP BEFORE ' + hashtagCount + '\\n' +
@@ -5653,7 +5656,8 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
         const now = Date.now();
         const year2000 = new Date('2000-01-01').getTime();
         let useCurrentWeather = false;
-        
+
+
         if (photoTimestamp > now || photoTimestamp < year2000) {
             // For invalid dates (future or too old), use current weather but keep original timestamp info for display
             useCurrentWeather = true;
@@ -5672,10 +5676,12 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
             weatherUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=' + latitude + '&lon=' + longitude + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
             apiDescription = 'current (invalid date detected)';
         } else {
-            // Use current weather for recent photos (within 5 days), historical for older
-            const fiveDaysAgo = Date.now() - (5 * 24 * 60 * 60 * 1000);
-            
-            if (photoTimestamp > fiveDaysAgo) {
+            // Use current weather for very recent photos (within 3 hours), historical for older
+            const threeHoursAgo = Date.now() - (3 * 60 * 60 * 1000);
+            const isRecent = photoTimestamp > threeHoursAgo;
+
+
+            if (isRecent) {
                 // Use current weather API for recent photos
                 weatherUrl = 'https://api.openweathermap.org/data/2.5/weather?lat=' + latitude + '&lon=' + longitude + '&appid=' + env.OPENWEATHER_API_KEY + '&units=metric';
                 apiDescription = 'current';
@@ -5685,8 +5691,8 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                 apiDescription = 'historical';
             }
         }
-        
-        
+
+
         const response = await fetch(weatherUrl, {
             headers: {
                 'User-Agent': 'AI Caption Studio'
@@ -5746,18 +5752,19 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
             let weatherText = weatherInfo.temperature + '°C, ' + weatherInfo.description +
                                (weatherInfo.humidity ? ', ' + weatherInfo.humidity + '% humidity' : '') +
                                (weatherInfo.windSpeed ? ', ' + weatherInfo.windSpeed + ' km/h wind' : '');
-            
+
             // Add note if using current weather due to invalid photo date
             if (useCurrentWeather) {
                 weatherText += ' (current weather - photo date appears invalid)';
             }
-            
+
             return weatherText;
         }
-        
+
     } catch (error) {
+        return null;
     }
-    
+
     return null;
 }
 
