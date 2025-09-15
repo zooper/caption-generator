@@ -1843,6 +1843,14 @@ app.get('/api/health', (c) => {
   });
 });
 
+// Version endpoint
+app.get('/api/version', (c) => {
+  return c.json({
+    commit: c.env.GIT_COMMIT || 'dev',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Debug endpoint to check database schema
 app.get('/api/debug/schema', async (c) => {
   try {
@@ -5236,19 +5244,13 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
             
             // Extract photo date/time
             const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
-            console.log('DEBUG: Available EXIF fields:', Object.keys(exifData));
-            console.log('DEBUG: Checking date fields:', dateFields);
-
             for (const field of dateFields) {
-                console.log(`DEBUG: Checking field ${field}:`, exifData[field]);
                 if (exifData[field]) {
                     try {
                         let dateStr = exifData[field];
                         let parsedDate;
                         
                         if (typeof dateStr === 'string') {
-                            // Debug: Log the actual EXIF date string
-                            console.log(`DEBUG EXIF ${field}:`, dateStr);
 
                             // Standard EXIF format: "2025:09:14 17:33:11"
                             // Simple parsing - no timezone complexity

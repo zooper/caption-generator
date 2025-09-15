@@ -4603,5 +4603,22 @@ NOTE: The system automatically provides camera info, location, weather, and cont
             return showToast(message, 'info', title, duration);
         }
     </script>
+
+    <!-- Footer -->
+    <footer id="version-footer" style="position: fixed; bottom: 8px; right: 8px; font-size: 10px; color: var(--text-secondary); opacity: 0.6; pointer-events: none;">
+        v.loading...
+    </footer>
+
+    <script>
+        // Load version info
+        fetch('/api/version')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('version-footer').textContent = `v.${data.commit}`;
+            })
+            .catch(() => {
+                document.getElementById('version-footer').textContent = 'v.unknown';
+            });
+    </script>
 </body>
 </html>
