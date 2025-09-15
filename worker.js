@@ -5236,7 +5236,11 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
             
             // Extract photo date/time
             const dateFields = ['DateTimeOriginal', 'DateTimeDigitized', 'DateTime'];
+            console.log('DEBUG: Available EXIF fields:', Object.keys(exifData));
+            console.log('DEBUG: Checking date fields:', dateFields);
+
             for (const field of dateFields) {
+                console.log(`DEBUG: Checking field ${field}:`, exifData[field]);
                 if (exifData[field]) {
                     try {
                         let dateStr = exifData[field];
