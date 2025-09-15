@@ -5875,30 +5875,18 @@ async function getTimezoneFromGPS(latitude, longitude, env) {
 function formatEXIFDateTime(exifComponents, timezone = 'UTC') {
     const { year, month, day, hour, minute, second } = exifComponents;
 
-    try {
-        // Create a date in the specified timezone
-        const dateInTimezone = new Date();
-        dateInTimezone.setFullYear(year, month - 1, day);
-        dateInTimezone.setHours(hour, minute, second, 0);
+    // Always use manual formatting to avoid timezone interpretation issues in Cloudflare Workers
+    const displayTime = hour > 12 ? `${hour - 12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
+                      hour === 12 ? `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} PM` :
+                      hour === 0 ? `12:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM` :
+                      `${hour}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} AM`;
 
-        // Format in the target timezone
-        return dateInTimezone.toLocaleString('en-US', {
-            timeZone: timezone,
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true
-        });
-    } catch (error) {
-        // Fallback to manual formatting
-        const displayTime = hour > 12 ? `${hour - 12}:${minute.toString().padStart(2, '0')} PM` :
-                          hour === 12 ? `${hour}:${minute.toString().padStart(2, '0')} PM` :
-                          hour === 0 ? `12:${minute.toString().padStart(2, '0')} AM` :
-                          `${hour}:${minute.toString().padStart(2, '0')} AM`;
-        return `${month}/${day}/${year} ${displayTime}`;
-    }
+    // Format month names manually
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthName = monthNames[month - 1] || month;
+
+    return `${monthName} ${day}, ${year}, ${displayTime}`;
 }
 
 // Helper function to create timestamp from EXIF components in specific timezone
