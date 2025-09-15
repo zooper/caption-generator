@@ -5243,10 +5243,25 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                         let parsedDate;
                         
                         if (typeof dateStr === 'string') {
-                            // Standard EXIF format: "2024:01:15 14:30:25"
-                            // Convert to ISO format but treat as local time (no Z suffix)
-                            dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
-                            parsedDate = new Date(dateStr);
+                            // Standard EXIF format: "2025:09:14 17:33:11"
+                            // Parse manually to avoid timezone interpretation
+                            const match = dateStr.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+                            if (match) {
+                                const [, year, month, day, hour, minute, second] = match;
+                                // Create date with exact EXIF values - no timezone conversion
+                                parsedDate = new Date(
+                                    parseInt(year),
+                                    parseInt(month) - 1, // Month is 0-indexed in JS
+                                    parseInt(day),
+                                    parseInt(hour),
+                                    parseInt(minute),
+                                    parseInt(second)
+                                );
+                            } else {
+                                // Fallback to string parsing if format doesn't match
+                                dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
+                                parsedDate = new Date(dateStr);
+                            }
                         } else if (dateStr instanceof Date) {
                             parsedDate = dateStr;
                         }
@@ -5636,10 +5651,25 @@ async function getHistoricalWeather(latitude, longitude, exifData, env) {
                     let parsedDate;
                     
                     if (typeof dateStr === 'string') {
-                        // Standard EXIF format: "2024:01:15 14:30:25"
-                        // Convert to ISO format but treat as local time (no Z suffix)
-                        dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
-                        parsedDate = new Date(dateStr);
+                        // Standard EXIF format: "2025:09:14 17:33:11"
+                        // Parse manually to avoid timezone interpretation
+                        const match = dateStr.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+                        if (match) {
+                            const [, year, month, day, hour, minute, second] = match;
+                            // Create date with exact EXIF values - no timezone conversion
+                            parsedDate = new Date(
+                                parseInt(year),
+                                parseInt(month) - 1, // Month is 0-indexed in JS
+                                parseInt(day),
+                                parseInt(hour),
+                                parseInt(minute),
+                                parseInt(second)
+                            );
+                        } else {
+                            // Fallback to string parsing if format doesn't match
+                            dateStr = dateStr.replace(/:/g, '-').replace(/ /, 'T');
+                            parsedDate = new Date(dateStr);
+                        }
                     } else if (dateStr instanceof Date) {
                         parsedDate = dateStr;
                     }
