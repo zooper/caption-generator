@@ -5288,9 +5288,36 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
                                 }
                             }
                         } else if (dateStr instanceof Date) {
-                            extractedData.photoDateTime = dateStr;
+                            // EXIF library returned a Date object
+                            console.log(`DEBUG EXIF ${field} (Date object):`, dateStr);
+
+                            // Extract components from the Date object using UTC to preserve original time
+                            const year = dateStr.getUTCFullYear();
+                            const month = dateStr.getUTCMonth() + 1; // getUTCMonth() returns 0-11
+                            const day = dateStr.getUTCDate();
+                            const hour = dateStr.getUTCHours();
+                            const minute = dateStr.getUTCMinutes();
+                            const second = dateStr.getUTCSeconds();
+
+                            // Simple 12-hour format conversion
+                            const hour12 = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+                            const ampm = hour >= 12 ? 'PM' : 'AM';
+                            const displayTime = `${hour12}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')} ${ampm}`;
+
+                            // Store components for weather API
+                            extractedData.photoDateTime = {
+                                year: year,
+                                month: month,
+                                day: day,
+                                hour: hour,
+                                minute: minute,
+                                second: second,
+                                originalString: dateStr.toISOString()
+                            };
                             extractedData.dateTimeSource = field;
-                            context.push('Photo taken: ' + formatDateWithTimezone(dateStr, null, env));
+
+                            // Simple display format
+                            context.push(`Photo taken: ${month}/${day}/${year} ${displayTime}`);
                             break;
                         }
                     } catch (error) {
