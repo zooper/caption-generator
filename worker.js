@@ -2211,7 +2211,7 @@ async function sendMagicLinkEmail(email, loginUrl, env) {
 
     const html = await renderTemplate('login-email', {
         LOGIN_URL: loginUrl,
-        TIMESTAMP: formatDateWithTimezone(new Date(), null, c.env)
+        TIMESTAMP: formatDateWithTimezone(new Date(), null, env)
     });
 
     const emailData = {
@@ -2287,14 +2287,14 @@ app.post('/api/auth/request-login', async (c) => {
                 expiresIn: '15 minutes'
             });
         } catch (emailError) {
-            
-            // Fallback: show link for development if email fails
-            return c.json({ 
-                success: true, 
-                message: 'Magic link generated (email sending failed: ' + emailError.message + ')',
-                expiresIn: '15 minutes',
-                loginUrl: loginUrl // Only shown when email fails
-            });
+            console.error('Email sending error:', emailError);
+
+            // Security: Never expose the actual login URL to the client
+            // The token exists in the database, but email failed to send
+            return c.json({
+                error: 'Failed to send login email. Please contact support or try again later.',
+                details: 'Email service unavailable'
+            }, 500);
         }
 
     } catch (error) {
