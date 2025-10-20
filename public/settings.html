@@ -4,9 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - AI Caption Studio</title>
+    <script>
+        // Placeholder for SimpleWebAuthn - will be loaded by module
+        window.SimpleWebAuthnBrowser = null;
+    </script>
     <script type="module">
         import { startRegistration, startAuthentication } from 'https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.js';
         window.SimpleWebAuthnBrowser = { startRegistration, startAuthentication };
+        console.log('✅ SimpleWebAuthn module loaded');
     </script>
     <style>
         /* Theme System */
@@ -508,25 +513,36 @@
     <script>
         async function checkAuth() {
             try {
+                console.log('🔐 Checking authentication...');
+                const token = localStorage.getItem('auth_token');
+                console.log('🔑 Token:', token ? 'exists' : 'missing');
+
                 const response = await fetch('/api/auth/me', {
-                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
+                    headers: { 'Authorization': 'Bearer ' + token },
                     credentials: 'include'
                 });
-                
+
+                console.log('📡 Auth response status:', response.status);
+
                 if (response.ok) {
                     const user = await response.json();
+                    console.log('✅ Authenticated as:', user.email);
                     document.getElementById('loginRequired').classList.add('hidden');
                     document.getElementById('settingsContent').classList.remove('hidden');
                     document.getElementById('userEmail').textContent = user.email;
                     document.getElementById('userType').textContent = user.isAdmin ? 'Admin' : 'User';
                     document.getElementById('memberSince').textContent = new Date().toLocaleDateString();
-                    
+
                     // Load saved preferences
                     loadPreferences();
                     loadSocialMediaSettings();
                     loadApiKeys();
+                } else {
+                    const error = await response.json();
+                    console.error('❌ Auth failed:', error);
                 }
             } catch (error) {
+                console.error('❌ Auth error:', error);
             }
         }
 
@@ -1361,8 +1377,19 @@
         }
 
         // Passkey Management Functions
-        const { startRegistration } = SimpleWebAuthnBrowser;
         let currentRecoveryCodes = [];
+
+        // Helper to wait for SimpleWebAuthn to load
+        async function waitForSimpleWebAuthn() {
+            let attempts = 0;
+            while (!window.SimpleWebAuthnBrowser && attempts < 50) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
+            if (!window.SimpleWebAuthnBrowser) {
+                throw new Error('SimpleWebAuthn failed to load');
+            }
+        }
 
         async function loadPasskeys() {
             try {
@@ -1417,6 +1444,10 @@
 
         async function registerPasskey() {
             try {
+                // Wait for SimpleWebAuthn to load
+                await waitForSimpleWebAuthn();
+                const { startRegistration } = window.SimpleWebAuthnBrowser;
+
                 // Ask for device name
                 const deviceName = prompt('Give this passkey a name (e.g., "MacBook Pro", "iPhone"):', getBrowserName());
                 if (!deviceName) return;
@@ -1593,7 +1624,10 @@ If you lose access to your passkeys, you can use these codes to recover your acc
             return 'This Device';
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
+            // Wait a bit for ES module to load
+            await new Promise(resolve => setTimeout(resolve, 100));
+
             checkAuth();
             loadSavedTheme();
             handleInstagramOAuthReturn();

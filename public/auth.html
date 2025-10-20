@@ -6,9 +6,14 @@
     <title>Login - AI Caption Studio</title>
     <link rel="stylesheet" href="themes.css">
     <script src="theme-loader.js"></script>
+    <script>
+        // Placeholder for SimpleWebAuthn - will be loaded by module
+        window.SimpleWebAuthnBrowser = null;
+    </script>
     <script type="module">
         import { startRegistration, startAuthentication } from 'https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.js';
         window.SimpleWebAuthnBrowser = { startRegistration, startAuthentication };
+        console.log('✅ SimpleWebAuthn module loaded');
     </script>
     <style>
         * {
@@ -320,7 +325,17 @@
     </div>
 
     <script>
-        const { startAuthentication } = SimpleWebAuthnBrowser;
+        // Helper to wait for SimpleWebAuthn to load
+        async function waitForSimpleWebAuthn() {
+            let attempts = 0;
+            while (!window.SimpleWebAuthnBrowser && attempts < 50) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
+            if (!window.SimpleWebAuthnBrowser) {
+                throw new Error('SimpleWebAuthn failed to load');
+            }
+        }
 
         class AuthManager {
             constructor() {
@@ -449,6 +464,10 @@
                 this.setPasskeyLoading(true);
 
                 try {
+                    // Wait for SimpleWebAuthn to load
+                    await waitForSimpleWebAuthn();
+                    const { startAuthentication } = window.SimpleWebAuthnBrowser;
+
                     // Get authentication options from server
                     const optionsResponse = await fetch('/api/auth/passkey/login-options', {
                         method: 'POST',
