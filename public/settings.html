@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - AI Caption Studio</title>
-    <script src="https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.umd.min.js"></script>
+    <script type="module">
+        import { startRegistration, startAuthentication } from 'https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.js';
+        window.SimpleWebAuthnBrowser = { startRegistration, startAuthentication };
+    </script>
     <style>
         /* Theme System */
         :root {

@@ -6,7 +6,10 @@
     <title>Login - AI Caption Studio</title>
     <link rel="stylesheet" href="themes.css">
     <script src="theme-loader.js"></script>
-    <script src="https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.umd.min.js"></script>
+    <script type="module">
+        import { startRegistration, startAuthentication } from 'https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.js';
+        window.SimpleWebAuthnBrowser = { startRegistration, startAuthentication };
+    </script>
     <style>
         * {
             margin: 0;
