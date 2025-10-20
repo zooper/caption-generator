@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - AI Caption Studio</title>
+    <script src="https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.umd.min.js"></script>
     <style>
         /* Theme System */
         :root {
@@ -202,6 +203,65 @@
                         <p><strong>Email:</strong> <span id="userEmail">Loading...</span></p>
                         <p><strong>Account Type:</strong> <span id="userType">Loading...</span></p>
                         <p><strong>Member Since:</strong> <span id="memberSince">Loading...</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security & Passkeys -->
+            <div class="settings-section">
+                <div class="section-title">🔐 Security & Passkeys</div>
+
+                <!-- Passkey Registration Prompt (shown if no passkeys) -->
+                <div id="passkeyPrompt" class="hidden" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 10px; font-size: 1.2rem;">🎉 Secure Your Account with a Passkey!</h3>
+                    <p style="margin-bottom: 15px; opacity: 0.95;">Set up a passkey for faster, more secure logins using your device's biometrics (Face ID, Touch ID, Windows Hello).</p>
+                    <button onclick="registerPasskey()" class="btn" style="background: white; color: #667eea; padding: 12px 24px;">
+                        🔐 Register Your First Passkey
+                    </button>
+                </div>
+
+                <!-- Passkeys List -->
+                <div id="passkeysSection">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <div>
+                            <h3 style="font-size: 1.1rem; margin-bottom: 5px;">Your Passkeys</h3>
+                            <p class="text-sm text-muted">Manage your registered passkeys for secure authentication</p>
+                        </div>
+                        <button onclick="registerPasskey()" class="btn btn-primary" id="addPasskeyBtn">
+                            ➕ Add Passkey
+                        </button>
+                    </div>
+
+                    <div id="passkeysList" style="margin-top: 15px;">
+                        <p class="text-muted">Loading passkeys...</p>
+                    </div>
+                </div>
+
+                <!-- Recovery Codes -->
+                <div style="margin-top: 30px; padding-top: 30px; border-top: 2px solid var(--border-color);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <div>
+                            <h3 style="font-size: 1.1rem; margin-bottom: 5px;">Recovery Codes</h3>
+                            <p class="text-sm text-muted">Use these codes to recover your account if you lose access to your passkeys</p>
+                        </div>
+                        <button onclick="showRecoveryCodes()" class="btn btn-secondary" id="viewRecoveryBtn">
+                            👁️ View Codes
+                        </button>
+                    </div>
+
+                    <div id="recoveryCodesSection" class="hidden" style="background: var(--card-background); border: 2px solid var(--warning-color); border-radius: 10px; padding: 20px; margin-top: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
+                            <div>
+                                <h4 style="color: var(--warning-color); margin-bottom: 10px;">⚠️ Keep These Safe!</h4>
+                                <p class="text-sm text-muted">Each code can only be used once. Store them securely.</p>
+                            </div>
+                            <button onclick="downloadRecoveryCodes()" class="btn btn-secondary">
+                                📥 Download
+                            </button>
+                        </div>
+                        <div id="recoveryCodesList" style="font-family: monospace; font-size: 14px; line-height: 2;">
+                            Loading...
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1297,10 +1357,234 @@
             }
         }
 
+        // Passkey Management Functions
+        const { startRegistration } = SimpleWebAuthnBrowser;
+        let currentRecoveryCodes = [];
+
+        async function loadPasskeys() {
+            try {
+                const response = await fetch('/api/auth/passkeys', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+
+                if (!response.ok) throw new Error('Failed to load passkeys');
+
+                const data = await response.json();
+                const passkeys = data.passkeys || [];
+
+                // Show prompt if no passkeys
+                const prompt = document.getElementById('passkeyPrompt');
+                const addBtn = document.getElementById('addPasskeyBtn');
+
+                if (passkeys.length === 0) {
+                    prompt.classList.remove('hidden');
+                    addBtn.classList.add('hidden');
+                } else {
+                    prompt.classList.add('hidden');
+                    addBtn.classList.remove('hidden');
+                }
+
+                // Render passkeys list
+                const list = document.getElementById('passkeysList');
+                if (passkeys.length === 0) {
+                    list.innerHTML = '<p class="text-muted">No passkeys registered yet.</p>';
+                } else {
+                    list.innerHTML = passkeys.map(pk => `
+                        <div style="border: 2px solid var(--border-color); border-radius: 10px; padding: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-weight: 600; margin-bottom: 5px;">
+                                    🔐 ${pk.deviceName || 'Unknown Device'}
+                                </div>
+                                <div class="text-sm text-muted">
+                                    Added: ${new Date(pk.createdAt).toLocaleDateString()}
+                                    ${pk.lastUsedAt ? ' • Last used: ' + new Date(pk.lastUsedAt).toLocaleDateString() : ''}
+                                </div>
+                            </div>
+                            <button onclick="deletePasskey('${pk.id}')" class="btn btn-danger" style="padding: 8px 16px;">
+                                🗑️ Remove
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Error loading passkeys:', error);
+                document.getElementById('passkeysList').innerHTML = '<p class="text-muted" style="color: var(--error-color);">Failed to load passkeys</p>';
+            }
+        }
+
+        async function registerPasskey() {
+            try {
+                // Ask for device name
+                const deviceName = prompt('Give this passkey a name (e.g., "MacBook Pro", "iPhone"):', getBrowserName());
+                if (!deviceName) return;
+
+                // Get registration options from server
+                const optionsResponse = await fetch('/api/auth/passkey/register-options', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token'),
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!optionsResponse.ok) {
+                    const error = await optionsResponse.json();
+                    throw new Error(error.error || 'Failed to get registration options');
+                }
+
+                const optionsData = await optionsResponse.json();
+
+                // Start WebAuthn registration
+                const credential = await startRegistration(optionsData.options);
+
+                // Verify registration with server
+                const verifyResponse = await fetch('/api/auth/passkey/register-verify', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('auth_token'),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        credential,
+                        challenge: optionsData.challenge,
+                        deviceName
+                    })
+                });
+
+                if (!verifyResponse.ok) {
+                    const error = await verifyResponse.json();
+                    throw new Error(error.error || 'Failed to verify passkey');
+                }
+
+                const verifyData = await verifyResponse.json();
+
+                alert('✅ Passkey registered successfully!');
+
+                // Show recovery codes if this was the first passkey
+                if (verifyData.recoveryCodes && verifyData.recoveryCodes.length > 0) {
+                    currentRecoveryCodes = verifyData.recoveryCodes;
+                    showRecoveryCodes();
+                    alert('⚠️ IMPORTANT: Save your recovery codes! They will be shown below and can only be viewed once.');
+                }
+
+                // Reload passkeys list
+                loadPasskeys();
+
+            } catch (error) {
+                console.error('Passkey registration error:', error);
+                if (error.name === 'NotAllowedError') {
+                    alert('❌ Passkey registration was cancelled');
+                } else {
+                    alert('❌ Failed to register passkey: ' + error.message);
+                }
+            }
+        }
+
+        async function deletePasskey(passkeyId) {
+            if (!confirm('Are you sure you want to remove this passkey?')) return;
+
+            try {
+                const response = await fetch(`/api/auth/passkey/${passkeyId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+
+                if (!response.ok) throw new Error('Failed to delete passkey');
+
+                alert('✅ Passkey removed successfully');
+                loadPasskeys();
+            } catch (error) {
+                console.error('Error deleting passkey:', error);
+                alert('❌ Failed to remove passkey: ' + error.message);
+            }
+        }
+
+        async function showRecoveryCodes() {
+            const section = document.getElementById('recoveryCodesSection');
+            const list = document.getElementById('recoveryCodesList');
+
+            // If we have fresh codes (just generated), use those
+            if (currentRecoveryCodes.length > 0) {
+                renderRecoveryCodes(currentRecoveryCodes);
+                section.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/recovery-codes', {
+                    headers: { 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') }
+                });
+
+                if (!response.ok) throw new Error('Failed to load recovery codes');
+
+                const data = await response.json();
+                currentRecoveryCodes = data.codes || [];
+
+                if (currentRecoveryCodes.length === 0) {
+                    list.innerHTML = '<p class="text-muted">No recovery codes available. They are generated when you register your first passkey.</p>';
+                } else {
+                    renderRecoveryCodes(currentRecoveryCodes);
+                }
+
+                section.classList.remove('hidden');
+            } catch (error) {
+                console.error('Error loading recovery codes:', error);
+                list.innerHTML = '<p style="color: var(--error-color);">Failed to load recovery codes</p>';
+                section.classList.remove('hidden');
+            }
+        }
+
+        function renderRecoveryCodes(codes) {
+            const list = document.getElementById('recoveryCodesList');
+            list.innerHTML = codes.map((code, i) => `
+                <div style="padding: 8px; background: var(--border-color); border-radius: 6px; margin-bottom: 8px;">
+                    ${i + 1}. ${code}
+                </div>
+            `).join('');
+        }
+
+        function downloadRecoveryCodes() {
+            if (currentRecoveryCodes.length === 0) {
+                alert('No recovery codes to download');
+                return;
+            }
+
+            const content = `AI Caption Studio - Recovery Codes
+Generated: ${new Date().toLocaleString()}
+
+IMPORTANT: Store these codes securely. Each code can only be used once.
+
+${currentRecoveryCodes.map((code, i) => `${i + 1}. ${code}`).join('\n')}
+
+---
+If you lose access to your passkeys, you can use these codes to recover your account.
+`;
+
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ai-caption-studio-recovery-codes-${Date.now()}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            alert('✅ Recovery codes downloaded! Store them in a safe place.');
+        }
+
+        function getBrowserName() {
+            const ua = navigator.userAgent;
+            if (ua.includes('Firefox')) return 'Firefox';
+            if (ua.includes('Chrome')) return 'Chrome';
+            if (ua.includes('Safari')) return 'Safari';
+            if (ua.includes('Edge')) return 'Edge';
+            return 'This Device';
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             checkAuth();
             loadSavedTheme();
             handleInstagramOAuthReturn();
+            loadPasskeys(); // Load passkeys when page loads
         });
     </script>
 </body>
