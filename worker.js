@@ -2702,13 +2702,11 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
 
         console.log('✅ Registration options generated successfully');
 
-        // Convert challenge to base64 for transport
-        const challengeBase64 = btoa(String.fromCharCode(...new Uint8Array(options.challenge)));
-
+        // Store the challenge separately (already base64url encoded by generateRegistrationOptions)
         return c.json({
             success: true,
             options: options,
-            challenge: challengeBase64
+            challenge: options.challenge // Already in correct format from generateRegistrationOptions
         });
     } catch (error) {
         console.error('❌ Error generating registration options:', error);
@@ -2732,17 +2730,11 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
         const origin = new URL(c.req.url).origin;
         const rpID = new URL(origin).hostname;
 
-        // Convert base64 challenge to Uint8Array
-        const binaryChallenge = atob(challenge);
-        const challengeBytes = new Uint8Array(binaryChallenge.length);
-        for (let i = 0; i < binaryChallenge.length; i++) {
-            challengeBytes[i] = binaryChallenge.charCodeAt(i);
-        }
-
-        // Verify the registration response
+        // The challenge is already in base64url format from generateRegistrationOptions
+        // verifyRegistrationResponse expects a string
         const verification = await verifyRegistrationResponse({
             response: credential,
-            expectedChallenge: challengeBytes,
+            expectedChallenge: challenge,
             expectedOrigin: origin,
             expectedRPID: rpID
         });
@@ -2756,9 +2748,10 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
 
         console.log('✅ Passkey verified, saving to database...');
 
-        // Convert Uint8Arrays to base64 for storage
-        const credentialIDBase64 = btoa(String.fromCharCode(...new Uint8Array(credentialID)));
-        const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(credentialPublicKey)));
+        // credentialID and credentialPublicKey are already Uint8Arrays
+        // Convert to base64 for storage
+        const credentialIDBase64 = btoa(String.fromCharCode(...credentialID));
+        const publicKeyBase64 = btoa(String.fromCharCode(...credentialPublicKey));
 
         // Save the passkey credential
         const success = await database.savePasskeyCredential(user.id, {
@@ -2847,13 +2840,11 @@ app.post('/api/auth/passkey/login-options', async (c) => {
             userVerification: 'preferred'
         });
 
-        // Convert challenge to base64
-        const challengeBase64 = btoa(String.fromCharCode(...new Uint8Array(options.challenge)));
-
+        // Challenge is already base64url encoded by generateAuthenticationOptions
         return c.json({
             success: true,
             options: options,
-            challenge: challengeBase64,
+            challenge: options.challenge,
             userId: user.id
         });
     } catch (error) {
@@ -2890,13 +2881,7 @@ app.post('/api/auth/passkey/login-verify', async (c) => {
         const origin = new URL(c.req.url).origin;
         const rpID = new URL(origin).hostname;
 
-        // Convert base64 strings to Uint8Array
-        const binaryChallenge = atob(challenge);
-        const challengeBytes = new Uint8Array(binaryChallenge.length);
-        for (let i = 0; i < binaryChallenge.length; i++) {
-            challengeBytes[i] = binaryChallenge.charCodeAt(i);
-        }
-
+        // Convert base64 stored credentials to Uint8Array for verification
         const binaryCredentialId = atob(passkey.credential_id);
         const credentialIdBytes = new Uint8Array(binaryCredentialId.length);
         for (let i = 0; i < binaryCredentialId.length; i++) {
@@ -2910,9 +2895,10 @@ app.post('/api/auth/passkey/login-verify', async (c) => {
         }
 
         // Verify the authentication response
+        // Challenge is base64url string, verifyAuthenticationResponse expects a string
         const verification = await verifyAuthenticationResponse({
             response: credential,
-            expectedChallenge: challengeBytes,
+            expectedChallenge: challenge,
             expectedOrigin: origin,
             expectedRPID: rpID,
             authenticator: {
