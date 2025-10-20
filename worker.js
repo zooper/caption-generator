@@ -2679,11 +2679,16 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
             }
         }).filter(c => c !== null);
 
-        // SimpleWebAuthn expects userID as a string, it will handle conversion internally
+        // SimpleWebAuthn v11+ requires userID as Uint8Array
+        // Convert numeric user ID to a buffer (encode as 4-byte integer)
+        const userIdBuffer = new Uint8Array(4);
+        const view = new DataView(userIdBuffer.buffer);
+        view.setUint32(0, user.id, false); // big-endian
+
         const options = await generateRegistrationOptions({
             rpName: 'AI Caption Studio',
             rpID: rpID,
-            userID: user.id.toString(),
+            userID: userIdBuffer,
             userName: user.email,
             userDisplayName: user.email,
             excludeCredentials: excludeCredentials,
