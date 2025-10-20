@@ -6,6 +6,7 @@
     <title>Login - AI Caption Studio</title>
     <link rel="stylesheet" href="themes.css">
     <script src="theme-loader.js"></script>
+    <script src="https://unpkg.com/@simplewebauthn/browser@11.0.0/dist/bundle/index.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -29,7 +30,7 @@
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
             padding: 40px;
             width: 100%;
-            max-width: 400px;
+            max-width: 420px;
             margin: 20px;
         }
 
@@ -56,7 +57,7 @@
         .auth-form {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 15px;
         }
 
         .form-group {
@@ -83,6 +84,33 @@
             border-color: var(--accent-color);
         }
 
+        .passkey-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .passkey-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .passkey-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .magic-link-btn {
             background: var(--primary-gradient);
             color: white;
@@ -93,10 +121,9 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
-            margin-top: 10px;
         }
 
-        .magic-link-btn:hover {
+        .magic-link-btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 10px 20px rgba(64, 93, 230, 0.3);
         }
@@ -105,6 +132,26 @@
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
+        }
+
+        .divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            margin: 20px 0;
+            color: #999;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid #e1e5e9;
+        }
+
+        .divider span {
+            padding: 0 10px;
+            font-size: 14px;
         }
 
         .notification {
@@ -127,6 +174,12 @@
             border: 1px solid #f5c6cb;
         }
 
+        .notification.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
         .back-link {
             text-align: center;
             margin-top: 30px;
@@ -143,14 +196,13 @@
         }
 
         .loading-spinner {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             border: 2px solid #ffffff;
             border-top: 2px solid transparent;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             display: inline-block;
-            margin-left: 10px;
         }
 
         @keyframes spin {
@@ -171,6 +223,32 @@
         .email-sent p {
             color: #666;
             line-height: 1.6;
+            margin-bottom: 10px;
+        }
+
+        .passkey-icon {
+            font-size: 20px;
+        }
+
+        .fallback-link {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .fallback-link a {
+            color: #8B5CF6;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .fallback-link a:hover {
+            text-decoration: underline;
+        }
+
+        #magicLinkSection {
+            display: none;
         }
     </style>
 </head>
@@ -178,23 +256,50 @@
     <div class="auth-container">
         <div class="auth-header">
             <h1>🎨 AI Caption Studio</h1>
-            <p>Sign in with your email address</p>
+            <p id="headerText">Sign in securely</p>
         </div>
 
         <div class="notification" id="notification"></div>
 
         <div id="loginForm">
-            <form class="auth-form" id="authForm">
-                <div class="form-group">
-                    <label for="email">Email Address</label>
-                    <input type="email" id="email" name="email" required placeholder="your@email.com">
+            <!-- Passkey Section (Primary) -->
+            <div id="passkeySection">
+                <form class="auth-form" id="passkeyForm">
+                    <div class="form-group">
+                        <label for="emailPasskey">Email Address</label>
+                        <input type="email" id="emailPasskey" name="email" required placeholder="your@email.com" autocomplete="username webauthn">
+                    </div>
+
+                    <button type="submit" class="passkey-btn" id="passkeyBtn">
+                        <span class="passkey-icon">🔐</span>
+                        <span id="passkeyBtnText">Sign in with Passkey</span>
+                        <span class="loading-spinner" id="passkeySpinner" style="display: none;"></span>
+                    </button>
+                </form>
+
+                <div class="fallback-link">
+                    <a href="#" id="showMagicLinkBtn">Use magic link instead</a>
                 </div>
-                
-                <button type="submit" class="magic-link-btn" id="submitBtn">
-                    <span id="btnText">🔗 Send Magic Link</span>
-                    <span class="loading-spinner" id="loadingSpinner" style="display: none;"></span>
-                </button>
-            </form>
+            </div>
+
+            <!-- Magic Link Section (Fallback) -->
+            <div id="magicLinkSection">
+                <form class="auth-form" id="authForm">
+                    <div class="form-group">
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" name="email" required placeholder="your@email.com">
+                    </div>
+
+                    <button type="submit" class="magic-link-btn" id="submitBtn">
+                        <span id="btnText">🔗 Send Magic Link</span>
+                        <span class="loading-spinner" id="loadingSpinner" style="display: none;"></span>
+                    </button>
+                </form>
+
+                <div class="fallback-link">
+                    <a href="#" id="showPasskeyBtn">Use passkey instead</a>
+                </div>
+            </div>
         </div>
 
         <div class="email-sent" id="emailSent">
@@ -212,18 +317,35 @@
     </div>
 
     <script>
+        const { startAuthentication } = SimpleWebAuthnBrowser;
+
         class AuthManager {
             constructor() {
-                this.form = document.getElementById('authForm');
+                // Form elements
+                this.passkeyForm = document.getElementById('passkeyForm');
+                this.authForm = document.getElementById('authForm');
+                this.emailPasskeyInput = document.getElementById('emailPasskey');
                 this.emailInput = document.getElementById('email');
+
+                // Buttons
+                this.passkeyBtn = document.getElementById('passkeyBtn');
+                this.passkeyBtnText = document.getElementById('passkeyBtnText');
+                this.passkeySpinner = document.getElementById('passkeySpinner');
                 this.submitBtn = document.getElementById('submitBtn');
                 this.btnText = document.getElementById('btnText');
                 this.loadingSpinner = document.getElementById('loadingSpinner');
-                this.notification = document.getElementById('notification');
+                this.sendAnotherBtn = document.getElementById('sendAnotherBtn');
+
+                // Sections
+                this.passkeySection = document.getElementById('passkeySection');
+                this.magicLinkSection = document.getElementById('magicLinkSection');
                 this.loginForm = document.getElementById('loginForm');
                 this.emailSent = document.getElementById('emailSent');
+
+                // Other elements
+                this.notification = document.getElementById('notification');
                 this.sentEmail = document.getElementById('sentEmail');
-                this.sendAnotherBtn = document.getElementById('sendAnotherBtn');
+                this.headerText = document.getElementById('headerText');
 
                 this.bindEvents();
                 this.checkExistingAuth();
@@ -231,8 +353,23 @@
             }
 
             bindEvents() {
-                this.form.addEventListener('submit', this.handleSubmit.bind(this));
+                // Passkey form
+                this.passkeyForm.addEventListener('submit', this.handlePasskeyLogin.bind(this));
+
+                // Magic link form
+                this.authForm.addEventListener('submit', this.handleMagicLinkSubmit.bind(this));
                 this.sendAnotherBtn.addEventListener('click', this.showLoginForm.bind(this));
+
+                // Toggle buttons
+                document.getElementById('showMagicLinkBtn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.showMagicLinkForm();
+                });
+
+                document.getElementById('showPasskeyBtn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.showPasskeyForm();
+                });
             }
 
             async init() {
@@ -240,48 +377,146 @@
                 const urlParams = new URLSearchParams(window.location.search);
                 const inviteToken = urlParams.get('invite');
                 const inviteEmail = urlParams.get('email');
-                
+
                 if (inviteToken && inviteEmail) {
                     this.emailInput.value = inviteEmail;
+                    this.emailPasskeyInput.value = inviteEmail;
                     this.inviteToken = inviteToken;
-                    this.showNotification(`You have been invited! Please enter ${inviteEmail} to continue.`, 'success');
+                    this.showNotification(`You have been invited! Please sign in to continue.`, 'success');
                 }
 
                 // Check registration status
                 try {
                     const response = await fetch('/api/auth/registration-status');
                     const data = await response.json();
-                    
+
                     if (!data.registrationOpen && !inviteToken) {
                         this.showNotification(data.message, 'error');
+                        this.passkeyBtn.disabled = true;
                         this.submitBtn.disabled = true;
-                        this.btnText.textContent = '🔒 Registration Closed';
                     }
                 } catch (error) {
                     console.error('Failed to check registration status:', error);
+                }
+
+                // Check if browser supports WebAuthn
+                if (!window.PublicKeyCredential) {
+                    console.log('WebAuthn not supported, showing magic link by default');
+                    this.showMagicLinkForm();
+                    this.showNotification('Your browser doesn\'t support passkeys. Using magic link instead.', 'info');
                 }
             }
 
             checkExistingAuth() {
                 const token = localStorage.getItem('auth_token');
                 const email = localStorage.getItem('user_email');
-                
+
                 if (token && email) {
-                    // User is already logged in, redirect to main app
                     window.location.href = '/';
                 }
             }
 
-            async handleSubmit(e) {
+            showPasskeyForm() {
+                this.passkeySection.style.display = 'block';
+                this.magicLinkSection.style.display = 'none';
+                this.headerText.textContent = 'Sign in securely';
+                this.emailPasskeyInput.focus();
+            }
+
+            showMagicLinkForm() {
+                this.passkeySection.style.display = 'none';
+                this.magicLinkSection.style.display = 'block';
+                this.headerText.textContent = 'Sign in with magic link';
+                // Copy email if already entered
+                if (this.emailPasskeyInput.value) {
+                    this.emailInput.value = this.emailPasskeyInput.value;
+                }
+                this.emailInput.focus();
+            }
+
+            async handlePasskeyLogin(e) {
                 e.preventDefault();
-                
+
+                const email = this.emailPasskeyInput.value.trim();
+                if (!email) {
+                    this.showNotification('Please enter your email address', 'error');
+                    return;
+                }
+
+                this.setPasskeyLoading(true);
+
+                try {
+                    // Get authentication options from server
+                    const optionsResponse = await fetch('/api/auth/passkey/login-options', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email })
+                    });
+
+                    const optionsData = await optionsResponse.json();
+
+                    if (!optionsResponse.ok) {
+                        // If no passkeys found, offer to use magic link
+                        if (optionsData.error.includes('No passkeys')) {
+                            this.showNotification('No passkey found. Use magic link to sign in first.', 'info');
+                            setTimeout(() => this.showMagicLinkForm(), 2000);
+                            return;
+                        }
+                        throw new Error(optionsData.error || 'Failed to initiate passkey login');
+                    }
+
+                    // Start WebAuthn authentication
+                    const credential = await startAuthentication(optionsData.options);
+
+                    // Verify authentication with server
+                    const verifyResponse = await fetch('/api/auth/passkey/login-verify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            credential,
+                            challenge: optionsData.challenge,
+                            userId: optionsData.userId
+                        })
+                    });
+
+                    const verifyData = await verifyResponse.json();
+
+                    if (!verifyResponse.ok) {
+                        throw new Error(verifyData.error || 'Passkey verification failed');
+                    }
+
+                    // Store auth token
+                    localStorage.setItem('auth_token', verifyData.token);
+                    localStorage.setItem('user_email', verifyData.user.email);
+
+                    // Success! Redirect to main app
+                    this.showNotification('Successfully signed in with passkey!', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+
+                } catch (error) {
+                    console.error('Passkey login error:', error);
+                    if (error.name === 'NotAllowedError') {
+                        this.showNotification('Passkey authentication was cancelled', 'error');
+                    } else {
+                        this.showNotification(error.message || 'Passkey login failed. Try magic link instead.', 'error');
+                    }
+                } finally {
+                    this.setPasskeyLoading(false);
+                }
+            }
+
+            async handleMagicLinkSubmit(e) {
+                e.preventDefault();
+
                 const email = this.emailInput.value.trim();
                 if (!email) {
                     this.showNotification('Please enter your email address', 'error');
                     return;
                 }
 
-                this.setLoading(true);
+                this.setMagicLinkLoading(true);
 
                 try {
                     const requestBody = { email };
@@ -291,9 +526,7 @@
 
                     const response = await fetch('/api/auth/request-login', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(requestBody)
                     });
 
@@ -308,11 +541,17 @@
                     console.error('Auth error:', error);
                     this.showNotification('Network error. Please try again.', 'error');
                 } finally {
-                    this.setLoading(false);
+                    this.setMagicLinkLoading(false);
                 }
             }
 
-            setLoading(loading) {
+            setPasskeyLoading(loading) {
+                this.passkeyBtn.disabled = loading;
+                this.passkeyBtnText.style.display = loading ? 'none' : 'inline';
+                this.passkeySpinner.style.display = loading ? 'inline-block' : 'none';
+            }
+
+            setMagicLinkLoading(loading) {
                 this.submitBtn.disabled = loading;
                 this.btnText.style.display = loading ? 'none' : 'inline';
                 this.loadingSpinner.style.display = loading ? 'inline-block' : 'none';
@@ -339,7 +578,8 @@
                 this.loginForm.style.display = 'block';
                 this.emailSent.style.display = 'none';
                 this.emailInput.value = '';
-                this.emailInput.focus();
+                this.emailPasskeyInput.value = '';
+                this.showPasskeyForm();
             }
         }
 

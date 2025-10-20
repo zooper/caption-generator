@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",
+    "@simplewebauthn/browser": "^11.0.0",
+    "@simplewebauthn/server": "^11.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

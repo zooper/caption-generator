@@ -4,28 +4,20 @@ import { cors } from 'hono/cors';
 import { getCookie, setCookie } from 'hono/cookie';
 import jwt from 'jsonwebtoken';
 import exifr from 'exifr';
+import {
+    generateRegistrationOptions,
+    verifyRegistrationResponse,
+    generateAuthenticationOptions,
+    verifyAuthenticationResponse
+} from '@simplewebauthn/server';
 
 // Template rendering utility
-async function renderTemplate(templateName, data = {}) {
-    try {
-        const response = await fetch(`/templates/${templateName}.html`);
-        if (!response.ok) {
-            throw new Error(`Failed to load template: ${templateName}`);
-        }
-        let template = await response.text();
-        
-        // Replace all template variables
-        for (const [key, value] of Object.entries(data)) {
-            const placeholder = `{{${key}}}`;
-            template = template.replaceAll(placeholder, value || '');
-        }
-        
-        return template;
-    } catch (error) {
-        console.error(`Error rendering template ${templateName}:`, error);
-        // Fallback to inline templates if external templates fail
-        return getFallbackTemplate(templateName, data);
-    }
+// Note: Currently uses fallback templates due to Workers Assets complexity
+// External template files in /public/templates/ are available but not loaded dynamically
+async function renderTemplate(templateName, data = {}, baseUrl = null) {
+    // For now, just use fallback templates directly
+    // Cloudflare Workers Assets don't support dynamic template loading via fetch
+    return getFallbackTemplate(templateName, data);
 }
 
 // Fallback templates for when external templates are unavailable
@@ -77,7 +69,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 14;
+        this.CURRENT_SCHEMA_VERSION = 15;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -165,6 +157,18 @@ class D1Database {
                     console.log('Migration v14 completed successfully');
                 } catch (migrationError) {
                     console.error('Migration v14 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 15: Add passkey authentication tables
+            if (fromVersion < 15) {
+                console.log('Running migration: Add passkey authentication tables (v15)');
+                try {
+                    await this.migration_v15();
+                    await this.setSchemaVersion(15);
+                    console.log('Migration v15 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v15 failed:', migrationError);
                 }
             }
         } catch (error) {
@@ -1256,20 +1260,68 @@ class D1Database {
             await this.db.prepare(`
                 ALTER TABLE user_api_keys ADD COLUMN name TEXT
             `).run();
-            
+
             // Update existing API keys to have a default name based on integration_type
             await this.db.prepare(`
-                UPDATE user_api_keys 
-                SET name = CASE 
+                UPDATE user_api_keys
+                SET name = CASE
                     WHEN integration_type = 'lightroom' THEN 'Lightroom'
                     ELSE 'API Key'
                 END
                 WHERE name IS NULL
             `).run();
-            
+
             console.log('Migration v14 completed: Added name field to API keys');
         } catch (error) {
             console.error('Migration v14 failed:', error);
+        }
+    }
+
+    // Database migration for passkey authentication (v15)
+    async migration_v15() {
+        try {
+            // Create passkey_credentials table
+            await this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS passkey_credentials (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    credential_id TEXT NOT NULL UNIQUE,
+                    public_key TEXT NOT NULL,
+                    counter INTEGER NOT NULL DEFAULT 0,
+                    transports TEXT,
+                    device_name TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at DATETIME,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            `).run();
+
+            // Create index on user_id for faster lookups
+            await this.db.prepare(`
+                CREATE INDEX IF NOT EXISTS idx_passkey_user_id ON passkey_credentials(user_id)
+            `).run();
+
+            // Create recovery_codes table
+            await this.db.prepare(`
+                CREATE TABLE IF NOT EXISTS recovery_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    code TEXT NOT NULL UNIQUE,
+                    used_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            `).run();
+
+            // Create index on user_id for recovery codes
+            await this.db.prepare(`
+                CREATE INDEX IF NOT EXISTS idx_recovery_user_id ON recovery_codes(user_id)
+            `).run();
+
+            console.log('Migration v15 completed: Added passkey authentication tables');
+        } catch (error) {
+            console.error('Migration v15 failed:', error);
+            throw error;
         }
     }
 
@@ -1368,7 +1420,7 @@ class D1Database {
     async deleteApiKeyById(userId, keyId) {
         try {
             const stmt = this.db.prepare(`
-                DELETE FROM user_api_keys 
+                DELETE FROM user_api_keys
                 WHERE user_id = ? AND id = ?
             `);
             const result = await stmt.bind(userId, keyId).run();
@@ -1376,6 +1428,168 @@ class D1Database {
             return changes > 0;
         } catch (error) {
             return false;
+        }
+    }
+
+    // Passkey Management Methods
+    async savePasskeyCredential(userId, credentialData) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                INSERT INTO passkey_credentials
+                (id, user_id, credential_id, public_key, counter, transports, device_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `);
+            await stmt.bind(
+                credentialData.id,
+                userId,
+                credentialData.credentialID,
+                credentialData.credentialPublicKey,
+                credentialData.counter,
+                credentialData.transports ? JSON.stringify(credentialData.transports) : null,
+                credentialData.deviceName || null
+            ).run();
+            return true;
+        } catch (error) {
+            console.error('Error saving passkey credential:', error);
+            return false;
+        }
+    }
+
+    async getUserPasskeys(userId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT * FROM passkey_credentials
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            `);
+            const result = await stmt.bind(userId).all();
+            return (result.results || []).map(cred => ({
+                ...cred,
+                transports: cred.transports ? JSON.parse(cred.transports) : []
+            }));
+        } catch (error) {
+            console.error('Error getting user passkeys:', error);
+            return [];
+        }
+    }
+
+    async getPasskeyByCredentialId(credentialId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT * FROM passkey_credentials
+                WHERE credential_id = ?
+            `);
+            const cred = await stmt.bind(credentialId).first();
+            if (cred && cred.transports) {
+                cred.transports = JSON.parse(cred.transports);
+            }
+            return cred;
+        } catch (error) {
+            console.error('Error getting passkey by credential ID:', error);
+            return null;
+        }
+    }
+
+    async updatePasskeyCounter(credentialId, newCounter) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                UPDATE passkey_credentials
+                SET counter = ?, last_used_at = datetime('now')
+                WHERE credential_id = ?
+            `);
+            await stmt.bind(newCounter, credentialId).run();
+            return true;
+        } catch (error) {
+            console.error('Error updating passkey counter:', error);
+            return false;
+        }
+    }
+
+    async deletePasskey(userId, passkeyId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                DELETE FROM passkey_credentials
+                WHERE id = ? AND user_id = ?
+            `);
+            const result = await stmt.bind(passkeyId, userId).run();
+            const changes = result.meta && result.meta.changes || result.changes || 0;
+            return changes > 0;
+        } catch (error) {
+            console.error('Error deleting passkey:', error);
+            return false;
+        }
+    }
+
+    // Recovery Code Methods
+    async generateRecoveryCodes(userId, count = 10) {
+        try {
+            await this.ensureInitialized();
+            const codes = [];
+
+            for (let i = 0; i < count; i++) {
+                // Generate a random 8-character recovery code
+                const code = generateRandomId().substring(0, 8).toUpperCase();
+                codes.push(code);
+
+                const stmt = this.db.prepare(`
+                    INSERT INTO recovery_codes (user_id, code)
+                    VALUES (?, ?)
+                `);
+                await stmt.bind(userId, code).run();
+            }
+
+            return codes;
+        } catch (error) {
+            console.error('Error generating recovery codes:', error);
+            return [];
+        }
+    }
+
+    async verifyRecoveryCode(userId, code) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT * FROM recovery_codes
+                WHERE user_id = ? AND code = ? AND used_at IS NULL
+            `);
+            const recoveryCode = await stmt.bind(userId, code.toUpperCase()).first();
+
+            if (recoveryCode) {
+                // Mark as used
+                const updateStmt = this.db.prepare(`
+                    UPDATE recovery_codes
+                    SET used_at = datetime('now')
+                    WHERE id = ?
+                `);
+                await updateStmt.bind(recoveryCode.id).run();
+                return true;
+            }
+
+            return false;
+        } catch (error) {
+            console.error('Error verifying recovery code:', error);
+            return false;
+        }
+    }
+
+    async getUnusedRecoveryCodes(userId) {
+        try {
+            await this.ensureInitialized();
+            const stmt = this.db.prepare(`
+                SELECT code, created_at FROM recovery_codes
+                WHERE user_id = ? AND used_at IS NULL
+                ORDER BY created_at DESC
+            `);
+            const result = await stmt.bind(userId).all();
+            return result.results || [];
+        } catch (error) {
+            console.error('Error getting recovery codes:', error);
+            return [];
         }
     }
 
@@ -2204,7 +2418,7 @@ D1Database.prototype.getUsersUsageStats = async function() {
 };
 
 // Send email using Resend API (Cloudflare Workers compatible)
-async function sendMagicLinkEmail(email, loginUrl, env) {
+async function sendMagicLinkEmail(email, loginUrl, env, baseUrl) {
     if (!env.SMTP_PASSWORD) {
         throw new Error('SMTP_PASSWORD (Resend API key) not configured');
     }
@@ -2212,7 +2426,7 @@ async function sendMagicLinkEmail(email, loginUrl, env) {
     const html = await renderTemplate('login-email', {
         LOGIN_URL: loginUrl,
         TIMESTAMP: formatDateWithTimezone(new Date(), null, env)
-    });
+    }, baseUrl);
 
     const emailData = {
         from: env.SMTP_FROM_EMAIL || 'AI Caption Studio <noreply@resend.dev>',
@@ -2220,6 +2434,13 @@ async function sendMagicLinkEmail(email, loginUrl, env) {
         subject: 'Your Login Link - AI Caption Studio',
         html: html
     };
+
+    console.log('📧 Email data:', {
+        from: emailData.from,
+        to: emailData.to,
+        subject: emailData.subject,
+        hasHtml: !!emailData.html
+    });
 
     const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -2230,12 +2451,16 @@ async function sendMagicLinkEmail(email, loginUrl, env) {
         body: JSON.stringify(emailData)
     });
 
+    console.log('📧 Resend API response status:', response.status);
+
     if (!response.ok) {
         const errorData = await response.text();
+        console.error('📧 Resend API error details:', errorData);
         throw new Error('Resend API error: ' + response.status + ' - ' + errorData);
     }
 
     const result = await response.json();
+    console.log('📧 Resend API full response:', result);
     return result;
 }
 
@@ -2279,15 +2504,18 @@ app.post('/api/auth/request-login', async (c) => {
         
         // Send email using Resend
         try {
-            await sendMagicLinkEmail(email, loginUrl, c.env);
-            
-            return c.json({ 
-                success: true, 
+            console.log('📧 Attempting to send email to:', email);
+            console.log('📧 Login URL:', loginUrl);
+            const emailResult = await sendMagicLinkEmail(email, loginUrl, c.env, c.req.url);
+            console.log('📧 Email sent successfully:', emailResult);
+
+            return c.json({
+                success: true,
                 message: 'Magic link sent to your email address',
                 expiresIn: '15 minutes'
             });
         } catch (emailError) {
-            console.error('Email sending error:', emailError);
+            console.error('📧 Email sending error:', emailError);
 
             // Security: Never expose the actual login URL to the client
             // The token exists in the database, but email failed to send
@@ -2310,18 +2538,18 @@ app.get('/auth/verify', async (c) => {
             const html = await renderTemplate('login-error', {
                 ERROR_TITLE: 'Invalid Login Link',
                 ERROR_MESSAGE: 'This login link is invalid.'
-            });
+            }, c.req.url);
             return c.html(html);
         }
 
         const database = new D1Database(c.env.DB);
         const loginToken = await database.getLoginToken(token);
-        
+
         if (!loginToken) {
             const html = await renderTemplate('login-error', {
                 ERROR_TITLE: 'Invalid or Expired Link',
                 ERROR_MESSAGE: 'This login link is invalid or has expired.'
-            });
+            }, c.req.url);
             return c.html(html);
         }
 
@@ -2365,14 +2593,14 @@ app.get('/auth/verify', async (c) => {
         const html = await renderTemplate('login-success', {
             USER_EMAIL: user.email,
             JWT_TOKEN: jwtToken
-        });
+        }, c.req.url);
         return c.html(html);
 
     } catch (error) {
         const html = await renderTemplate('login-error', {
             ERROR_TITLE: 'Login Failed',
             ERROR_MESSAGE: 'Login verification failed.'
-        });
+        }, c.req.url);
         return c.html(html);
     }
 });
@@ -2408,6 +2636,297 @@ app.post('/api/auth/logout', authenticateToken, async (c) => {
         return c.json({ success: true, message: 'Logged out successfully' });
     } catch (error) {
         return c.json({ error: 'Logout failed' }, 500);
+    }
+});
+
+// Passkey Authentication Endpoints
+
+// Generate passkey registration options
+app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+
+        // Get existing passkeys for this user
+        const existingPasskeys = await database.getUserPasskeys(user.userId);
+
+        // Get RP (Relying Party) information from request
+        const origin = new URL(c.req.url).origin;
+        const rpID = new URL(origin).hostname;
+
+        const options = await generateRegistrationOptions({
+            rpName: 'AI Caption Studio',
+            rpID: rpID,
+            userID: user.userId.toString(),
+            userName: user.email,
+            userDisplayName: user.email,
+            // Exclude existing passkeys
+            excludeCredentials: existingPasskeys.map(passkey => ({
+                id: Buffer.from(passkey.credential_id, 'base64'),
+                type: 'public-key',
+                transports: passkey.transports || []
+            })),
+            authenticatorSelection: {
+                residentKey: 'preferred',
+                userVerification: 'preferred',
+                authenticatorAttachment: 'platform'
+            }
+        });
+
+        // Store challenge in session for verification
+        // We'll use a temporary in-memory store (in production, use KV or similar)
+        // For now, encode it in the response and expect it back
+
+        return c.json({
+            success: true,
+            options: options,
+            challenge: Buffer.from(options.challenge).toString('base64')
+        });
+    } catch (error) {
+        console.error('Error generating registration options:', error);
+        return c.json({ error: 'Failed to generate registration options' }, 500);
+    }
+});
+
+// Verify passkey registration
+app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const { credential, challenge, deviceName } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+
+        const origin = new URL(c.req.url).origin;
+        const rpID = new URL(origin).hostname;
+
+        // Verify the registration response
+        const verification = await verifyRegistrationResponse({
+            response: credential,
+            expectedChallenge: Buffer.from(challenge, 'base64'),
+            expectedOrigin: origin,
+            expectedRPID: rpID
+        });
+
+        if (!verification.verified || !verification.registrationInfo) {
+            return c.json({ error: 'Passkey verification failed' }, 400);
+        }
+
+        const { credentialPublicKey, credentialID, counter } = verification.registrationInfo;
+
+        // Save the passkey credential
+        const success = await database.savePasskeyCredential(user.userId, {
+            id: generateRandomId(),
+            credentialID: Buffer.from(credentialID).toString('base64'),
+            credentialPublicKey: Buffer.from(credentialPublicKey).toString('base64'),
+            counter: counter,
+            transports: credential.response.transports,
+            deviceName: deviceName || 'Unknown Device'
+        });
+
+        if (!success) {
+            return c.json({ error: 'Failed to save passkey' }, 500);
+        }
+
+        // Generate recovery codes if this is the user's first passkey
+        const passkeys = await database.getUserPasskeys(user.userId);
+        let recoveryCodes = [];
+        if (passkeys.length === 1) {
+            recoveryCodes = await database.generateRecoveryCodes(user.userId);
+        }
+
+        return c.json({
+            success: true,
+            message: 'Passkey registered successfully',
+            recoveryCodes: recoveryCodes.length > 0 ? recoveryCodes : undefined
+        });
+    } catch (error) {
+        console.error('Error verifying registration:', error);
+        return c.json({ error: 'Failed to verify passkey registration' }, 500);
+    }
+});
+
+// Generate passkey authentication options (for login)
+app.post('/api/auth/passkey/login-options', async (c) => {
+    try {
+        const { email } = await c.req.json();
+
+        if (!email) {
+            return c.json({ error: 'Email is required' }, 400);
+        }
+
+        const database = new D1Database(c.env.DB);
+        const user = await database.getUserByEmail(email);
+
+        if (!user) {
+            // Don't reveal if user exists or not
+            return c.json({ error: 'Invalid credentials' }, 401);
+        }
+
+        // Get user's passkeys
+        const passkeys = await database.getUserPasskeys(user.id);
+
+        if (passkeys.length === 0) {
+            return c.json({ error: 'No passkeys registered for this account' }, 400);
+        }
+
+        const origin = new URL(c.req.url).origin;
+        const rpID = new URL(origin).hostname;
+
+        const options = await generateAuthenticationOptions({
+            rpID: rpID,
+            allowCredentials: passkeys.map(passkey => ({
+                id: Buffer.from(passkey.credential_id, 'base64'),
+                type: 'public-key',
+                transports: passkey.transports || []
+            })),
+            userVerification: 'preferred'
+        });
+
+        return c.json({
+            success: true,
+            options: options,
+            challenge: Buffer.from(options.challenge).toString('base64'),
+            userId: user.id
+        });
+    } catch (error) {
+        console.error('Error generating authentication options:', error);
+        return c.json({ error: 'Failed to generate authentication options' }, 500);
+    }
+});
+
+// Verify passkey authentication (complete login)
+app.post('/api/auth/passkey/login-verify', async (c) => {
+    try {
+        const { credential, challenge, userId } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+
+        const user = await database.getUserById(userId);
+        if (!user) {
+            return c.json({ error: 'Invalid credentials' }, 401);
+        }
+
+        // Get the passkey credential
+        const credentialIdBase64 = Buffer.from(credential.id, 'base64url').toString('base64');
+        const passkey = await database.getPasskeyByCredentialId(credentialIdBase64);
+
+        if (!passkey || passkey.user_id !== userId) {
+            return c.json({ error: 'Invalid passkey' }, 401);
+        }
+
+        const origin = new URL(c.req.url).origin;
+        const rpID = new URL(origin).hostname;
+
+        // Verify the authentication response
+        const verification = await verifyAuthenticationResponse({
+            response: credential,
+            expectedChallenge: Buffer.from(challenge, 'base64'),
+            expectedOrigin: origin,
+            expectedRPID: rpID,
+            authenticator: {
+                credentialID: Buffer.from(passkey.credential_id, 'base64'),
+                credentialPublicKey: Buffer.from(passkey.public_key, 'base64'),
+                counter: passkey.counter
+            }
+        });
+
+        if (!verification.verified) {
+            return c.json({ error: 'Passkey verification failed' }, 401);
+        }
+
+        // Update counter
+        await database.updatePasskeyCounter(passkey.credential_id, verification.authenticationInfo.newCounter);
+
+        // Create session
+        const sessionId = generateRandomId();
+        const sessionExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const ipAddress = c.req.header('cf-connecting-ip') || 'unknown';
+        const userAgent = c.req.header('user-agent') || '';
+
+        await database.createSession(sessionId, user.id, sessionExpiresAt, ipAddress, userAgent);
+
+        // Create JWT token
+        const jwtToken = jwt.sign({ sessionId }, c.env.JWT_SECRET || JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+        // Set secure cookie
+        setCookie(c, 'auth_token', jwtToken, {
+            httpOnly: false,
+            secure: false,
+            maxAge: 7 * 24 * 60 * 60,
+            sameSite: 'Lax'
+        });
+
+        return c.json({
+            success: true,
+            message: 'Login successful',
+            token: jwtToken,
+            user: {
+                email: user.email,
+                isAdmin: user.is_admin
+            }
+        });
+    } catch (error) {
+        console.error('Error verifying authentication:', error);
+        return c.json({ error: 'Failed to verify passkey authentication' }, 500);
+    }
+});
+
+// Get user's passkeys
+app.get('/api/auth/passkeys', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+
+        const passkeys = await database.getUserPasskeys(user.userId);
+
+        return c.json({
+            success: true,
+            passkeys: passkeys.map(p => ({
+                id: p.id,
+                deviceName: p.device_name,
+                createdAt: p.created_at,
+                lastUsedAt: p.last_used_at
+            }))
+        });
+    } catch (error) {
+        console.error('Error getting passkeys:', error);
+        return c.json({ error: 'Failed to get passkeys' }, 500);
+    }
+});
+
+// Delete a passkey
+app.delete('/api/auth/passkey/:id', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const passkeyId = c.req.param('id');
+        const database = new D1Database(c.env.DB);
+
+        const success = await database.deletePasskey(user.userId, passkeyId);
+
+        if (!success) {
+            return c.json({ error: 'Failed to delete passkey' }, 500);
+        }
+
+        return c.json({ success: true, message: 'Passkey deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting passkey:', error);
+        return c.json({ error: 'Failed to delete passkey' }, 500);
+    }
+});
+
+// Get recovery codes
+app.get('/api/auth/recovery-codes', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const database = new D1Database(c.env.DB);
+
+        const codes = await database.getUnusedRecoveryCodes(user.userId);
+
+        return c.json({
+            success: true,
+            codes: codes.map(c => c.code)
+        });
+    } catch (error) {
+        console.error('Error getting recovery codes:', error);
+        return c.json({ error: 'Failed to get recovery codes' }, 500);
     }
 });
 
