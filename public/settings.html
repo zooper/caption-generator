@@ -1427,14 +1427,24 @@
                     }
                 });
 
+                console.log('📡 Options response status:', optionsResponse.status);
+                console.log('📡 Options response ok:', optionsResponse.ok);
+
                 if (!optionsResponse.ok) {
                     const error = await optionsResponse.json();
                     throw new Error(error.error || 'Failed to get registration options');
                 }
 
                 const optionsData = await optionsResponse.json();
+                console.log('📦 Received registration options:', optionsData);
+                console.log('📦 Options data structure:', JSON.stringify(optionsData, null, 2));
+
+                if (!optionsData || !optionsData.options) {
+                    throw new Error('Invalid options received from server');
+                }
 
                 // Start WebAuthn registration
+                console.log('🔐 Starting WebAuthn registration...');
                 const credential = await startRegistration(optionsData.options);
 
                 // Verify registration with server

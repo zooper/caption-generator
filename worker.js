@@ -2679,17 +2679,11 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
             }
         }).filter(c => c !== null);
 
-        // Convert user ID to Uint8Array
-        const userIdString = user.id.toString();
-        const userIdBytes = new Uint8Array(userIdString.length);
-        for (let i = 0; i < userIdString.length; i++) {
-            userIdBytes[i] = userIdString.charCodeAt(i);
-        }
-
+        // SimpleWebAuthn expects userID as a string, it will handle conversion internally
         const options = await generateRegistrationOptions({
             rpName: 'AI Caption Studio',
             rpID: rpID,
-            userID: userIdBytes,
+            userID: user.id.toString(),
             userName: user.email,
             userDisplayName: user.email,
             excludeCredentials: excludeCredentials,
