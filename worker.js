@@ -2647,44 +2647,69 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
         const user = c.get('user');
         const database = new D1Database(c.env.DB);
 
+        console.log('🔐 Generating passkey registration options for user:', user.email);
+
         // Get existing passkeys for this user
         const existingPasskeys = await database.getUserPasskeys(user.userId);
+        console.log('📱 User has', existingPasskeys.length, 'existing passkeys');
 
         // Get RP (Relying Party) information from request
         const origin = new URL(c.req.url).origin;
         const rpID = new URL(origin).hostname;
 
+        console.log('🌐 RP Origin:', origin, 'RP ID:', rpID);
+
+        // Convert base64 credential IDs to Uint8Array for existing passkeys
+        const excludeCredentials = existingPasskeys.map(passkey => {
+            try {
+                // Decode base64 to Uint8Array
+                const binaryString = atob(passkey.credential_id);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                return {
+                    id: bytes,
+                    type: 'public-key',
+                    transports: passkey.transports || []
+                };
+            } catch (err) {
+                console.error('Error converting credential_id:', err);
+                return null;
+            }
+        }).filter(c => c !== null);
+
         const options = await generateRegistrationOptions({
             rpName: 'AI Caption Studio',
             rpID: rpID,
-            userID: user.userId.toString(),
+            userID: new Uint8Array(Buffer.from(user.userId.toString())),
             userName: user.email,
             userDisplayName: user.email,
-            // Exclude existing passkeys
-            excludeCredentials: existingPasskeys.map(passkey => ({
-                id: Buffer.from(passkey.credential_id, 'base64'),
-                type: 'public-key',
-                transports: passkey.transports || []
-            })),
+            excludeCredentials: excludeCredentials,
             authenticatorSelection: {
                 residentKey: 'preferred',
-                userVerification: 'preferred',
-                authenticatorAttachment: 'platform'
+                userVerification: 'preferred'
+                // Don't restrict to platform authenticators - allow security keys too
             }
         });
 
-        // Store challenge in session for verification
-        // We'll use a temporary in-memory store (in production, use KV or similar)
-        // For now, encode it in the response and expect it back
+        console.log('✅ Registration options generated successfully');
+
+        // Convert challenge to base64 for transport
+        const challengeBase64 = btoa(String.fromCharCode(...new Uint8Array(options.challenge)));
 
         return c.json({
             success: true,
             options: options,
-            challenge: Buffer.from(options.challenge).toString('base64')
+            challenge: challengeBase64
         });
     } catch (error) {
-        console.error('Error generating registration options:', error);
-        return c.json({ error: 'Failed to generate registration options' }, 500);
+        console.error('❌ Error generating registration options:', error);
+        console.error('Error stack:', error.stack);
+        return c.json({
+            error: 'Failed to generate registration options',
+            details: error.message
+        }, 500);
     }
 });
 
@@ -2695,41 +2720,61 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
         const { credential, challenge, deviceName } = await c.req.json();
         const database = new D1Database(c.env.DB);
 
+        console.log('🔐 Verifying passkey registration for user:', user.email);
+
         const origin = new URL(c.req.url).origin;
         const rpID = new URL(origin).hostname;
+
+        // Convert base64 challenge to Uint8Array
+        const binaryChallenge = atob(challenge);
+        const challengeBytes = new Uint8Array(binaryChallenge.length);
+        for (let i = 0; i < binaryChallenge.length; i++) {
+            challengeBytes[i] = binaryChallenge.charCodeAt(i);
+        }
 
         // Verify the registration response
         const verification = await verifyRegistrationResponse({
             response: credential,
-            expectedChallenge: Buffer.from(challenge, 'base64'),
+            expectedChallenge: challengeBytes,
             expectedOrigin: origin,
             expectedRPID: rpID
         });
 
         if (!verification.verified || !verification.registrationInfo) {
+            console.error('❌ Passkey verification failed');
             return c.json({ error: 'Passkey verification failed' }, 400);
         }
 
         const { credentialPublicKey, credentialID, counter } = verification.registrationInfo;
 
+        console.log('✅ Passkey verified, saving to database...');
+
+        // Convert Uint8Arrays to base64 for storage
+        const credentialIDBase64 = btoa(String.fromCharCode(...new Uint8Array(credentialID)));
+        const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(credentialPublicKey)));
+
         // Save the passkey credential
         const success = await database.savePasskeyCredential(user.userId, {
             id: generateRandomId(),
-            credentialID: Buffer.from(credentialID).toString('base64'),
-            credentialPublicKey: Buffer.from(credentialPublicKey).toString('base64'),
+            credentialID: credentialIDBase64,
+            credentialPublicKey: publicKeyBase64,
             counter: counter,
             transports: credential.response.transports,
             deviceName: deviceName || 'Unknown Device'
         });
 
         if (!success) {
+            console.error('❌ Failed to save passkey to database');
             return c.json({ error: 'Failed to save passkey' }, 500);
         }
+
+        console.log('✅ Passkey saved successfully');
 
         // Generate recovery codes if this is the user's first passkey
         const passkeys = await database.getUserPasskeys(user.userId);
         let recoveryCodes = [];
         if (passkeys.length === 1) {
+            console.log('🔑 Generating recovery codes for first passkey');
             recoveryCodes = await database.generateRecoveryCodes(user.userId);
         }
 
@@ -2739,8 +2784,12 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
             recoveryCodes: recoveryCodes.length > 0 ? recoveryCodes : undefined
         });
     } catch (error) {
-        console.error('Error verifying registration:', error);
-        return c.json({ error: 'Failed to verify passkey registration' }, 500);
+        console.error('❌ Error verifying registration:', error);
+        console.error('Error stack:', error.stack);
+        return c.json({
+            error: 'Failed to verify passkey registration',
+            details: error.message
+        }, 500);
     }
 });
 
@@ -2771,20 +2820,33 @@ app.post('/api/auth/passkey/login-options', async (c) => {
         const origin = new URL(c.req.url).origin;
         const rpID = new URL(origin).hostname;
 
-        const options = await generateAuthenticationOptions({
-            rpID: rpID,
-            allowCredentials: passkeys.map(passkey => ({
-                id: Buffer.from(passkey.credential_id, 'base64'),
+        // Convert base64 credential IDs to Uint8Array
+        const allowCredentials = passkeys.map(passkey => {
+            const binaryString = atob(passkey.credential_id);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return {
+                id: bytes,
                 type: 'public-key',
                 transports: passkey.transports || []
-            })),
+            };
+        });
+
+        const options = await generateAuthenticationOptions({
+            rpID: rpID,
+            allowCredentials: allowCredentials,
             userVerification: 'preferred'
         });
+
+        // Convert challenge to base64
+        const challengeBase64 = btoa(String.fromCharCode(...new Uint8Array(options.challenge)));
 
         return c.json({
             success: true,
             options: options,
-            challenge: Buffer.from(options.challenge).toString('base64'),
+            challenge: challengeBase64,
             userId: user.id
         });
     } catch (error) {
@@ -2804,8 +2866,14 @@ app.post('/api/auth/passkey/login-verify', async (c) => {
             return c.json({ error: 'Invalid credentials' }, 401);
         }
 
-        // Get the passkey credential
-        const credentialIdBase64 = Buffer.from(credential.id, 'base64url').toString('base64');
+        // Get the passkey credential - credential.id is already base64url encoded
+        // We need to convert it to standard base64 for database lookup
+        const credentialIdBase64url = credential.id;
+        // Convert base64url to base64
+        const credentialIdBase64 = credentialIdBase64url
+            .replace(/-/g, '+')
+            .replace(/_/g, '/');
+
         const passkey = await database.getPasskeyByCredentialId(credentialIdBase64);
 
         if (!passkey || passkey.user_id !== userId) {
@@ -2815,15 +2883,34 @@ app.post('/api/auth/passkey/login-verify', async (c) => {
         const origin = new URL(c.req.url).origin;
         const rpID = new URL(origin).hostname;
 
+        // Convert base64 strings to Uint8Array
+        const binaryChallenge = atob(challenge);
+        const challengeBytes = new Uint8Array(binaryChallenge.length);
+        for (let i = 0; i < binaryChallenge.length; i++) {
+            challengeBytes[i] = binaryChallenge.charCodeAt(i);
+        }
+
+        const binaryCredentialId = atob(passkey.credential_id);
+        const credentialIdBytes = new Uint8Array(binaryCredentialId.length);
+        for (let i = 0; i < binaryCredentialId.length; i++) {
+            credentialIdBytes[i] = binaryCredentialId.charCodeAt(i);
+        }
+
+        const binaryPublicKey = atob(passkey.public_key);
+        const publicKeyBytes = new Uint8Array(binaryPublicKey.length);
+        for (let i = 0; i < binaryPublicKey.length; i++) {
+            publicKeyBytes[i] = binaryPublicKey.charCodeAt(i);
+        }
+
         // Verify the authentication response
         const verification = await verifyAuthenticationResponse({
             response: credential,
-            expectedChallenge: Buffer.from(challenge, 'base64'),
+            expectedChallenge: challengeBytes,
             expectedOrigin: origin,
             expectedRPID: rpID,
             authenticator: {
-                credentialID: Buffer.from(passkey.credential_id, 'base64'),
-                credentialPublicKey: Buffer.from(passkey.public_key, 'base64'),
+                credentialID: credentialIdBytes,
+                credentialPublicKey: publicKeyBytes,
                 counter: passkey.counter
             }
         });
