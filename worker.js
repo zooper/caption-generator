@@ -2647,10 +2647,10 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
         const user = c.get('user');
         const database = new D1Database(c.env.DB);
 
-        console.log('🔐 Generating passkey registration options for user:', user.email);
+        console.log('🔐 Generating passkey registration options for user:', user.email, 'id:', user.id);
 
         // Get existing passkeys for this user
-        const existingPasskeys = await database.getUserPasskeys(user.userId);
+        const existingPasskeys = await database.getUserPasskeys(user.id);
         console.log('📱 User has', existingPasskeys.length, 'existing passkeys');
 
         // Get RP (Relying Party) information from request
@@ -2679,10 +2679,17 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
             }
         }).filter(c => c !== null);
 
+        // Convert user ID to Uint8Array
+        const userIdString = user.id.toString();
+        const userIdBytes = new Uint8Array(userIdString.length);
+        for (let i = 0; i < userIdString.length; i++) {
+            userIdBytes[i] = userIdString.charCodeAt(i);
+        }
+
         const options = await generateRegistrationOptions({
             rpName: 'AI Caption Studio',
             rpID: rpID,
-            userID: new Uint8Array(Buffer.from(user.userId.toString())),
+            userID: userIdBytes,
             userName: user.email,
             userDisplayName: user.email,
             excludeCredentials: excludeCredentials,
@@ -2754,7 +2761,7 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
         const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(credentialPublicKey)));
 
         // Save the passkey credential
-        const success = await database.savePasskeyCredential(user.userId, {
+        const success = await database.savePasskeyCredential(user.id, {
             id: generateRandomId(),
             credentialID: credentialIDBase64,
             credentialPublicKey: publicKeyBase64,
@@ -2771,11 +2778,11 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
         console.log('✅ Passkey saved successfully');
 
         // Generate recovery codes if this is the user's first passkey
-        const passkeys = await database.getUserPasskeys(user.userId);
+        const passkeys = await database.getUserPasskeys(user.id);
         let recoveryCodes = [];
         if (passkeys.length === 1) {
             console.log('🔑 Generating recovery codes for first passkey');
-            recoveryCodes = await database.generateRecoveryCodes(user.userId);
+            recoveryCodes = await database.generateRecoveryCodes(user.id);
         }
 
         return c.json({
@@ -2962,7 +2969,7 @@ app.get('/api/auth/passkeys', authenticateToken, async (c) => {
         const user = c.get('user');
         const database = new D1Database(c.env.DB);
 
-        const passkeys = await database.getUserPasskeys(user.userId);
+        const passkeys = await database.getUserPasskeys(user.id);
 
         return c.json({
             success: true,
@@ -2986,7 +2993,7 @@ app.delete('/api/auth/passkey/:id', authenticateToken, async (c) => {
         const passkeyId = c.req.param('id');
         const database = new D1Database(c.env.DB);
 
-        const success = await database.deletePasskey(user.userId, passkeyId);
+        const success = await database.deletePasskey(user.id, passkeyId);
 
         if (!success) {
             return c.json({ error: 'Failed to delete passkey' }, 500);
@@ -3005,7 +3012,7 @@ app.get('/api/auth/recovery-codes', authenticateToken, async (c) => {
         const user = c.get('user');
         const database = new D1Database(c.env.DB);
 
-        const codes = await database.getUnusedRecoveryCodes(user.userId);
+        const codes = await database.getUnusedRecoveryCodes(user.id);
 
         return c.json({
             success: true,
