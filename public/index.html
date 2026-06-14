@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Caption Studio</title>
-    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+    <!-- full build (not lite): includes the PNG/HEIC parsers so EXIF reads from
+         Darktable/Lightroom PNG exports and iPhone HEIC, not just JPEG/TIFF -->
+    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
     <link rel="stylesheet" href="darkroom.css">
     <script>
       /* apply the saved theme early (avoids a flash); defaults to dark */
@@ -159,7 +161,7 @@
                     <button class="dr-module-head" type="button">
                         <svg class="dr-chevron" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
                         <span class="dr-module-title">Metadata &amp; context</span>
-                        <span class="dr-module-tag">EXIF</span>
+                        <span class="dr-module-tag" id="exifBadge">EXIF</span>
                     </button>
                     <div class="dr-module-body">
                         <div class="context-section">
@@ -569,25 +571,27 @@
                     const fnameBar = document.getElementById('drFilename');
                     if (fnameBar) fnameBar.textContent = file.name;
 
-                    const exifBar = document.getElementById('drExif');
-                    if (exifBar) {
-                        const bits = [];
-                        if (allExifData) {
-                            if (allExifData.FocalLength) bits.push(Math.round(allExifData.FocalLength) + 'mm');
-                            if (allExifData.FNumber) bits.push('f/' + allExifData.FNumber);
-                            if (allExifData.ExposureTime) {
-                                const et = allExifData.ExposureTime;
-                                bits.push(et >= 1 ? et + 's' : '1/' + Math.round(1 / et) + 's');
-                            }
-                            if (allExifData.ISO) bits.push('ISO ' + allExifData.ISO);
+                    const bits = [];
+                    if (allExifData) {
+                        if (allExifData.FocalLength) bits.push(Math.round(allExifData.FocalLength) + 'mm');
+                        if (allExifData.FNumber) bits.push('f/' + allExifData.FNumber);
+                        if (allExifData.ExposureTime) {
+                            const et = allExifData.ExposureTime;
+                            bits.push(et >= 1 ? et + 's' : '1/' + Math.round(1 / et) + 's');
                         }
-                        exifBar.textContent = bits.join(' · ');
+                        if (allExifData.ISO) bits.push('ISO ' + allExifData.ISO);
+                    }
+                    const exifBar = document.getElementById('drExif');
+                    if (exifBar) exifBar.textContent = bits.join(' · ');
+                    if (bits.length) hasData = true;
+
+                    // Tell the user whether any metadata was actually found
+                    const badge = document.getElementById('exifBadge');
+                    if (badge) {
+                        badge.textContent = hasData ? 'EXIF' : 'no EXIF';
+                        badge.classList.toggle('none', !hasData);
                     }
                 } catch (e) {}
-
-                if (hasData) {
-                } else {
-                }
 
             } catch (error) {
             }
