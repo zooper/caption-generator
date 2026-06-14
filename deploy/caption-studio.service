@@ -5,6 +5,10 @@
 Description=AI Caption Studio
 After=network-online.target
 Wants=network-online.target
+# If the photo-library editor is enabled, wait for the NAS mount so the startup
+# scan sees the files (adjust the path to match LIBRARY_DIR in .env; remove if
+# the library feature is unused).
+RequiresMountsFor=/mnt
 
 [Service]
 Type=simple

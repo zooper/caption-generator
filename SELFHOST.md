@@ -119,3 +119,25 @@ Env vars (all optional — unset `LIBRARY_DIR` keeps the editor dormant):
 
 The catalog indexes into `library_files` (schema v16); edit stacks live in
 `edit_stacks` (v17). Both are created by the normal migration path.
+
+### Mounting the NAS photo share
+
+Point `LIBRARY_DIR` at an NFS mount of the photo directory. Example for a share
+at `192.168.0.44:/var/nfs/shared/Photos`:
+
+```bash
+# one-off (lost on reboot):
+sudo mount -t nfs 192.168.0.44:/var/nfs/shared/Photos /mnt
+
+# persistent — add to /etc/fstab (read-only matches "originals are read-only"):
+192.168.0.44:/var/nfs/shared/Photos  /mnt  nfs  ro,_netdev,nofail  0 0
+```
+
+Then set `LIBRARY_DIR=/mnt` in `/opt/caption-studio/.env` and
+`systemctl restart caption-studio`. The bundled unit has
+`RequiresMountsFor=/mnt` so the service waits for the mount before its startup
+scan (adjust the path if `LIBRARY_DIR` differs).
+
+**Unprivileged LXC:** the kernel usually blocks in-container NFS mounts. Either
+make the CT privileged, or mount the NFS on the Proxmox host and bind it in via
+`lxc.cgroup`/`lxc.mount.entry` (e.g. `lxc.mount.entry: /mnt/photos mnt none bind,create=dir`).
