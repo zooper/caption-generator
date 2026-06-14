@@ -122,7 +122,8 @@
 
   function initGL() {
     canvas = document.getElementById('developCanvas'); if (!canvas) return false;
-    gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl'); if (!gl) { console.warn('develop: no WebGL'); return false; }
+    var opts = { preserveDrawingBuffer: true }; // so toDataURL/drawImage capture reliably after a debounce
+    gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts); if (!gl) { console.warn('develop: no WebGL'); return false; }
     prog1 = prog(FRAG1); progBlur = prog(FRAGBLUR); progFinal = prog(FRAGFINAL);
     if (!prog1 || !progBlur || !progFinal) return false;
     quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
@@ -235,7 +236,30 @@
     pushTimer = setTimeout(function () { try { if (window.setEditedImage) window.setEditedImage(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]); } catch (e) {} }, 220);
     if (fileId) { clearTimeout(saveTimer); saveTimer = setTimeout(saveEdits, 600); }
   }
-  function saveEdits() { if (!fileId) return; fetch('/api/library/' + fileId + '/edits', { method: 'PUT', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ adjustments: adj }) }).catch(function () {}); }
+  function adjIsDefault() {
+    var d = defaults();
+    for (var k in d) {
+      if (k === 'curve') { if (JSON.stringify(adj.curve) !== JSON.stringify(d.curve)) return false; }
+      else if (adj[k] !== d[k]) return false;
+    }
+    return true;
+  }
+  function makeThumbB64() {
+    var w = canvas.width, h = canvas.height, s = Math.min(1, 480 / Math.max(w, h));
+    var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+    c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82).split(',')[1];
+  }
+  function saveEdits() {
+    if (!fileId) return;
+    if (adjIsDefault()) { // reset / no edits: clear the stack + edited thumbnail
+      fetch('/api/library/' + fileId + '/edits', { method: 'DELETE', headers: authHeaders(), credentials: 'include' }).catch(function () {});
+      return;
+    }
+    fetch('/api/library/' + fileId + '/edits', { method: 'PUT', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ adjustments: adj }) })
+      .then(function () { try { fetch('/api/library/' + fileId + '/thumb', { method: 'PUT', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ imageData: makeThumbB64() }) }).catch(function () {}); } catch (e) {} })
+      .catch(function () {});
+  }
 
   /* ---- controls <-> adjustments ---- */
   function syncControls() {

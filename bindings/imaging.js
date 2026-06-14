@@ -59,9 +59,37 @@ function locatePreview(buf) {
     return best;
 }
 
+// EXIF/DNG Orientation (tag 0x0112) from IFD0.
+function readOrientation(buf) {
+    try {
+        const le = buf.readUInt16LE(0) === 0x4949;
+        const u16 = (o) => le ? buf.readUInt16LE(o) : buf.readUInt16BE(o);
+        const u32 = (o) => le ? buf.readUInt32LE(o) : buf.readUInt32BE(o);
+        if (u16(2) !== 42) return 1;
+        const off = u32(4), n = u16(off);
+        for (let i = 0; i < n; i++) { const e = off + 2 + i * 12; if (u16(e) === 0x0112) return u16(e + 8); }
+    } catch { /* default */ }
+    return 1;
+}
+
+// Apply an EXIF orientation (1–8) to a sharp pipeline. Embedded RAW previews
+// carry no orientation of their own, so we apply the DNG's explicitly.
+function applyOrientation(pipe, ori) {
+    switch (ori) {
+        case 2: return pipe.flop();
+        case 3: return pipe.rotate(180);
+        case 4: return pipe.flip();
+        case 5: return pipe.rotate(90).flop();
+        case 6: return pipe.rotate(90);
+        case 7: return pipe.rotate(270).flop();
+        case 8: return pipe.rotate(270);
+        default: return pipe;
+    }
+}
+
 // Read the embedded preview JPEG from a RAW (two-phase: parse IFD tables from the
 // head, then read just the JPEG byte range). ~10–200ms vs ~9s for a darktable
-// demosaic. Falls back to a full-file scan if the tables sit past the head.
+// demosaic. Returns { jpeg, ori } where ori is the DNG orientation to apply.
 async function extractRawPreview(absPath) {
     let fh;
     try {
@@ -70,13 +98,13 @@ async function extractRawPreview(absPath) {
         const headLen = Math.min(1 << 20, size);
         const head = Buffer.alloc(headLen);
         await fh.read(head, 0, headLen, 0);
-        let loc = locatePreview(head);
-        if (!loc && size > headLen) { const all = Buffer.alloc(size); await fh.read(all, 0, size, 0); loc = locatePreview(all); }
+        let loc = locatePreview(head), parsed = head;
+        if (!loc && size > headLen) { const all = Buffer.alloc(size); await fh.read(all, 0, size, 0); loc = locatePreview(all); parsed = all; }
         if (!loc || loc.off + loc.len > size) return null;
         const jpeg = Buffer.alloc(loc.len);
         await fh.read(jpeg, 0, loc.len, loc.off);
         if (jpeg[0] !== 0xFF || jpeg[1] !== 0xD8) return null; // JPEG SOI
-        return jpeg;
+        return { jpeg, ori: readOrientation(parsed) };
     } catch { return null; }
     finally { if (fh) await fh.close().catch(() => {}); }
 }
@@ -109,8 +137,9 @@ export class Imaging {
         const src = await this._previewJpeg(absPath);
         if (src) {
             try {
-                return await sharp(src).rotate()
-                    .resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
+                let pipe = sharp(src.buf, { failOn: 'none' });
+                pipe = src.ori ? applyOrientation(pipe, src.ori) : pipe.rotate(); // RAW: explicit; else auto-from-EXIF
+                return await pipe.resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
                     .jpeg({ quality: 80 }).toBuffer();
             } catch { /* fall through */ }
         }
@@ -118,16 +147,17 @@ export class Imaging {
         return null;
     }
 
-    // Return a JPEG/decodable buffer to develop from: embedded preview for RAW,
-    // the file itself otherwise. null if RAW has no usable embedded preview.
+    // Source to develop from + how to orient it: embedded preview for RAW (with
+    // the DNG orientation to apply), the file itself otherwise (ori 0 = auto via
+    // sharp .rotate()). null if a RAW has no usable embedded preview.
     async _previewJpeg(absPath) {
         if (isRaw(absPath)) {
             const p = await extractRawPreview(absPath);
-            if (p) return p;
-            try { const t = await exifr.thumbnail(absPath); if (t && t.byteLength) return Buffer.from(t); } catch { /* none */ }
+            if (p) return { buf: p.jpeg, ori: p.ori };
+            try { const t = await exifr.thumbnail(absPath); if (t && t.byteLength) return { buf: Buffer.from(t), ori: 1 }; } catch { /* none */ }
             return null;
         }
-        try { return await fs.readFile(absPath); } catch { return null; }
+        try { return { buf: await fs.readFile(absPath), ori: 0 }; } catch { return null; }
     }
 
     _cachePath(cacheId, longEdge, mtimeMs, size) {
@@ -145,8 +175,9 @@ export class Imaging {
         let buf;
         const src = await this._previewJpeg(absPath);
         if (src) {
-            buf = await sharp(src, { failOn: 'none' }).rotate()
-                .resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
+            let pipe = sharp(src.buf, { failOn: 'none' });
+            pipe = src.ori ? applyOrientation(pipe, src.ori) : pipe.rotate();
+            buf = await pipe.resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
                 .jpeg({ quality: 88 }).toBuffer();
         } else if (isRaw(absPath)) {
             buf = await this._decodeRaw(absPath, longEdge); // darktable fallback
@@ -160,6 +191,19 @@ export class Imaging {
         }
         return buf;
     }
+
+    // Edited thumbnail (a small JPEG from the client canvas, reflecting the
+    // current develop) cached under PROXY_DIR/edited/<id>.jpg; served by /thumb.
+    _editedThumbPath(id) { return this.proxyDir ? path.join(this.proxyDir, 'edited', String(id).replace(/[^\w-]/g, '') + '.jpg') : null; }
+    async saveEditedThumb(id, buffer) {
+        const p = this._editedThumbPath(id); if (!p) return;
+        await fs.mkdir(path.dirname(p), { recursive: true }).catch(() => {});
+        // normalize size so the grid stays light
+        const out = await sharp(buffer).resize(480, 480, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+        await fs.writeFile(p, out);
+    }
+    async getEditedThumb(id) { const p = this._editedThumbPath(id); if (!p) return null; try { return await fs.readFile(p); } catch { return null; } }
+    async deleteEditedThumb(id) { const p = this._editedThumbPath(id); if (!p) return; await fs.unlink(p).catch(() => {}); }
 
     // Write developed pixels (a JPEG buffer from the client canvas) into EXPORT_DIR,
     // named after the original. Originals on the NAS are never touched.

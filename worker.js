@@ -1437,6 +1437,9 @@ class D1Database {
                 adjustments = excluded.adjustments, updated_at = CURRENT_TIMESTAMP
         `).bind(fileId, userId, JSON.stringify(adjustments || {})).run();
     }
+    async deleteEditStack(fileId, userId) {
+        await this.db.prepare('DELETE FROM edit_stacks WHERE file_id = ? AND user_id = ?').bind(fileId, userId).run();
+    }
 
     async migration_v18() {
         await this.db.prepare(`
@@ -1473,10 +1476,11 @@ class D1Database {
     async getLibraryFileById(id) {
         return this.db.prepare('SELECT * FROM library_files WHERE id = ?').bind(id).first();
     }
-    async getLibraryFilesInDir(dir) {
+    async getLibraryFilesInDir(dir, userId) {
         const r = await this.db.prepare(
-            'SELECT * FROM library_files WHERE dir = ? ORDER BY filename'
-        ).bind(dir || '').all();
+            `SELECT lf.*, (SELECT 1 FROM edit_stacks es WHERE es.file_id = lf.id AND es.user_id = ?) AS edited
+             FROM library_files lf WHERE lf.dir = ? ORDER BY lf.filename`
+        ).bind(userId || 0, dir || '').all();
         return r.results || [];
     }
     async getLibrarySubdirs(dir) {
@@ -4359,7 +4363,7 @@ app.get('/api/library/files', authenticateToken, async (c) => {
         const database = new D1Database(c.env.DB);
         const [dirs, files] = await Promise.all([
             database.getLibrarySubdirs(dir),
-            database.getLibraryFilesInDir(dir),
+            database.getLibraryFilesInDir(dir, c.get('user').id),
         ]);
         return c.json({
             dir,
@@ -4367,7 +4371,7 @@ app.get('/api/library/files', authenticateToken, async (c) => {
             dirs: dirs.map((name) => ({ name, relPath: dir ? `${dir}/${name}` : name })),
             files: files.map((f) => ({
                 id: f.id, name: f.filename, relPath: f.rel_path, format: f.format,
-                ext: f.ext, width: f.width, height: f.height,
+                ext: f.ext, width: f.width, height: f.height, edited: !!f.edited,
             })),
         });
     } catch (e) {
@@ -4405,12 +4409,18 @@ async function serveLibraryImage(c, kind) {
         if (!f) return c.json({ error: 'File not found' }, 404);
         const abs = c.env.LIBRARY.absPath(f.rel_path);
         const opts = { cacheId: f.id, mtimeMs: f.mtime, size: f.size };
-        const buf = kind === 'thumb'
-            ? await c.env.IMAGING.embeddedThumb(abs, { longEdge: 480 })
-            : await c.env.IMAGING.decodeProxy(abs, { ...opts, longEdge: 2048 });
+        let buf, edited = false;
+        if (kind === 'thumb') {
+            // prefer the edited thumbnail (reflects the develop) when present
+            const et = await c.env.IMAGING.getEditedThumb(f.id);
+            if (et) { buf = et; edited = true; } else { buf = await c.env.IMAGING.embeddedThumb(abs, { longEdge: 480 }); }
+        } else {
+            buf = await c.env.IMAGING.decodeProxy(abs, { ...opts, longEdge: 2048 });
+        }
         if (!buf) return c.json({ error: 'Could not render image' }, 500);
+        // edited thumbnails change as the user develops, so don't let them cache stale
         return new Response(buf, {
-            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' },
+            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': edited ? 'private, no-cache' : 'private, max-age=86400' },
         });
     } catch (e) {
         console.error(`library/${kind} failed:`, e);
@@ -4455,6 +4465,31 @@ app.put('/api/library/:id/edits', authenticateToken, async (c) => {
         return c.json({ success: true });
     } catch (e) {
         return c.json({ error: 'Failed to save edits' }, 500);
+    }
+});
+// Reset: drop the edit stack + the edited thumbnail for this file/user.
+app.delete('/api/library/:id/edits', authenticateToken, async (c) => {
+    try {
+        const id = c.req.param('id');
+        const database = new D1Database(c.env.DB);
+        await database.deleteEditStack(id, c.get('user').id);
+        if (c.env.IMAGING) await c.env.IMAGING.deleteEditedThumb(id);
+        return c.json({ success: true });
+    } catch (e) {
+        return c.json({ error: 'Failed to reset edits' }, 500);
+    }
+});
+// Store the edited thumbnail (client canvas JPEG) so the grid shows the develop.
+app.put('/api/library/:id/thumb', authenticateToken, async (c) => {
+    if (!c.env.IMAGING) return libraryUnavailable(c);
+    try {
+        const { imageData } = await c.req.json();
+        if (!imageData) return c.json({ error: 'No image data' }, 400);
+        await c.env.IMAGING.saveEditedThumb(c.req.param('id'), Buffer.from(imageData, 'base64'));
+        return c.json({ success: true });
+    } catch (e) {
+        console.error('library/thumb save failed:', e);
+        return c.json({ error: 'Failed to save thumbnail' }, 500);
     }
 });
 

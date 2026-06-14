@@ -577,7 +577,8 @@ input, textarea, select { font-family: inherit; }
 .dr-grid-empty button { margin-top: 10px; }
 .dr-grid-crumb { font-family: var(--dr-mono); font-size: 12px; color: var(--dr-ink-3); margin-bottom: 14px; }
 .dr-tile { display: flex; flex-direction: column; gap: 6px; cursor: pointer; background: none; padding: 0; text-align: left; }
-.dr-tile-thumb { width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; border: 1px solid var(--dr-line); background: var(--dr-elevated) center/cover no-repeat; transition: border-color .15s, box-shadow .15s; }
+.dr-tile-thumb { position: relative; width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; border: 1px solid var(--dr-line); background: var(--dr-elevated) center/cover no-repeat; transition: border-color .15s, box-shadow .15s; }
+.dr-tile-edited { position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--dr-accent); box-shadow: 0 0 0 2px var(--dr-bg), 0 0 6px rgba(var(--dr-accent-rgb), .8); }
 .dr-tile:hover .dr-tile-thumb { border-color: var(--dr-accent); box-shadow: 0 8px 22px -12px rgba(0, 0, 0, .7); }
 .dr-tile-name { font-family: var(--dr-mono); font-size: 10.5px; color: var(--dr-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dr-tile-folder .dr-tile-thumb { display: flex; align-items: center; justify-content: center; background: var(--dr-panel-2); color: var(--dr-ink-3); }
