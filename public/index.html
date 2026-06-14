@@ -26,12 +26,17 @@
                 <div class="header-title">
                     <h1>Caption Studio</h1>
                 </div>
+                <div class="dr-modtabs hidden" id="modTabs" role="tablist">
+                    <button type="button" class="dr-modtab active" data-view="library" role="tab">Library</button>
+                    <button type="button" class="dr-modtab" data-view="develop" role="tab">Develop</button>
+                    <button type="button" class="dr-modtab" data-view="caption" role="tab">Caption</button>
+                </div>
                 <div class="auth-section">
                     <div id="authStatus" class="user-info hidden">
                         <div class="user-welcome">Welcome, <span id="userEmail"></span>!</div>
                         <div class="user-controls">
                             <button id="adminButton" onclick="window.location.href='/admin'" class="control-btn secondary" style="display: none;">Admin</button>
-                            <button id="imageLibraryBtn" onclick="toggleImageLibrary()" class="control-btn secondary">Library</button>
+                            <button id="imageLibraryBtn" onclick="toggleImageLibrary()" class="control-btn secondary">Captions</button>
                             <button id="uploadedImagesBtn" onclick="toggleUploadedImages()" class="control-btn secondary">Lightroom</button>
                             <button id="scheduledPostsBtn" onclick="toggleScheduledPosts()" class="control-btn secondary">Scheduled</button>
                             <button onclick="window.location.href='/lightroom'" class="control-btn secondary">Plugin</button>
@@ -54,12 +59,12 @@
             </div>
         </div>
 
-        <!-- ===================== DEVELOP MODULE ===================== -->
-        <main class="main-content">
+        <!-- ===================== WORKSPACE (module views) ===================== -->
+        <main class="main-content" data-view="library">
 
-            <!-- LEFT: Navigator + Style presets -->
+            <!-- LEFT: Navigator + Folders + Style presets -->
             <section class="upload-section">
-                <div style="padding:14px;border-bottom:1px solid var(--dr-line)">
+                <div data-views="develop caption" style="padding:14px;border-bottom:1px solid var(--dr-line)">
                     <div style="font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--dr-ink-3);margin-bottom:9px">Navigator</div>
                     <div class="dr-nav-thumb" id="navThumb" title="Click to choose a photo"></div>
                 </div>
@@ -69,7 +74,7 @@
                     <div class="dr-tree" id="drTree"><div class="dr-tree-empty">Loading…</div></div>
                 </div>
 
-                <div class="style-options">
+                <div class="style-options" data-views="caption">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <h3>Style presets</h3>
                         <button id="managePromptsBtn" class="control-btn secondary">Manage</button>
@@ -94,8 +99,11 @@
                 </div>
             </section>
 
+            <!-- LIBRARY GRID (browse view) -->
+            <section class="dr-grid" data-views="library" id="libraryGrid"></section>
+
             <!-- CENTER: Canvas + EXIF info bar -->
-            <section class="dr-canvas">
+            <section class="dr-canvas" data-views="develop caption">
                 <div class="dr-stage">
                     <div class="upload-area" id="uploadArea">
                         <div id="uploadPlaceholder" class="dr-stage-empty">
@@ -130,11 +138,11 @@
                 </div>
             </section>
 
-            <!-- RIGHT: Develop stack -->
-            <section class="results-section">
+            <!-- RIGHT: module stack -->
+            <section class="results-section" data-views="develop caption">
 
                 <!-- AI Engine -->
-                <div class="dr-module" data-module="ai">
+                <div class="dr-module" data-module="ai" data-views="caption">
                     <button class="dr-module-head" type="button">
                         <svg class="dr-chevron" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
                         <span class="dr-module-title">AI Engine</span>
@@ -177,7 +185,7 @@
                 </div>
 
                 <!-- Develop (non-destructive WebGL adjustments) -->
-                <div class="dr-module" data-module="develop">
+                <div class="dr-module" data-module="develop" data-views="develop">
                     <button class="dr-module-head" type="button">
                         <svg class="dr-chevron" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
                         <span class="dr-module-title">Develop</span>
@@ -269,7 +277,7 @@
                 </div>
 
                 <!-- Metadata & context -->
-                <div class="dr-module" data-module="meta">
+                <div class="dr-module" data-module="meta" data-views="develop caption">
                     <button class="dr-module-head" type="button">
                         <svg class="dr-chevron" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
                         <span class="dr-module-title">Metadata &amp; context</span>
@@ -305,7 +313,7 @@
                 </div>
 
                 <!-- Generated output (revealed after Generate) -->
-                <div id="results" class="hidden">
+                <div id="results" class="hidden" data-views="caption">
                     <div class="dr-module" data-module="caption">
                         <button class="dr-module-head" type="button">
                             <svg class="dr-chevron" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
@@ -354,7 +362,7 @@
                 </div>
 
                 <!-- Scheduling -->
-                <div class="result-card" id="schedulingCard" style="display: none;">
+                <div class="result-card" id="schedulingCard" data-views="caption" style="display: none;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
                         <h4 style="margin:0;">Schedule post</h4>
                         <button class="copy-btn" onclick="toggleScheduling()" style="width:auto;margin:0;padding:5px 9px;">Close</button>
@@ -385,9 +393,17 @@
 
                 <!-- Export bar -->
                 <div class="dr-exportbar">
-                    <button id="exportBtn" class="copy-btn" onclick="window.exportImage && window.exportImage()" style="width:auto;margin:0;padding:10px 14px;">Export</button>
-                    <button id="scheduleToggleBtn" class="copy-btn" onclick="toggleScheduling()" style="display:none;width:auto;margin:0;padding:10px 14px;">Schedule</button>
-                    <div class="dr-postrow">
+                    <div class="dr-export-group" data-views="develop">
+                        <select id="exportSize" class="dr-export-size" title="Export resolution">
+                            <option value="full">Full</option>
+                            <option value="4096">4096 px</option>
+                            <option value="2048" selected>2048 px</option>
+                            <option value="1024">1024 px</option>
+                        </select>
+                        <button id="exportBtn" class="post-btn" onclick="window.exportImage && window.exportImage()" style="padding:10px 16px;">Export</button>
+                    </div>
+                    <div class="dr-postrow" data-views="caption">
+                        <button id="scheduleToggleBtn" class="copy-btn" onclick="toggleScheduling()" style="display:none;width:auto;margin:0;padding:9px 12px;">Schedule</button>
                         <span style="font-size:12px;color:var(--dr-ink-3);font-weight:600;">Post</span>
                         <button class="dr-platform-btn" title="Post to Mastodon" onclick="postToMastodon()" style="color:#8A8BFF;">M</button>
                         <button class="dr-platform-btn" title="Post to Pixelfed" onclick="postToPixelfed()" style="color:#34D399;">P</button>
@@ -397,7 +413,7 @@
             </section>
 
             <!-- FILMSTRIP -->
-            <div class="dr-filmstrip" id="drFilmstrip">
+            <div class="dr-filmstrip" id="drFilmstrip" data-views="develop caption">
                 <div class="dr-filmstrip-label">Catalog</div>
             </div>
         </main>
@@ -504,6 +520,7 @@
             isAuthenticated = true;
             document.getElementById('loginSection').classList.add('hidden');
             document.getElementById('authStatus').classList.remove('hidden');
+            var mt = document.getElementById('modTabs'); if (mt) mt.classList.remove('hidden');
             document.getElementById('userEmail').textContent = user.email;
             document.querySelector('.main-content').style.display = 'grid';
             
@@ -521,6 +538,7 @@
             isAuthenticated = false;
             document.getElementById('loginSection').classList.remove('hidden');
             document.getElementById('authStatus').classList.add('hidden');
+            var mt = document.getElementById('modTabs'); if (mt) mt.classList.add('hidden');
             document.querySelector('.main-content').style.display = 'none';
             
             // Hide admin button

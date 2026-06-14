@@ -4420,6 +4420,23 @@ async function serveLibraryImage(c, kind) {
 app.get('/api/library/:id/thumb', authenticateToken, (c) => serveLibraryImage(c, 'thumb'));
 app.get('/api/library/:id/proxy', authenticateToken, (c) => serveLibraryImage(c, 'proxy'));
 
+// Higher-resolution decode for export (?size=long-edge px, clamped <= 8192).
+app.get('/api/library/:id/full', authenticateToken, async (c) => {
+    if (!c.env.LIBRARY?.enabled || !c.env.IMAGING) return libraryUnavailable(c);
+    try {
+        const database = new D1Database(c.env.DB);
+        const f = await database.getLibraryFileById(c.req.param('id'));
+        if (!f) return c.json({ error: 'File not found' }, 404);
+        const size = Math.max(256, Math.min(8192, parseInt(c.req.query('size') || '4096', 10) || 4096));
+        const buf = await c.env.IMAGING.decodeProxy(c.env.LIBRARY.absPath(f.rel_path), { cacheId: f.id, mtimeMs: f.mtime, size: f.size, longEdge: size });
+        if (!buf) return c.json({ error: 'Could not render image' }, 500);
+        return new Response(buf, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=3600' } });
+    } catch (e) {
+        console.error('library/full failed:', e);
+        return c.json({ error: 'Failed to render image' }, 500);
+    }
+});
+
 // Non-destructive edit stack for a library file (per user).
 app.get('/api/library/:id/edits', authenticateToken, async (c) => {
     try {

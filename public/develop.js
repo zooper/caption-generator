@@ -113,7 +113,7 @@
   var canvas, gl, baseImage = null, ready = false, fileId = null;
   var adj = defaults();
   var prog1, progBlur, progFinal, srcTex, lutTex, fboA, fboB, fboC, quad;
-  var pushTimer = null, saveTimer = null, seed = 0.137, cropMode = false, pendCrop = null;
+  var pushTimer = null, saveTimer = null, seed = 0.137, cropMode = false, pendCrop = null, exporting = false;
 
   function sh(type, src) { var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error('develop shader:', gl.getShaderInfoLog(s), src); return null; } return s; }
   function prog(fs) { var v = sh(gl.VERTEX_SHADER, VERT), f = sh(gl.FRAGMENT_SHADER, fs); if (!v || !f) return null; var p = gl.createProgram(); gl.attachShader(p, v); gl.attachShader(p, f); gl.bindAttribLocation(p, 0, 'p'); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { console.error('develop link:', gl.getProgramInfoLog(p)); return null; } return p; }
@@ -195,13 +195,17 @@
     schedulePush();
   }
 
-  function outDims() {
+  function outDims(max) {
+    max = max || 2048;
     var iw = baseImage.naturalWidth || baseImage.width, ih = baseImage.naturalHeight || baseImage.height;
     var cw = iw * (cropMode ? 1 : (adj.cropW || 1)), ch = ih * (cropMode ? 1 : (adj.cropH || 1));
     if ((adj.rotate90 || 0) % 2 === 1) { var t = cw; cw = ch; ch = t; }
-    var max = 2048, scale = Math.min(1, max / Math.max(cw, ch));
+    var scale = Math.min(1, max / Math.max(cw, ch));
     return { w: Math.max(1, Math.round(cw * scale)), h: Math.max(1, Math.round(ch * scale)) };
   }
+  function uploadTex(img) { gl.bindTexture(gl.TEXTURE_2D, srcTex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); }
+  function allocFBOs(w, h) { fboA = makeFBO(w, h); fboB = makeFBO(w, h); fboC = makeFBO(w, h); }
+  function loadImg(src) { return new Promise(function (res, rej) { var i = new Image(); i.onload = function () { res(i); }; i.onerror = rej; i.src = src; }); }
 
   function setBaseImage(img) {
     baseImage = img;
@@ -226,6 +230,7 @@
   /* ---- push edited pixels + persist ---- */
   function authHeaders() { var t = localStorage.getItem('auth_token'); var h = { 'Content-Type': 'application/json' }; if (t) h.Authorization = 'Bearer ' + t; return h; }
   function schedulePush() {
+    if (exporting) return; // don't push transient high-res export frames
     clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { try { if (window.setEditedImage) window.setEditedImage(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]); } catch (e) {} }, 220);
     if (fileId) { clearTimeout(saveTimer); saveTimer = setTimeout(saveEdits, 600); }
@@ -276,14 +281,46 @@
       .catch(function () {});
   }
 
-  window.exportImage = function () {
-    var dataUrl = (api.getEdited && api.getEdited()) || null;
-    if (!dataUrl) { var pv = document.getElementById('previewImage'); dataUrl = pv && pv.getAttribute('src'); }
-    if (!dataUrl) { if (window.showError) showError('Load a photo first', 'Export'); return; }
+  // Re-run the exact edit pipeline at a higher resolution, then restore the proxy.
+  function renderAt(srcImg, target) {
+    exporting = true;
+    var savedBase = baseImage, savedW = canvas.width, savedH = canvas.height;
+    baseImage = srcImg; uploadTex(srcImg);
+    var d = outDims(target); canvas.width = d.w; canvas.height = d.h; allocFBOs(d.w, d.h); render();
+    var out = canvas.toDataURL('image/jpeg', 0.92);
+    baseImage = savedBase; uploadTex(savedBase); canvas.width = savedW; canvas.height = savedH; allocFBOs(savedW, savedH); render();
+    exporting = false;
+    return out;
+  }
+
+  window.exportImage = async function () {
+    if (!ready || !baseImage) {
+      var pv = document.getElementById('previewImage'); var s = pv && pv.getAttribute('src');
+      if (!s) { if (window.showError) showError('Load a photo first', 'Export'); return; }
+    }
+    var sel = document.getElementById('exportSize');
+    var choice = sel ? sel.value : '2048';
+    var target = choice === 'full' ? 8192 : parseInt(choice, 10) || 2048;
+    var id = window.getLibraryFileId && window.getLibraryFileId();
+    var curLong = Math.max(canvas.width, canvas.height);
+    var dataUrl;
+    try {
+      if (target <= curLong || !baseImage) {
+        dataUrl = api.getEdited();
+      } else if (id) {
+        // library file: fetch a higher-res decode and render the edit at that size
+        var blob = await fetch('/api/library/' + id + '/full?size=' + target, { headers: authHeaders(), credentials: 'include' }).then(function (r) { return r.ok ? r.blob() : null; });
+        dataUrl = blob ? renderAt(await loadImg(URL.createObjectURL(blob)), target) : api.getEdited();
+      } else {
+        // uploaded image: the loaded source is already full-res — just re-render bigger
+        dataUrl = renderAt(baseImage, target);
+      }
+    } catch (e) { dataUrl = api.getEdited(); }
+    if (!dataUrl) { if (window.showError) showError('Could not export', 'Export'); return; }
+
     var name = (window.getCurrentFilename && window.getCurrentFilename()) || 'caption-studio';
     var a = document.createElement('a'); a.href = dataUrl; a.download = name.replace(/\.[^.]+$/, '') + '_edited.jpg';
     document.body.appendChild(a); a.click(); a.remove();
-    var id = window.getLibraryFileId && window.getLibraryFileId();
     if (id) {
       fetch('/api/library/' + id + '/export', { method: 'POST', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ imageData: dataUrl.split(',')[1] }) })
         .then(function (r) { return r.ok ? r.json() : null; })
