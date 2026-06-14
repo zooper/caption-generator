@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Caption Studio</title>
-    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+    <!-- full build (not lite): includes the PNG/HEIC parsers so EXIF reads from
+         Darktable/Lightroom PNG exports and iPhone HEIC, not just JPEG/TIFF -->
+    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
     <link rel="stylesheet" href="darkroom.css">
     <script>
       /* apply the saved theme early (avoids a flash); defaults to dark */
