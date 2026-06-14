@@ -20,6 +20,67 @@ function isRaw(p) {
     return RAW_EXTS.has(path.extname(p).slice(1).toLowerCase());
 }
 
+// Locate the largest embedded JPEG preview in a TIFF/DNG by walking the IFD
+// chain (IFD0 + SubIFDs). Returns {off,len,w,h} or null. `buf` only needs to
+// contain the IFD tables (the JPEG bytes are read separately by offset).
+function locatePreview(buf) {
+    if (buf.length < 8) return null;
+    const le = buf.readUInt16LE(0) === 0x4949;
+    const u16 = (o) => le ? buf.readUInt16LE(o) : buf.readUInt16BE(o);
+    const u32 = (o) => le ? buf.readUInt32LE(o) : buf.readUInt32BE(o);
+    if (u16(2) !== 42) return null;
+    const ifds = [u32(4)]; const seen = new Set(); let best = null;
+    const SZ = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+    while (ifds.length) {
+        const off = ifds.shift();
+        if (!off || seen.has(off) || off + 2 > buf.length) continue;
+        seen.add(off);
+        const n = u16(off);
+        if (off + 2 + n * 12 > buf.length) continue;
+        const tags = {};
+        for (let i = 0; i < n; i++) {
+            const e = off + 2 + i * 12, tag = u16(e), type = u16(e + 2), cnt = u32(e + 4);
+            const len = (SZ[type] || 1) * cnt, valOff = len <= 4 ? e + 8 : u32(e + 8);
+            if (valOff + Math.min(len, 4) > buf.length) continue;
+            tags[tag] = { type, cnt, valOff, val: type === 3 ? u16(valOff) : u32(valOff) };
+        }
+        const next = u32(off + 2 + n * 12); if (next) ifds.push(next);
+        if (tags[0x014A]) { const s = tags[0x014A]; for (let i = 0; i < s.cnt; i++) ifds.push(s.cnt === 1 ? s.val : u32(s.valOff + i * 4)); }
+        const comp = tags[0x0103] && tags[0x0103].val;
+        const w = tags[0x0100] && tags[0x0100].val, h = tags[0x0101] && tags[0x0101].val;
+        let jOff = null, jLen = null;
+        if (tags[0x0201] && tags[0x0202]) { jOff = tags[0x0201].val; jLen = tags[0x0202].val; }
+        else if ((comp === 7 || comp === 6) && tags[0x0111] && tags[0x0117] && tags[0x0111].cnt === 1) { jOff = tags[0x0111].val; jLen = tags[0x0117].val; }
+        if (jOff && jLen) {
+            const area = (w || 0) * (h || 0) || jLen;
+            if (!best || area > best.area) best = { off: jOff, len: jLen, w: w || null, h: h || null, area };
+        }
+    }
+    return best;
+}
+
+// Read the embedded preview JPEG from a RAW (two-phase: parse IFD tables from the
+// head, then read just the JPEG byte range). ~10–200ms vs ~9s for a darktable
+// demosaic. Falls back to a full-file scan if the tables sit past the head.
+async function extractRawPreview(absPath) {
+    let fh;
+    try {
+        fh = await fs.open(absPath, 'r');
+        const size = (await fh.stat()).size;
+        const headLen = Math.min(1 << 20, size);
+        const head = Buffer.alloc(headLen);
+        await fh.read(head, 0, headLen, 0);
+        let loc = locatePreview(head);
+        if (!loc && size > headLen) { const all = Buffer.alloc(size); await fh.read(all, 0, size, 0); loc = locatePreview(all); }
+        if (!loc || loc.off + loc.len > size) return null;
+        const jpeg = Buffer.alloc(loc.len);
+        await fh.read(jpeg, 0, loc.len, loc.off);
+        if (jpeg[0] !== 0xFF || jpeg[1] !== 0xD8) return null; // JPEG SOI
+        return jpeg;
+    } catch { return null; }
+    finally { if (fh) await fh.close().catch(() => {}); }
+}
+
 // Minimal async concurrency limiter (darktable-cli is heavy; don't fork dozens).
 class Limiter {
     constructor(n) { this.max = n; this.active = 0; this.queue = []; }
@@ -41,23 +102,32 @@ export class Imaging {
 
     get enabled() { return true; }
 
-    // Fast path for grid thumbnails: pull the JPEG embedded in EXIF (RAW + most
-    // camera JPEGs have one). Falls back to a small sharp resize for files without.
+    // Fast path for grid thumbnails: the camera's embedded JPEG preview (full-res
+    // in RAW, extracted by parsing the TIFF/DNG in ~tens of ms — NOT a darktable
+    // demosaic). Falls back to exifr's small thumbnail, then darktable.
     async embeddedThumb(absPath, { longEdge = 480 } = {}) {
-        try {
-            const thumb = await exifr.thumbnail(absPath);
-            if (thumb && thumb.byteLength) {
-                return await sharp(Buffer.from(thumb)).rotate()
+        const src = await this._previewJpeg(absPath);
+        if (src) {
+            try {
+                return await sharp(src).rotate()
                     .resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
                     .jpeg({ quality: 80 }).toBuffer();
-            }
-        } catch { /* fall through */ }
+            } catch { /* fall through */ }
+        }
         if (isRaw(absPath)) return this.decodeProxy(absPath, { longEdge });
-        try {
-            return await sharp(absPath, { failOn: 'none' }).rotate()
-                .resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
-                .jpeg({ quality: 80 }).toBuffer();
-        } catch { return null; }
+        return null;
+    }
+
+    // Return a JPEG/decodable buffer to develop from: embedded preview for RAW,
+    // the file itself otherwise. null if RAW has no usable embedded preview.
+    async _previewJpeg(absPath) {
+        if (isRaw(absPath)) {
+            const p = await extractRawPreview(absPath);
+            if (p) return p;
+            try { const t = await exifr.thumbnail(absPath); if (t && t.byteLength) return Buffer.from(t); } catch { /* none */ }
+            return null;
+        }
+        try { return await fs.readFile(absPath); } catch { return null; }
     }
 
     _cachePath(cacheId, longEdge, mtimeMs, size) {
@@ -65,17 +135,24 @@ export class Imaging {
         return path.join(this.proxyDir, `${cacheId}_${mtimeMs}_${size}_${longEdge}.jpg`);
     }
 
-    // Editing/preview proxy: a quality JPEG at `longEdge`, cached on disk.
+    // Editing/preview/export proxy: a quality JPEG at `longEdge`, cached on disk.
+    // Uses the embedded full-res preview for RAW (fast); darktable only if absent.
     async decodeProxy(absPath, { longEdge = 2048, mtimeMs = 0, size = 0, cacheId } = {}) {
         const id = cacheId || crypto.createHash('sha1').update(absPath).digest('hex').slice(0, 16);
         const cachePath = this._cachePath(id, longEdge, mtimeMs, size);
         if (cachePath) { try { return await fs.readFile(cachePath); } catch { /* miss */ } }
 
         let buf;
-        if (isRaw(absPath)) buf = await this._decodeRaw(absPath, longEdge);
-        else buf = await sharp(absPath, { failOn: 'none' }).rotate()
-            .resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 88 }).toBuffer();
+        const src = await this._previewJpeg(absPath);
+        if (src) {
+            buf = await sharp(src, { failOn: 'none' }).rotate()
+                .resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 88 }).toBuffer();
+        } else if (isRaw(absPath)) {
+            buf = await this._decodeRaw(absPath, longEdge); // darktable fallback
+        } else {
+            throw new Error('cannot decode ' + absPath);
+        }
 
         if (cachePath) {
             await fs.mkdir(this.proxyDir, { recursive: true }).catch(() => {});
