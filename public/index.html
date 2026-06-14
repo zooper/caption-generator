@@ -286,7 +286,6 @@
             <!-- FILMSTRIP -->
             <div class="dr-filmstrip" id="drFilmstrip">
                 <div class="dr-filmstrip-label">Catalog</div>
-                <div class="dr-filmstrip-empty" id="drFilmstripEmpty">Upload or import a photo to begin your catalog</div>
             </div>
         </main>
 
@@ -354,6 +353,7 @@
         let currentImageId = null; // Track current image ID for Instagram posting
         let currentImageHash = null; // Track current image hash for caption history
         let currentImageFilename = null; // Track original filename for web uploads
+        let currentLibraryFileId = null; // Track the open photo-library file (NAS editor)
         let isAuthenticated = false;
 
         // Authentication functions
@@ -411,6 +411,55 @@
                 adminButton.style.display = 'none';
             }
         }
+
+        // Open a file from the photo library (NAS) into the editor. Loads the
+        // server-rendered proxy into the canvas and fills context/EXIF from meta,
+        // reusing the same `uploadedImage` seam as uploads so caption/post work.
+        window.openLibraryFile = async function (id) {
+            const token = localStorage.getItem('auth_token');
+            const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+            try {
+                const [meta, blob] = await Promise.all([
+                    fetch(`/api/library/${id}/meta`, { headers, credentials: 'include' }).then(r => r.ok ? r.json() : null),
+                    fetch(`/api/library/${id}/proxy`, { headers, credentials: 'include' }).then(r => r.ok ? r.blob() : null),
+                ]);
+                if (!meta || !blob) { if (window.showError) showError('Could not open this file', 'Library'); return; }
+
+                const dataUrl = await new Promise((res) => {
+                    const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob);
+                });
+
+                const previewImage = document.getElementById('previewImage');
+                const uploadPlaceholder = document.getElementById('uploadPlaceholder');
+                previewImage.src = dataUrl;
+                previewImage.classList.remove('hidden');
+                if (uploadPlaceholder) uploadPlaceholder.classList.add('hidden');
+
+                uploadedImage = dataUrl.split(',')[1];
+                currentImageId = null;
+                currentImageFilename = meta.filename;
+                currentLibraryFileId = id;
+                window.currentGPS = (meta.lat != null && meta.lon != null) ? { latitude: meta.lat, longitude: meta.lon } : null;
+                const genBtn = document.getElementById('generateBtn');
+                if (genBtn) genBtn.disabled = false;
+
+                // Context fields from indexed metadata
+                const setVal = (elId, v) => { const el = document.getElementById(elId); if (el && v) { el.value = v; el.dataset.autoDetected = 'true'; } };
+                ['cameraInput', 'eventInput', 'locationInput', 'moodInput', 'subjectInput', 'customInput']
+                    .forEach(elId => { const el = document.getElementById(elId); if (el) { el.value = ''; el.dataset.autoDetected = 'false'; } });
+                setVal('cameraInput', meta.camera_model);
+                setVal('locationInput', meta.location || (meta.lat != null ? `${meta.lat.toFixed(4)}, ${meta.lon.toFixed(4)}` : ''));
+
+                // Info bar + EXIF badge
+                const fnEl = document.getElementById('drFilename'); if (fnEl) fnEl.textContent = meta.filename;
+                const exBits = [meta.focal_length, meta.aperture ? 'f/' + meta.aperture : null, meta.shutter_speed, meta.iso ? 'ISO ' + meta.iso : null].filter(Boolean);
+                const exEl = document.getElementById('drExif'); if (exEl) exEl.textContent = exBits.join(' · ');
+                const badge = document.getElementById('exifBadge');
+                if (badge) { const has = !!(meta.camera_model || exBits.length); badge.textContent = has ? 'EXIF' : 'no EXIF'; badge.classList.toggle('none', !has); }
+            } catch (e) {
+                if (window.showError) showError('Could not open this file', 'Library');
+            }
+        };
 
         // Theme management functions
         function loadSavedTheme() {

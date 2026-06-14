@@ -707,7 +707,16 @@ input[type=range].dr-range::-moz-range-thumb {
 .dr-frame.active .dr-frame-thumb { border-color: var(--dr-accent); box-shadow: 0 0 0 3px rgba(var(--dr-accent-rgb), .25); }
 .dr-frame .dr-frame-name { font-family: var(--dr-mono); font-size: 10px; color: var(--dr-ink-4); max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dr-frame.active .dr-frame-name { color: var(--dr-ink-2); font-weight: 600; }
-.dr-filmstrip-empty { color: var(--dr-ink-4); font-size: 12.5px; font-family: var(--dr-mono); }
+.dr-filmstrip-empty { color: var(--dr-ink-4); font-size: 12.5px; font-family: var(--dr-mono); align-self: center; }
+.dr-breadcrumb { flex-shrink: 0; align-self: center; font-family: var(--dr-mono); font-size: 11px; color: var(--dr-ink-3); padding: 0 4px; }
+.dr-folder {
+    flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    width: 86px; height: 78px; border-radius: 7px;
+    border: 1px solid var(--dr-line); background: var(--dr-panel-2); color: var(--dr-ink-2);
+    cursor: pointer; transition: border-color .15s, color .15s, background .15s;
+}
+.dr-folder:hover { border-color: var(--dr-accent); color: var(--dr-ink); background: var(--dr-elevated); }
+.dr-folder span { font-size: 10.5px; max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ----------------------------------------------------------------------------
    6. FULL-PAGE SECTIONS (Library / Lightroom / Scheduled overlays)

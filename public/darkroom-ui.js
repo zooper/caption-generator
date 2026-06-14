@@ -105,28 +105,9 @@
     if (thumb) thumb.style.backgroundImage = loaded ? 'url("' + src + '")' : '';
 
     var fn = $('drFilename');
-    if (fn) fn.textContent = loaded ? currentName() : 'No photo loaded';
-
-    var strip = $('drFilmstrip'), empty = $('drFilmstripEmpty');
-    if (strip) {
-      var frame = $('drActiveFrame');
-      if (loaded) {
-        if (empty) empty.style.display = 'none';
-        if (!frame) {
-          frame = document.createElement('div');
-          frame.id = 'drActiveFrame';
-          frame.className = 'dr-frame active';
-          frame.innerHTML = '<div class="dr-frame-thumb"></div><span class="dr-frame-name"></span>';
-          frame.addEventListener('click', function () { var fi = $('fileInput'); if (fi) fi.click(); });
-          strip.appendChild(frame);
-        }
-        frame.querySelector('.dr-frame-thumb').style.backgroundImage = 'url("' + src + '")';
-        frame.querySelector('.dr-frame-name').textContent = currentName();
-      } else if (frame) {
-        frame.remove();
-        if (empty) empty.style.display = '';
-      }
-    }
+    if (fn && loaded) fn.textContent = currentName();
+    // The Navigator (left) reflects the current image; the filmstrip below is the
+    // photo-library catalog (see catalog browser), not a single-image strip.
   }
 
   function wireImageMirror() {
@@ -163,10 +144,95 @@
     syncReadouts();
   }
 
+  /* -------- photo-library catalog (the filmstrip browses LIBRARY_DIR) -------- */
+  var LIB = { dir: '', enabled: null };
+
+  function authHeaders() {
+    var t = localStorage.getItem('auth_token');
+    return t ? { Authorization: 'Bearer ' + t } : {};
+  }
+
+  // Lazy-load thumbnails as authed blobs (img src can't carry a Bearer header).
+  var thumbIO = ('IntersectionObserver' in window) ? new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      var el = en.target; thumbIO.unobserve(el);
+      fetch('/api/library/' + el.getAttribute('data-thumb') + '/thumb', { headers: authHeaders(), credentials: 'include' })
+        .then(function (r) { return r.ok ? r.blob() : null; })
+        .then(function (b) { if (b) el.style.backgroundImage = 'url("' + URL.createObjectURL(b) + '")'; })
+        .catch(function () {});
+    });
+  }, { root: null, rootMargin: '200px' }) : null;
+
+  function hint(strip, text) {
+    var e = document.createElement('div');
+    e.className = 'dr-filmstrip-empty dr-cat-item';
+    e.textContent = text;
+    strip.appendChild(e);
+  }
+
+  function folderChip(name, relPath) {
+    var b = document.createElement('button');
+    b.className = 'dr-folder dr-cat-item';
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span></span>';
+    b.querySelector('span').textContent = name;
+    b.addEventListener('click', function () { loadCatalog(relPath); });
+    return b;
+  }
+
+  function fileFrame(f) {
+    var b = document.createElement('button');
+    b.className = 'dr-frame dr-cat-item';
+    b.setAttribute('data-id', f.id);
+    b.innerHTML = '<div class="dr-frame-thumb" data-thumb="' + f.id + '"></div><span class="dr-frame-name"></span>';
+    b.querySelector('.dr-frame-name').textContent = f.name;
+    b.addEventListener('click', function () {
+      var strip = $('drFilmstrip');
+      if (strip) strip.querySelectorAll('.dr-frame.active').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      if (window.openLibraryFile) window.openLibraryFile(f.id);
+    });
+    var th = b.querySelector('.dr-frame-thumb');
+    if (thumbIO) thumbIO.observe(th); else {
+      fetch('/api/library/' + f.id + '/thumb', { headers: authHeaders(), credentials: 'include' })
+        .then(function (r) { return r.ok ? r.blob() : null; })
+        .then(function (bl) { if (bl) th.style.backgroundImage = 'url("' + URL.createObjectURL(bl) + '")'; }).catch(function () {});
+    }
+    return b;
+  }
+
+  function loadCatalog(dir) {
+    var strip = $('drFilmstrip');
+    if (!strip) return;
+    strip.querySelectorAll('.dr-cat-item, .dr-breadcrumb').forEach(function (e) { e.remove(); });
+    fetch('/api/library/files?dir=' + encodeURIComponent(dir || ''), { headers: authHeaders(), credentials: 'include' })
+      .then(function (r) {
+        if (r.status === 503) { LIB.enabled = false; hint(strip, 'Library off — set LIBRARY_DIR to browse photos'); return null; }
+        if (r.status === 401) { hint(strip, 'Sign in to browse your library'); return null; }
+        if (!r.ok) { hint(strip, 'Could not load library'); return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        LIB.enabled = true; LIB.dir = data.dir || '';
+        var bc = document.createElement('div');
+        bc.className = 'dr-breadcrumb dr-cat-item';
+        bc.textContent = data.dir ? '/' + data.dir : '/';
+        strip.appendChild(bc);
+        if (data.parent !== null && data.parent !== undefined) strip.appendChild(folderChip('..', data.parent));
+        data.dirs.forEach(function (d) { strip.appendChild(folderChip(d.name, d.relPath)); });
+        data.files.forEach(function (f) { strip.appendChild(fileFrame(f)); });
+        if (!data.dirs.length && !data.files.length) hint(strip, 'Empty folder');
+      })
+      .catch(function () { hint(strip, 'Could not load library'); });
+  }
+  window.drReloadCatalog = function () { loadCatalog(LIB.dir || ''); };
+
   onReady(function () {
     wireModules();
     wireSliders();
     wireImageMirror();
+    loadCatalog('');
     mirrorImage();
   });
 })();
