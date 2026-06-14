@@ -69,7 +69,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 17;
+        this.CURRENT_SCHEMA_VERSION = 18;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -193,6 +193,18 @@ class D1Database {
                     console.log('Migration v17 completed successfully');
                 } catch (migrationError) {
                     console.error('Migration v17 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 18: Add saved develop presets
+            if (fromVersion < 18) {
+                console.log('Running migration: Add develop_presets table (v18)');
+                try {
+                    await this.migration_v18();
+                    await this.setSchemaVersion(18);
+                    console.log('Migration v18 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v18 failed:', migrationError);
                 }
             }
         } catch (error) {
@@ -1424,6 +1436,37 @@ class D1Database {
             ON CONFLICT(file_id, user_id) DO UPDATE SET
                 adjustments = excluded.adjustments, updated_at = CURRENT_TIMESTAMP
         `).bind(fileId, userId, JSON.stringify(adjustments || {})).run();
+    }
+
+    async migration_v18() {
+        await this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS develop_presets (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                adjustments TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `).run();
+        await this.db.prepare('CREATE INDEX IF NOT EXISTS idx_presets_user ON develop_presets(user_id)').run();
+        console.log('Migration v18 completed: Added develop_presets table');
+    }
+    async getDevelopPresets(userId) {
+        const r = await this.db.prepare(
+            'SELECT id, name, adjustments, created_at FROM develop_presets WHERE user_id = ? ORDER BY name'
+        ).bind(userId).all();
+        return (r.results || []).map((row) => {
+            let adj = {}; try { adj = JSON.parse(row.adjustments); } catch {}
+            return { id: row.id, name: row.name, adjustments: adj };
+        });
+    }
+    async createDevelopPreset(id, userId, name, adjustments) {
+        await this.db.prepare(
+            'INSERT INTO develop_presets (id, user_id, name, adjustments) VALUES (?, ?, ?, ?)'
+        ).bind(id, userId, name, JSON.stringify(adjustments || {})).run();
+    }
+    async deleteDevelopPreset(id, userId) {
+        await this.db.prepare('DELETE FROM develop_presets WHERE id = ? AND user_id = ?').bind(id, userId).run();
     }
 
     // ---- Photo library helpers ----
@@ -4413,6 +4456,38 @@ app.post('/api/library/:id/export', authenticateToken, async (c) => {
     } catch (e) {
         console.error('library/export failed:', e);
         return c.json({ error: 'Export failed' }, 500);
+    }
+});
+
+// Develop presets (per user; DB-only, works without the library binding).
+app.get('/api/develop-presets', authenticateToken, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        return c.json({ presets: await database.getDevelopPresets(c.get('user').id) });
+    } catch (e) {
+        return c.json({ error: 'Failed to load presets' }, 500);
+    }
+});
+app.post('/api/develop-presets', authenticateToken, async (c) => {
+    try {
+        const { name, adjustments } = await c.req.json();
+        if (!name || !String(name).trim()) return c.json({ error: 'Name required' }, 400);
+        const database = new D1Database(c.env.DB);
+        const id = (crypto.randomUUID && crypto.randomUUID()) || ('p' + Date.now() + Math.random().toString(36).slice(2, 8));
+        await database.createDevelopPreset(id, c.get('user').id, String(name).trim().slice(0, 60), adjustments);
+        return c.json({ success: true, id });
+    } catch (e) {
+        console.error('develop-presets create failed:', e);
+        return c.json({ error: 'Failed to save preset' }, 500);
+    }
+});
+app.delete('/api/develop-presets/:id', authenticateToken, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        await database.deleteDevelopPreset(c.req.param('id'), c.get('user').id);
+        return c.json({ success: true });
+    } catch (e) {
+        return c.json({ error: 'Failed to delete preset' }, 500);
     }
 });
 

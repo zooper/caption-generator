@@ -403,6 +403,57 @@
     window.addEventListener('resize', function () { if (cropMode) positionBox(); });
   }
 
-  function start() { if (!initGL()) { window.drDevelop = null; return; } ready = true; wireControls(); wireGeometry(); window.drDevelop = api; }
+  /* ---- develop presets (built-in B&W looks + saved) ---- */
+  var GEOM_KEYS = ['cropX', 'cropY', 'cropW', 'cropH', 'straighten', 'rotate90', 'flipH', 'flipV'];
+  var BUILTIN = [
+    { name: 'B&W High Contrast', builtin: true, adjustments: { bw: 1, contrast: 35, blacks: -25, whites: 20, clarity: 35, bwRed: 20, bwBlue: -30, curve: [[0, 0], [0.25, 0.12], [0.75, 0.88], [1, 1]] } },
+    { name: 'B&W Soft', builtin: true, adjustments: { bw: 1, contrast: -8, highlights: -20, shadows: 25, clarity: -10, curve: [[0, 0.08], [1, 0.92]] } },
+    { name: 'B&W Film + Grain', builtin: true, adjustments: { bw: 1, contrast: 20, clarity: 18, grain: 45, grainSize: 55, vignette: 25, bwOrange: 15 } },
+    { name: 'Selenium Tone', builtin: true, adjustments: { bw: 1, contrast: 18, splitShadowHue: 265, splitShadowSat: 28, splitHighlightHue: 35, splitHighlightSat: 12 } },
+  ];
+  var savedPresets = [];
+
+  function lookOnly(a) { var o = {}; Object.keys(a).forEach(function (k) { if (GEOM_KEYS.indexOf(k) < 0) o[k] = a[k]; }); return o; }
+  function applyPresetLook(p) {
+    var look = p || {};
+    Object.keys(look).forEach(function (k) { if (GEOM_KEYS.indexOf(k) < 0) adj[k] = (k === 'curve') ? JSON.parse(JSON.stringify(look[k])) : look[k]; });
+    if (!adj.curve || adj.curve.length < 2) adj.curve = [[0, 0], [1, 1]];
+    syncControls(); uploadLUT(); render();
+  }
+  function renderPresets() {
+    var el = document.getElementById('devPresets'); if (!el) return;
+    el.innerHTML = '';
+    BUILTIN.concat(savedPresets).forEach(function (p) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'dr-preset'; b.textContent = p.name;
+      b.addEventListener('click', function () { applyPresetLook(p.adjustments); });
+      if (!p.builtin) {
+        var x = document.createElement('span'); x.textContent = ' ✕'; x.style.opacity = '.6';
+        x.addEventListener('click', function (e) { e.stopPropagation(); deletePreset(p.id); });
+        b.appendChild(x);
+      }
+      el.appendChild(b);
+    });
+    var add = document.createElement('button'); add.type = 'button'; add.className = 'dr-preset add'; add.textContent = '+ Save';
+    add.addEventListener('click', saveCurrentPreset); el.appendChild(add);
+  }
+  function loadPresets() {
+    fetch('/api/develop-presets', { headers: authHeaders(), credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.presets) savedPresets = d.presets; renderPresets(); })
+      .catch(function () { renderPresets(); });
+  }
+  function saveCurrentPreset() {
+    var name = window.prompt('Preset name'); if (!name) return;
+    fetch('/api/develop-presets', { method: 'POST', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ name: name, adjustments: lookOnly(adj) }) })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.success) { loadPresets(); if (window.showSuccess) showSuccess('Saved preset “' + name + '”', 'Develop'); } })
+      .catch(function () {});
+  }
+  function deletePreset(id) {
+    fetch('/api/develop-presets/' + id, { method: 'DELETE', headers: authHeaders(), credentials: 'include' })
+      .then(function () { loadPresets(); }).catch(function () {});
+  }
+
+  function start() { if (!initGL()) { window.drDevelop = null; return; } ready = true; wireControls(); wireGeometry(); renderPresets(); loadPresets(); window.drDevelop = api; }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
