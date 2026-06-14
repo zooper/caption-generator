@@ -99,6 +99,7 @@
                             <span>or click to browse &middot; JPG, PNG, GIF up to 10MB</span>
                         </div>
                         <img class="preview-image hidden" id="previewImage" alt="Preview">
+                        <canvas id="developCanvas" class="preview-image hidden" aria-label="Edited preview"></canvas>
                         <input type="file" id="fileInput" accept="image/*" style="display:none;">
                     </div>
                 </div>
@@ -153,6 +154,29 @@
                             <span class="btn-text">Generate caption</span>
                             <div class="loading-spinner" style="display:none;"></div>
                         </button>
+                    </div>
+                </div>
+
+                <!-- Develop (non-destructive WebGL adjustments) -->
+                <div class="dr-module" data-module="develop">
+                    <button class="dr-module-head" type="button">
+                        <svg class="dr-chevron" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
+                        <span class="dr-module-title">Develop</span>
+                        <button type="button" id="devReset" class="dr-reset" title="Reset all adjustments">Reset</button>
+                    </button>
+                    <div class="dr-module-body">
+                        <div class="dr-sliders" id="developSliders">
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Exposure</span><span class="dr-readout" id="devExposureOut">0</span></div><input type="range" class="dr-range" id="devExposure" data-adj="exposure" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Contrast</span><span class="dr-readout" id="devContrastOut">0</span></div><input type="range" class="dr-range" id="devContrast" data-adj="contrast" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Highlights</span><span class="dr-readout" id="devHighlightsOut">0</span></div><input type="range" class="dr-range" id="devHighlights" data-adj="highlights" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Shadows</span><span class="dr-readout" id="devShadowsOut">0</span></div><input type="range" class="dr-range" id="devShadows" data-adj="shadows" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Whites</span><span class="dr-readout" id="devWhitesOut">0</span></div><input type="range" class="dr-range" id="devWhites" data-adj="whites" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Blacks</span><span class="dr-readout" id="devBlacksOut">0</span></div><input type="range" class="dr-range" id="devBlacks" data-adj="blacks" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Temperature</span><span class="dr-readout" id="devTempOut">0</span></div><input type="range" class="dr-range" id="devTemp" data-adj="temp" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Tint</span><span class="dr-readout" id="devTintOut">0</span></div><input type="range" class="dr-range" id="devTint" data-adj="tint" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Vibrance</span><span class="dr-readout" id="devVibranceOut">0</span></div><input type="range" class="dr-range" id="devVibrance" data-adj="vibrance" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Saturation</span><span class="dr-readout" id="devSaturationOut">0</span></div><input type="range" class="dr-range" id="devSaturation" data-adj="saturation" min="-100" max="100" value="0"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -356,6 +380,10 @@
         let currentLibraryFileId = null; // Track the open photo-library file (NAS editor)
         let isAuthenticated = false;
 
+        // The WebGL develop engine pushes edited pixels here so caption/post use them.
+        window.setEditedImage = function (b64) { if (b64) uploadedImage = b64; };
+        window.getLibraryFileId = function () { return currentLibraryFileId; };
+
         // Authentication functions
         async function checkAuth() {
             try {
@@ -456,6 +484,8 @@
                 const exEl = document.getElementById('drExif'); if (exEl) exEl.textContent = exBits.join(' · ');
                 const badge = document.getElementById('exifBadge');
                 if (badge) { const has = !!(meta.camera_model || exBits.length); badge.textContent = has ? 'EXIF' : 'no EXIF'; badge.classList.toggle('none', !has); }
+
+                if (window.drDevelop) window.drDevelop.load({ src: dataUrl, fileId: id });
             } catch (e) {
                 if (window.showError) showError('Could not open this file', 'Library');
             }
@@ -520,6 +550,8 @@
                     
                     // Extract EXIF metadata immediately when image is loaded
                     extractMetadataFromEXIF(file);
+                    currentLibraryFileId = null; // uploads aren't library files
+                    if (window.drDevelop) window.drDevelop.load({ src: e.target.result, fileId: null });
                 };
                 reader.readAsDataURL(file);
             }
@@ -3869,6 +3901,7 @@ NOTE: The system automatically provides camera info, location, weather, and cont
                 document.getElementById('version-footer').textContent = 'v.unknown';
             });
     </script>
+    <script src="develop.js"></script>
     <script src="darkroom-ui.js"></script>
 </body>
 </html>

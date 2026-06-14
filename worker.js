@@ -69,7 +69,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 16;
+        this.CURRENT_SCHEMA_VERSION = 17;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -181,6 +181,18 @@ class D1Database {
                     console.log('Migration v16 completed successfully');
                 } catch (migrationError) {
                     console.error('Migration v16 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 17: Add non-destructive edit stacks
+            if (fromVersion < 17) {
+                console.log('Running migration: Add edit_stacks table (v17)');
+                try {
+                    await this.migration_v17();
+                    await this.setSchemaVersion(17);
+                    console.log('Migration v17 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v17 failed:', migrationError);
                 }
             }
         } catch (error) {
@@ -1381,6 +1393,37 @@ class D1Database {
         `).run();
         await this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_proxy_file ON image_proxies(file_id, kind)`).run();
         console.log('Migration v16 completed: Added library_files + image_proxies tables');
+    }
+
+    async migration_v17() {
+        // Non-destructive develop edits, keyed per library file + user. Originals
+        // on disk are never touched; this stores the adjustment stack as JSON.
+        await this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS edit_stacks (
+                file_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                adjustments TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (file_id, user_id)
+            )
+        `).run();
+        console.log('Migration v17 completed: Added edit_stacks table');
+    }
+
+    async getEditStack(fileId, userId) {
+        const row = await this.db.prepare(
+            'SELECT adjustments FROM edit_stacks WHERE file_id = ? AND user_id = ?'
+        ).bind(fileId, userId).first();
+        if (!row) return null;
+        try { return JSON.parse(row.adjustments); } catch { return null; }
+    }
+    async saveEditStack(fileId, userId, adjustments) {
+        await this.db.prepare(`
+            INSERT INTO edit_stacks (file_id, user_id, adjustments, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(file_id, user_id) DO UPDATE SET
+                adjustments = excluded.adjustments, updated_at = CURRENT_TIMESTAMP
+        `).bind(fileId, userId, JSON.stringify(adjustments || {})).run();
     }
 
     // ---- Photo library helpers ----
@@ -4326,6 +4369,27 @@ async function serveLibraryImage(c, kind) {
 }
 app.get('/api/library/:id/thumb', authenticateToken, (c) => serveLibraryImage(c, 'thumb'));
 app.get('/api/library/:id/proxy', authenticateToken, (c) => serveLibraryImage(c, 'proxy'));
+
+// Non-destructive edit stack for a library file (per user).
+app.get('/api/library/:id/edits', authenticateToken, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        const adjustments = await database.getEditStack(c.req.param('id'), c.get('user').id);
+        return c.json({ adjustments: adjustments || null });
+    } catch (e) {
+        return c.json({ error: 'Failed to load edits' }, 500);
+    }
+});
+app.put('/api/library/:id/edits', authenticateToken, async (c) => {
+    try {
+        const { adjustments } = await c.req.json();
+        const database = new D1Database(c.env.DB);
+        await database.saveEditStack(c.req.param('id'), c.get('user').id, adjustments);
+        return c.json({ success: true });
+    } catch (e) {
+        return c.json({ error: 'Failed to save edits' }, 500);
+    }
+});
 
 app.post('/api/library/rescan', authenticateToken, async (c) => {
     if (!c.env.LIBRARY?.enabled || !c.env.LIBRARY.rescan) return libraryUnavailable(c);

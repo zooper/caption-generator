@@ -99,7 +99,9 @@
     var img = $('previewImage');
     if (!img) return;
     var src = img.getAttribute('src');
-    var loaded = src && !img.classList.contains('hidden');
+    // The develop engine hides the <img> and shows a <canvas>, so track the
+    // source by whether a src is set, not by the <img>'s visibility.
+    var loaded = !!(src && src.length > 5);
 
     var thumb = $('navThumb');
     if (thumb) thumb.style.backgroundImage = loaded ? 'url("' + src + '")' : '';
