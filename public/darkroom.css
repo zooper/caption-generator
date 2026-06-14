@@ -398,12 +398,24 @@ input, textarea, select { font-family: inherit; }
 }
 .dr-stage {
     flex: 1;
+    position: relative;
     display: grid;
     place-items: center;
     padding: 30px;
     min-height: 0;
     overflow: hidden;
     background: radial-gradient(circle at 50% 38%, var(--dr-stage-1), var(--dr-stage-2) 78%);
+}
+.dr-loading {
+    position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    color: var(--dr-ink-2); font-family: var(--dr-mono); font-size: 13px;
+    background: rgba(0, 0, 0, .25);
+}
+.dr-spinner {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 3px solid var(--dr-line-2); border-top-color: var(--dr-accent);
+    animation: dr-spin .8s linear infinite;
 }
 .dr-stage img, .dr-stage .dr-stage-empty {
     max-width: 100%;

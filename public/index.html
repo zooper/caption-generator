@@ -102,6 +102,10 @@
                         <canvas id="developCanvas" class="preview-image hidden" aria-label="Edited preview"></canvas>
                         <input type="file" id="fileInput" accept="image/*" style="display:none;">
                     </div>
+                    <div class="dr-loading hidden" id="drLoading">
+                        <div class="dr-spinner"></div>
+                        <span id="drLoadingText">Developing…</span>
+                    </div>
                 </div>
                 <div class="dr-infobar">
                     <span style="display:flex;align-items:center;gap:10px">
@@ -448,6 +452,8 @@
         window.openLibraryFile = async function (id) {
             const token = localStorage.getItem('auth_token');
             const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+            const loading = document.getElementById('drLoading');
+            if (loading) loading.classList.remove('hidden');
             try {
                 const [meta, blob] = await Promise.all([
                     fetch(`/api/library/${id}/meta`, { headers, credentials: 'include' }).then(r => r.ok ? r.json() : null),
@@ -490,6 +496,8 @@
                 if (window.drDevelop) window.drDevelop.load({ src: dataUrl, fileId: id });
             } catch (e) {
                 if (window.showError) showError('Could not open this file', 'Library');
+            } finally {
+                if (loading) loading.classList.add('hidden');
             }
         };
 

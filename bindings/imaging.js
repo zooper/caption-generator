@@ -95,6 +95,30 @@ export class Imaging {
         return name;
     }
 
+    // Evict oldest cached proxies once the cache exceeds maxBytes (keeps a NAS
+    // library with thousands of RAWs from filling the disk with proxies).
+    async pruneProxyCache(maxBytes) {
+        if (!this.proxyDir) return;
+        let names;
+        try { names = await fs.readdir(this.proxyDir); } catch { return; }
+        const stats = [];
+        let total = 0;
+        for (const n of names) {
+            try {
+                const st = await fs.stat(path.join(this.proxyDir, n));
+                if (st.isFile()) { stats.push({ n, size: st.size, mtime: st.mtimeMs }); total += st.size; }
+            } catch { /* skip */ }
+        }
+        if (total <= maxBytes) return 0;
+        stats.sort((a, b) => a.mtime - b.mtime); // oldest first
+        let removed = 0;
+        for (const s of stats) {
+            if (total <= maxBytes) break;
+            try { await fs.unlink(path.join(this.proxyDir, s.n)); total -= s.size; removed++; } catch { /* skip */ }
+        }
+        return removed;
+    }
+
     async _decodeRaw(absPath, longEdge) {
         return this.limiter.run(async () => {
             const tmp = path.join(os.tmpdir(), 'dr_' + crypto.randomBytes(7).toString('hex') + '.jpg');

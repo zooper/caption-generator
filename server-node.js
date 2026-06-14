@@ -77,6 +77,13 @@ if (LIBRARY.enabled) {
         setInterval(() => LIBRARY.rescan().catch((e) => console.error('Library rescan failed:', e)),
             everyMin * 60 * 1000).unref();
     }
+    // Keep the proxy cache bounded.
+    const cacheMb = Number(process.env.PROXY_CACHE_MB || 1024);
+    const prune = () => IMAGING.pruneProxyCache(cacheMb * 1024 * 1024)
+        .then((n) => { if (n) console.log(`proxy cache: evicted ${n} stale proxies`); })
+        .catch(() => {});
+    prune();
+    setInterval(prune, 30 * 60 * 1000).unref();
 }
 
 // Serve static assets from /public. Registered after all worker routes are
