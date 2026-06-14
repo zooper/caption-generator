@@ -64,6 +64,11 @@
                     <div class="dr-nav-thumb" id="navThumb" title="Click to choose a photo"></div>
                 </div>
 
+                <div class="dr-folders">
+                    <div class="dr-section-label">Folders</div>
+                    <div class="dr-tree" id="drTree"><div class="dr-tree-empty">Loading…</div></div>
+                </div>
+
                 <div class="style-options">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <h3>Style presets</h3>
@@ -105,6 +110,16 @@
                     <div class="dr-loading hidden" id="drLoading">
                         <div class="dr-spinner"></div>
                         <span id="drLoadingText">Developing…</span>
+                    </div>
+                    <div class="dr-crop hidden" id="cropOverlay">
+                        <div class="dr-crop-box" id="cropBox">
+                            <i class="dr-crop-h" data-h="nw"></i><i class="dr-crop-h" data-h="ne"></i>
+                            <i class="dr-crop-h" data-h="sw"></i><i class="dr-crop-h" data-h="se"></i>
+                        </div>
+                        <div class="dr-crop-bar">
+                            <button type="button" id="cropCancel">Cancel</button>
+                            <button type="button" id="cropDone">Apply</button>
+                        </div>
                     </div>
                 </div>
                 <div class="dr-infobar">
@@ -168,18 +183,87 @@
                         <span class="dr-module-title">Develop</span>
                         <button type="button" id="devReset" class="dr-reset" title="Reset all adjustments">Reset</button>
                     </button>
-                    <div class="dr-module-body">
-                        <div class="dr-sliders" id="developSliders">
+                    <div class="dr-module-body" id="developBody">
+                        <!-- Presets row (populated by develop.js) -->
+                        <div class="dr-presets" id="devPresets"></div>
+
+                        <!-- B&W toggle -->
+                        <div class="dr-toggle-row">
+                            <span>Black &amp; White</span>
+                            <button type="button" id="devBW" class="dr-switch" role="switch" aria-checked="false"><span></span></button>
+                        </div>
+
+                        <div class="dr-group-label">Light</div>
+                        <div class="dr-sliders">
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Exposure</span><span class="dr-readout" id="devExposureOut">0</span></div><input type="range" class="dr-range" id="devExposure" data-adj="exposure" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Contrast</span><span class="dr-readout" id="devContrastOut">0</span></div><input type="range" class="dr-range" id="devContrast" data-adj="contrast" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Highlights</span><span class="dr-readout" id="devHighlightsOut">0</span></div><input type="range" class="dr-range" id="devHighlights" data-adj="highlights" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Shadows</span><span class="dr-readout" id="devShadowsOut">0</span></div><input type="range" class="dr-range" id="devShadows" data-adj="shadows" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Whites</span><span class="dr-readout" id="devWhitesOut">0</span></div><input type="range" class="dr-range" id="devWhites" data-adj="whites" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Blacks</span><span class="dr-readout" id="devBlacksOut">0</span></div><input type="range" class="dr-range" id="devBlacks" data-adj="blacks" min="-100" max="100" value="0"></div>
+                        </div>
+
+                        <div class="dr-group-label">Tone curve</div>
+                        <div class="dr-curve-wrap"><canvas id="devCurve" class="dr-curve" width="252" height="160"></canvas></div>
+
+                        <div class="dr-group-label" data-group="color">Color</div>
+                        <div class="dr-sliders" data-group="color">
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Temperature</span><span class="dr-readout" id="devTempOut">0</span></div><input type="range" class="dr-range" id="devTemp" data-adj="temp" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Tint</span><span class="dr-readout" id="devTintOut">0</span></div><input type="range" class="dr-range" id="devTint" data-adj="tint" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Vibrance</span><span class="dr-readout" id="devVibranceOut">0</span></div><input type="range" class="dr-range" id="devVibrance" data-adj="vibrance" min="-100" max="100" value="0"></div>
                             <div class="dr-slider-row"><div class="dr-slider-label"><span>Saturation</span><span class="dr-readout" id="devSaturationOut">0</span></div><input type="range" class="dr-range" id="devSaturation" data-adj="saturation" min="-100" max="100" value="0"></div>
+                        </div>
+
+                        <div class="dr-group-label" data-group="bw">B&amp;W mix</div>
+                        <div class="dr-sliders" data-group="bw">
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Red</span><span class="dr-readout" id="devBwRedOut">0</span></div><input type="range" class="dr-range" id="devBwRed" data-adj="bwRed" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Orange</span><span class="dr-readout" id="devBwOrangeOut">0</span></div><input type="range" class="dr-range" id="devBwOrange" data-adj="bwOrange" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Yellow</span><span class="dr-readout" id="devBwYellowOut">0</span></div><input type="range" class="dr-range" id="devBwYellow" data-adj="bwYellow" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Green</span><span class="dr-readout" id="devBwGreenOut">0</span></div><input type="range" class="dr-range" id="devBwGreen" data-adj="bwGreen" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Aqua</span><span class="dr-readout" id="devBwAquaOut">0</span></div><input type="range" class="dr-range" id="devBwAqua" data-adj="bwAqua" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Blue</span><span class="dr-readout" id="devBwBlueOut">0</span></div><input type="range" class="dr-range" id="devBwBlue" data-adj="bwBlue" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Purple</span><span class="dr-readout" id="devBwPurpleOut">0</span></div><input type="range" class="dr-range" id="devBwPurple" data-adj="bwPurple" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Magenta</span><span class="dr-readout" id="devBwMagentaOut">0</span></div><input type="range" class="dr-range" id="devBwMagenta" data-adj="bwMagenta" min="-100" max="100" value="0"></div>
+                        </div>
+
+                        <div class="dr-group-label">Presence</div>
+                        <div class="dr-sliders">
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Clarity</span><span class="dr-readout" id="devClarityOut">0</span></div><input type="range" class="dr-range" id="devClarity" data-adj="clarity" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Texture</span><span class="dr-readout" id="devTextureOut">0</span></div><input type="range" class="dr-range" id="devTexture" data-adj="texture" min="-100" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Sharpen</span><span class="dr-readout" id="devSharpenOut">0</span></div><input type="range" class="dr-range" id="devSharpen" data-adj="sharpen" min="0" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Grain</span><span class="dr-readout" id="devGrainOut">0</span></div><input type="range" class="dr-range" id="devGrain" data-adj="grain" min="0" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Grain size</span><span class="dr-readout" id="devGrainSizeOut">40</span></div><input type="range" class="dr-range" id="devGrainSize" data-adj="grainSize" min="10" max="100" value="40"></div>
+                        </div>
+
+                        <div class="dr-group-label">Split tone</div>
+                        <div class="dr-sliders">
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Shadow hue</span><span class="dr-readout" id="devSplitShadowHueOut">210</span></div><input type="range" class="dr-range" id="devSplitShadowHue" data-adj="splitShadowHue" min="0" max="360" value="210"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Shadow tone</span><span class="dr-readout" id="devSplitShadowSatOut">0</span></div><input type="range" class="dr-range" id="devSplitShadowSat" data-adj="splitShadowSat" min="0" max="100" value="0"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Highlight hue</span><span class="dr-readout" id="devSplitHighlightHueOut">40</span></div><input type="range" class="dr-range" id="devSplitHighlightHue" data-adj="splitHighlightHue" min="0" max="360" value="40"></div>
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Highlight tone</span><span class="dr-readout" id="devSplitHighlightSatOut">0</span></div><input type="range" class="dr-range" id="devSplitHighlightSat" data-adj="splitHighlightSat" min="0" max="100" value="0"></div>
+                        </div>
+
+                        <div class="dr-group-label">Effects</div>
+                        <div class="dr-sliders">
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Vignette</span><span class="dr-readout" id="devVignetteOut">0</span></div><input type="range" class="dr-range" id="devVignette" data-adj="vignette" min="-100" max="100" value="0"></div>
+                        </div>
+
+                        <div class="dr-group-label">Geometry</div>
+                        <div class="dr-geo-btns">
+                            <button type="button" id="devCropToggle" class="dr-geo-btn">Crop</button>
+                            <button type="button" id="devRotate" class="dr-geo-btn" title="Rotate 90°">Rotate</button>
+                            <button type="button" id="devFlipH" class="dr-geo-btn" title="Flip horizontal">Flip H</button>
+                            <button type="button" id="devFlipV" class="dr-geo-btn" title="Flip vertical">Flip V</button>
+                        </div>
+                        <div class="dr-aspect" id="devAspect">
+                            <button type="button" class="dr-aspect-btn active" data-aspect="free">Free</button>
+                            <button type="button" class="dr-aspect-btn" data-aspect="1">1:1</button>
+                            <button type="button" class="dr-aspect-btn" data-aspect="1.5">3:2</button>
+                            <button type="button" class="dr-aspect-btn" data-aspect="0.8">4:5</button>
+                            <button type="button" class="dr-aspect-btn" data-aspect="1.7778">16:9</button>
+                        </div>
+                        <div class="dr-sliders">
+                            <div class="dr-slider-row"><div class="dr-slider-label"><span>Straighten</span><span class="dr-readout" id="devStraightenOut">0</span></div><input type="range" class="dr-range" id="devStraighten" data-adj="straighten" min="-45" max="45" value="0"></div>
                         </div>
                     </div>
                 </div>

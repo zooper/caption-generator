@@ -217,6 +217,7 @@
       .then(function (data) {
         if (!data) return;
         LIB.enabled = true; LIB.dir = data.dir || '';
+        if (typeof renderTree === 'function') renderTree(); // sync tree highlight
         var bc = document.createElement('div');
         bc.className = 'dr-breadcrumb dr-cat-item';
         bc.textContent = data.dir ? '/' + data.dir : '/';
@@ -230,10 +231,72 @@
   }
   window.drReloadCatalog = function () { loadCatalog(LIB.dir || ''); };
 
+  /* -------- folder tree (left panel) -------- */
+  var treeRoot = null;
+  var treeExpanded = { '': true };
+
+  function buildTree(dirs) {
+    var root = { name: 'All photos', path: '', children: {}, fileCount: 0 };
+    dirs.forEach(function (d) {
+      var node = root;
+      if (d.dir === '') { root.fileCount = d.count; return; }
+      var acc = '';
+      d.dir.split('/').forEach(function (p) {
+        acc = acc ? acc + '/' + p : p;
+        if (!node.children[p]) node.children[p] = { name: p, path: acc, children: {}, fileCount: 0 };
+        node = node.children[p];
+      });
+      node.fileCount = d.count;
+    });
+    return root;
+  }
+  function subtreeCount(n) { var c = n.fileCount || 0; for (var k in n.children) c += subtreeCount(n.children[k]); return c; }
+
+  function renderTreeNode(node, depth) {
+    var wrap = document.createElement('div');
+    var kids = Object.keys(node.children).sort();
+    var row = document.createElement('div');
+    row.className = 'dr-tree-row' + (node.path === LIB.dir ? ' active' : '');
+    row.style.paddingLeft = (6 + depth * 13) + 'px';
+    var open = !!treeExpanded[node.path];
+    var caret = document.createElement('span');
+    caret.className = 'dr-tree-caret' + (kids.length ? (open ? ' open' : '') : ' leaf');
+    caret.innerHTML = '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>';
+    var label = document.createElement('span');
+    label.className = 'dr-tree-label'; label.textContent = node.name;
+    var cnt = document.createElement('span');
+    cnt.className = 'dr-tree-count'; cnt.textContent = subtreeCount(node) || '';
+    row.appendChild(caret); row.appendChild(label); row.appendChild(cnt);
+    caret.addEventListener('click', function (e) { e.stopPropagation(); treeExpanded[node.path] = !treeExpanded[node.path]; renderTree(); });
+    row.addEventListener('click', function () { loadCatalog(node.path); });
+    wrap.appendChild(row);
+    if (kids.length && open) {
+      kids.forEach(function (k) { wrap.appendChild(renderTreeNode(node.children[k], depth + 1)); });
+    }
+    return wrap;
+  }
+  function renderTree() {
+    var el = $('drTree'); if (!el || !treeRoot) return;
+    el.innerHTML = '';
+    el.appendChild(renderTreeNode(treeRoot, 0));
+  }
+  function loadTree() {
+    var el = $('drTree'); if (!el) return;
+    fetch('/api/library/tree', { headers: authHeaders(), credentials: 'include' })
+      .then(function (r) {
+        if (r.status === 503) { el.innerHTML = '<div class="dr-tree-empty">Library off</div>'; return null; }
+        if (!r.ok) { el.innerHTML = '<div class="dr-tree-empty">' + (r.status === 401 ? 'Sign in' : 'Unavailable') + '</div>'; return null; }
+        return r.json();
+      })
+      .then(function (data) { if (!data) return; treeRoot = buildTree(data.dirs || []); renderTree(); })
+      .catch(function () { el.innerHTML = '<div class="dr-tree-empty">Unavailable</div>'; });
+  }
+
   onReady(function () {
     wireModules();
     wireSliders();
     wireImageMirror();
+    loadTree();
     loadCatalog('');
     mirrorImage();
   });
