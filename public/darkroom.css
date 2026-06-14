@@ -398,12 +398,24 @@ input, textarea, select { font-family: inherit; }
 }
 .dr-stage {
     flex: 1;
+    position: relative;
     display: grid;
     place-items: center;
     padding: 30px;
     min-height: 0;
     overflow: hidden;
     background: radial-gradient(circle at 50% 38%, var(--dr-stage-1), var(--dr-stage-2) 78%);
+}
+.dr-loading {
+    position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    color: var(--dr-ink-2); font-family: var(--dr-mono); font-size: 13px;
+    background: rgba(0, 0, 0, .25);
+}
+.dr-spinner {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 3px solid var(--dr-line-2); border-top-color: var(--dr-accent);
+    animation: dr-spin .8s linear infinite;
 }
 .dr-stage img, .dr-stage .dr-stage-empty {
     max-width: 100%;
@@ -474,6 +486,13 @@ input, textarea, select { font-family: inherit; }
 .weather-section input[type=checkbox] {
     width: 18px; height: 18px; accent-color: var(--dr-accent); cursor: pointer; flex-shrink: 0;
 }
+#developCanvas { display: block; }
+.dr-reset {
+    font-size: 11px; font-weight: 600; color: var(--dr-ink-3);
+    padding: 3px 10px; border: 1px solid var(--dr-line-2); border-radius: 6px;
+    background: var(--dr-panel-2); cursor: pointer; transition: color .15s, border-color .15s;
+}
+.dr-reset:hover { color: var(--dr-ink); border-color: var(--dr-accent); }
 
 /* Collapsible module shell */
 .dr-module { border-bottom: 1px solid var(--dr-line); }
@@ -707,7 +726,16 @@ input[type=range].dr-range::-moz-range-thumb {
 .dr-frame.active .dr-frame-thumb { border-color: var(--dr-accent); box-shadow: 0 0 0 3px rgba(var(--dr-accent-rgb), .25); }
 .dr-frame .dr-frame-name { font-family: var(--dr-mono); font-size: 10px; color: var(--dr-ink-4); max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dr-frame.active .dr-frame-name { color: var(--dr-ink-2); font-weight: 600; }
-.dr-filmstrip-empty { color: var(--dr-ink-4); font-size: 12.5px; font-family: var(--dr-mono); }
+.dr-filmstrip-empty { color: var(--dr-ink-4); font-size: 12.5px; font-family: var(--dr-mono); align-self: center; }
+.dr-breadcrumb { flex-shrink: 0; align-self: center; font-family: var(--dr-mono); font-size: 11px; color: var(--dr-ink-3); padding: 0 4px; }
+.dr-folder {
+    flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    width: 86px; height: 78px; border-radius: 7px;
+    border: 1px solid var(--dr-line); background: var(--dr-panel-2); color: var(--dr-ink-2);
+    cursor: pointer; transition: border-color .15s, color .15s, background .15s;
+}
+.dr-folder:hover { border-color: var(--dr-accent); color: var(--dr-ink); background: var(--dr-elevated); }
+.dr-folder span { font-size: 10.5px; max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ----------------------------------------------------------------------------
    6. FULL-PAGE SECTIONS (Library / Lightroom / Scheduled overlays)

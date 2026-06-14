@@ -17,6 +17,8 @@ import cron from 'node-cron';
 import worker, { app, D1Database } from './worker.js';
 import { D1SQLite } from './bindings/d1-sqlite.js';
 import { R2FS } from './bindings/r2-fs.js';
+import { LibraryFS, scanLibrary } from './bindings/library-fs.js';
+import { Imaging } from './bindings/imaging.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +44,13 @@ const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'caption-studio.sqlit
 const IMAGES_DIR = process.env.IMAGES_DIR || path.join(DATA_DIR, 'images');
 const PORT = Number(process.env.PORT || 3000);
 
+// Photo library (NAS mount). Optional — if LIBRARY_DIR is unset the editor's
+// library features stay dormant and the app behaves exactly as before.
+const LIBRARY_DIR = process.env.LIBRARY_DIR || '';
+const PROXY_DIR = process.env.PROXY_DIR || path.join(DATA_DIR, 'proxies');
+const EXPORT_DIR = process.env.EXPORT_DIR || path.join(DATA_DIR, 'exports');
+const DARKTABLE_BIN = process.env.DARKTABLE_BIN || 'darktable-cli';
+
 if (!process.env.JWT_SECRET) {
     console.error('FATAL: JWT_SECRET is not set. Refusing to start. Add it to your .env.');
     process.exit(1);
@@ -49,12 +58,33 @@ if (!process.env.JWT_SECRET) {
 
 const DB = new D1SQLite(DB_PATH);
 const R2_BUCKET = new R2FS(IMAGES_DIR);
+const LIBRARY = new LibraryFS(LIBRARY_DIR);
+const IMAGING = new Imaging({ proxyDir: PROXY_DIR, exportDir: EXPORT_DIR, darktableBin: DARKTABLE_BIN });
 
 await bootstrapDatabase(DB);
 
 // The binding object passed to Hono as `env` (second arg to app.fetch), mirroring
 // the Cloudflare Workers env. process.env supplies all secrets/vars.
-const ENV = { ...process.env, DB, R2_BUCKET };
+const ENV = { ...process.env, DB, R2_BUCKET, LIBRARY, IMAGING };
+
+// Index the photo library on startup, then periodically. `rescan` is exposed on
+// the binding so the POST /api/library/rescan route can trigger it on demand.
+if (LIBRARY.enabled) {
+    LIBRARY.rescan = () => scanLibrary(LIBRARY, DB, { log: (m) => console.log(m) });
+    LIBRARY.rescan().catch((e) => console.error('Initial library scan failed:', e));
+    const everyMin = Number(process.env.LIBRARY_RESCAN_MINUTES || 10);
+    if (everyMin > 0) {
+        setInterval(() => LIBRARY.rescan().catch((e) => console.error('Library rescan failed:', e)),
+            everyMin * 60 * 1000).unref();
+    }
+    // Keep the proxy cache bounded.
+    const cacheMb = Number(process.env.PROXY_CACHE_MB || 1024);
+    const prune = () => IMAGING.pruneProxyCache(cacheMb * 1024 * 1024)
+        .then((n) => { if (n) console.log(`proxy cache: evicted ${n} stale proxies`); })
+        .catch(() => {});
+    prune();
+    setInterval(prune, 30 * 60 * 1000).unref();
+}
 
 // Serve static assets from /public. Registered after all worker routes are
 // imported, so it acts as the final fallback — API/UI routes match first, and
@@ -65,6 +95,7 @@ serve({ fetch: (request) => app.fetch(request, ENV), port: PORT }, (info) => {
     console.log(`AI Caption Studio listening on http://localhost:${info.port}`);
     console.log(`  DB:     ${path.resolve(DB_PATH)}`);
     console.log(`  Images: ${path.resolve(IMAGES_DIR)}`);
+    console.log(`  Library:${LIBRARY.enabled ? ' ' + path.resolve(LIBRARY_DIR) : ' (disabled — set LIBRARY_DIR)'}`);
     console.log(`  Origin: ${process.env.PUBLIC_ORIGIN || '(derived from request)'}`);
 });
 

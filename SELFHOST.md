@@ -92,3 +92,30 @@ state survives deploys.
 - `node:sqlite` requires **Node 24+** unflagged. The CI and systemd target 24.
 - Backups: `DATA_DIR/caption-studio.sqlite` (+ `images/`) is the whole state.
   Snapshot it (Litestream is a good streaming-backup option for the SQLite file).
+
+## Photo library / editor (NAS-backed)
+
+The app can browse and non-destructively develop a directory of RAW/JPEG files
+in place (no upload), then caption/post the result. This is **self-host only**
+(Node), provided as injected bindings (`LibraryFS`/`Imaging`) — it no-ops on
+Cloudflare. Originals are **read-only**; edits are stored as JSON edit stacks in
+the DB and exports are written to a separate folder.
+
+Requirements on the LXC:
+- **`darktable-cli`** on `PATH` (RAW demosaic). `sharp` (bundled libvips) handles
+  JPEG/PNG/HEIC + proxy resizing and is an npm dependency.
+- Mount the NAS photo directory into the container (read-only is fine).
+
+Env vars (all optional — unset `LIBRARY_DIR` keeps the editor dormant):
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `LIBRARY_DIR` | _(unset)_ | NAS mount to index/browse. Editor is off when unset. |
+| `PROXY_DIR` | `DATA_DIR/proxies` | Cached decode/resize JPEGs. |
+| `EXPORT_DIR` | `DATA_DIR/exports` | Where developed exports are written. |
+| `DARKTABLE_BIN` | `darktable-cli` | Override the darktable binary path. |
+| `LIBRARY_RESCAN_MINUTES` | `10` | Background re-index interval (0 = off). |
+| `PROXY_CACHE_MB` | `1024` | Proxy cache size cap before oldest are evicted. |
+
+The catalog indexes into `library_files` (schema v16); edit stacks live in
+`edit_stacks` (v17). Both are created by the normal migration path.
