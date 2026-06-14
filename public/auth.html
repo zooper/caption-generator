@@ -6,6 +6,7 @@
     <title>Login - AI Caption Studio</title>
     <link rel="stylesheet" href="themes.css">
     <script src="theme-loader.js"></script>
+    <link rel="stylesheet" href="darkroom.css">
     <script>
         // Placeholder for SimpleWebAuthn - will be loaded by module
         window.SimpleWebAuthnBrowser = null;
@@ -23,22 +24,24 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: var(--background-gradient);
+            font-family: var(--dr-sans);
+            background: var(--dr-bg);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: var(--text-primary);
+            color: var(--dr-ink);
+            -webkit-font-smoothing: antialiased;
         }
 
         .auth-container {
-            background: var(--card-background);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            background: var(--dr-panel);
+            border: 1px solid var(--dr-line);
+            border-radius: var(--dr-radius);
+            box-shadow: 0 30px 70px -40px #000;
             padding: 40px;
             width: 100%;
-            max-width: 420px;
+            max-width: 400px;
             margin: 20px;
         }
 
@@ -48,18 +51,29 @@
         }
 
         .auth-header h1 {
-            background: var(--primary-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            font-size: 2rem;
-            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--dr-ink);
             margin-bottom: 10px;
         }
 
+        .auth-header h1 .brand-mark {
+            width: 26px;
+            height: 26px;
+            border-radius: 7px;
+            background: var(--dr-gradient);
+            box-shadow: 0 3px 12px -2px rgba(var(--dr-accent-rgb), .6);
+            flex-shrink: 0;
+        }
+
         .auth-header p {
-            color: #666;
-            font-size: 1rem;
+            color: var(--dr-ink-2);
+            font-size: 0.95rem;
         }
 
         .auth-form {
@@ -76,32 +90,40 @@
 
         .form-group label {
             font-weight: 600;
-            color: var(--text-primary);
+            font-size: 0.85rem;
+            color: var(--dr-ink-2);
         }
 
         .form-group input {
-            padding: 15px;
-            border: 2px solid #e1e5e9;
-            border-radius: 10px;
-            font-size: 16px;
-            transition: border-color 0.2s;
+            padding: 13px 14px;
+            border: 1px solid var(--dr-line-2);
+            border-radius: var(--dr-radius-sm);
+            background: var(--dr-input);
+            color: var(--dr-ink);
+            font-size: 15px;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        .form-group input::placeholder {
+            color: var(--dr-ink-4);
         }
 
         .form-group input:focus {
             outline: none;
-            border-color: var(--accent-color);
+            border-color: var(--dr-accent);
+            box-shadow: 0 0 0 3px rgba(var(--dr-accent-rgb), .25);
         }
 
         .passkey-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: var(--dr-gradient);
+            color: #fff;
             border: none;
-            padding: 16px 30px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
+            padding: 15px 30px;
+            border-radius: var(--dr-radius-sm);
+            font-size: 15px;
+            font-weight: 700;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -109,35 +131,35 @@
         }
 
         .passkey-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+            transform: translateY(-1px);
+            box-shadow: 0 12px 26px -10px rgba(var(--dr-accent-rgb), .7);
         }
 
         .passkey-btn:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
             transform: none;
         }
 
         .magic-link-btn {
-            background: var(--primary-gradient);
-            color: white;
+            background: var(--dr-gradient);
+            color: #fff;
             border: none;
             padding: 15px 30px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
+            border-radius: var(--dr-radius-sm);
+            font-size: 15px;
+            font-weight: 700;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
         }
 
         .magic-link-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(64, 93, 230, 0.3);
+            transform: translateY(-1px);
+            box-shadow: 0 12px 26px -10px rgba(var(--dr-accent-rgb), .7);
         }
 
         .magic-link-btn:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
             transform: none;
         }
@@ -147,14 +169,14 @@
             align-items: center;
             text-align: center;
             margin: 20px 0;
-            color: #999;
+            color: var(--dr-ink-3);
         }
 
         .divider::before,
         .divider::after {
             content: '';
             flex: 1;
-            border-bottom: 1px solid #e1e5e9;
+            border-bottom: 1px solid var(--dr-line);
         }
 
         .divider span {
@@ -163,29 +185,30 @@
         }
 
         .notification {
-            padding: 15px;
-            border-radius: 10px;
+            padding: 13px 15px;
+            border-radius: var(--dr-radius-sm);
             margin-bottom: 20px;
             font-weight: 500;
+            font-size: 0.9rem;
             display: none;
         }
 
         .notification.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background: rgba(52, 211, 153, .12);
+            color: var(--dr-ok);
+            border: 1px solid rgba(52, 211, 153, .35);
         }
 
         .notification.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background: rgba(248, 113, 113, .12);
+            color: var(--dr-err);
+            border: 1px solid rgba(248, 113, 113, .35);
         }
 
         .notification.info {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
+            background: rgba(var(--dr-accent-rgb), .12);
+            color: var(--dr-accent-2);
+            border: 1px solid rgba(var(--dr-accent-rgb), .35);
         }
 
         .back-link {
@@ -194,9 +217,10 @@
         }
 
         .back-link a {
-            color: #8B5CF6;
+            color: var(--dr-accent);
             text-decoration: none;
             font-weight: 500;
+            font-size: 0.9rem;
         }
 
         .back-link a:hover {
@@ -206,8 +230,8 @@
         .loading-spinner {
             width: 18px;
             height: 18px;
-            border: 2px solid #ffffff;
-            border-top: 2px solid transparent;
+            border: 2px solid rgba(255, 255, 255, .35);
+            border-top: 2px solid #fff;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             display: inline-block;
@@ -224,29 +248,48 @@
         }
 
         .email-sent h2 {
-            color: #8B5CF6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            color: var(--dr-ink);
+            font-weight: 800;
             margin-bottom: 15px;
         }
 
         .email-sent p {
-            color: #666;
+            color: var(--dr-ink-2);
             line-height: 1.6;
             margin-bottom: 10px;
         }
 
+        .email-sent strong {
+            color: var(--dr-ink);
+        }
+
         .passkey-icon {
-            font-size: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            vertical-align: middle;
+            margin-right: 7px;
         }
 
         .fallback-link {
             text-align: center;
             margin-top: 15px;
             font-size: 14px;
-            color: #666;
+            color: var(--dr-ink-3);
         }
 
         .fallback-link a {
-            color: #8B5CF6;
+            color: var(--dr-accent);
             text-decoration: none;
             font-weight: 500;
         }
@@ -263,7 +306,7 @@
 <body>
     <div class="auth-container">
         <div class="auth-header">
-            <h1>🎨 AI Caption Studio</h1>
+            <h1><span class="brand-mark" aria-hidden="true"></span>AI Caption Studio</h1>
             <p id="headerText">Sign in securely</p>
         </div>
 
@@ -279,7 +322,7 @@
                     </div>
 
                     <button type="submit" class="passkey-btn" id="passkeyBtn">
-                        <span class="passkey-icon">🔐</span>
+                        <span class="passkey-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
                         <span id="passkeyBtnText">Sign in with Passkey</span>
                         <span class="loading-spinner" id="passkeySpinner" style="display: none;"></span>
                     </button>
@@ -299,7 +342,7 @@
                     </div>
 
                     <button type="submit" class="magic-link-btn" id="submitBtn">
-                        <span id="btnText">🔗 Send Magic Link</span>
+                        <span id="btnText"><svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Send Magic Link</span>
                         <span class="loading-spinner" id="loadingSpinner" style="display: none;"></span>
                     </button>
                 </form>
@@ -311,7 +354,7 @@
         </div>
 
         <div class="email-sent" id="emailSent">
-            <h2>✉️ Check Your Email</h2>
+            <h2><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>Check Your Email</h2>
             <p>We've sent a magic link to <strong id="sentEmail"></strong></p>
             <p>Click the link in your email to sign in. The link expires in 15 minutes.</p>
             <button type="button" class="magic-link-btn" id="sendAnotherBtn" style="margin-top: 20px;">
