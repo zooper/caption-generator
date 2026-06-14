@@ -29,6 +29,11 @@
     --dr-line:      #26262c;
     --dr-line-2:    #2c2c32;
 
+    /* Stage + filmstrip backdrops (overridden in light mode) */
+    --dr-stage-1:   #19191f;
+    --dr-stage-2:   #0c0c0e;
+    --dr-strip:     #121214;
+
     /* Ink */
     --dr-ink:    #E8E6EC;
     --dr-ink-2:  #a9a7b2;
@@ -75,9 +80,23 @@
 [data-theme="dark-ocean"]  { --dr-accent:#38BDF8; --dr-accent-2:#7DD3FC; --dr-accent-rgb:8,145,178;  --dr-gradient:linear-gradient(135deg,#0891B2,#1D4ED8); }
 [data-theme="dark-forest"] { --dr-accent:#34D399; --dr-accent-2:#6EE7B7; --dr-accent-rgb:5,150,105;  --dr-gradient:linear-gradient(135deg,#059669,#7C2D12); }
 
-/* "Light"-named themes recolor the accent only — the Darkroom shell stays dark
-   so the develop-module aesthetic is consistent across every screen. */
-[data-theme="purple-creative"] { --dr-accent:#A78BFA; --dr-accent-2:#C4B5FD; --dr-accent-rgb:139,92,246; --dr-gradient:linear-gradient(135deg,#8B5CF6,#EC4899); }
+/* LIGHT MODE — the "light"-named themes lift the develop-module onto light
+   surfaces (editorial light palette). Same layout + tokens, just inverted. */
+[data-theme="default"],
+[data-theme="purple-creative"],
+[data-theme="ocean-blue"],
+[data-theme="ocean-breeze"],
+[data-theme="sunset-warm"] {
+    --dr-bg:#E7E6EC; --dr-frame:#F3F2F7; --dr-canvas:#ECEAF2;
+    --dr-panel:#FFFFFF; --dr-panel-2:#F8F7FB; --dr-elevated:#F1EFF6; --dr-input:#FFFFFF;
+    --dr-line:#EAE8F1; --dr-line-2:#E0DEEA;
+    --dr-ink:#1B1626; --dr-ink-2:#6B6578; --dr-ink-3:#8E8898; --dr-ink-4:#A8A2B4;
+    --dr-stage-1:#F2F0F8; --dr-stage-2:#E7E6EC; --dr-strip:#EDEBF3;
+    --shadow-color: rgba(40,30,60,.16);
+    --hover-shadow:  rgba(var(--dr-accent-rgb), .3);
+}
+/* per-theme accent recoloring (applies in both modes) */
+[data-theme="purple-creative"] { --dr-accent:#8B5CF6; --dr-accent-2:#7C3AED; --dr-accent-rgb:139,92,246; --dr-gradient:linear-gradient(135deg,#8B5CF6,#EC4899); }
 [data-theme="ocean-blue"],
 [data-theme="ocean-breeze"]    { --dr-accent:#2196F3; --dr-accent-2:#0B79D0; --dr-accent-rgb:33,150,243; --dr-gradient:linear-gradient(135deg,#06B6D4,#3B82F6); }
 [data-theme="sunset-warm"]     { --dr-accent:#F59E0B; --dr-accent-2:#D97706; --dr-accent-rgb:245,158,11; --dr-gradient:linear-gradient(135deg,#F59E0B,#EF4444); }
@@ -119,7 +138,9 @@ input, textarea, select { font-family: inherit; }
     max-width: none;
     margin: 0;
     padding: 0;
-    min-height: 100vh;
+    height: 100vh;            /* fixed editor frame — panels scroll internally */
+    height: 100dvh;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     background: var(--dr-bg);
@@ -382,7 +403,7 @@ input, textarea, select { font-family: inherit; }
     padding: 30px;
     min-height: 0;
     overflow: hidden;
-    background: radial-gradient(circle at 50% 38%, #19191f, var(--dr-canvas) 78%);
+    background: radial-gradient(circle at 50% 38%, var(--dr-stage-1), var(--dr-stage-2) 78%);
 }
 .dr-stage img, .dr-stage .dr-stage-empty {
     max-width: 100%;
@@ -659,7 +680,7 @@ input[type=range].dr-range::-moz-range-thumb {
    ---------------------------------------------------------------------------- */
 .dr-filmstrip {
     grid-area: film;
-    background: #121214;
+    background: var(--dr-strip);
     border-top: 1px solid var(--dr-line);
     display: flex; align-items: center; gap: 11px;
     padding: 0 16px;
@@ -700,7 +721,7 @@ input[type=range].dr-range::-moz-range-thumb {
     box-shadow: none;
     overflow-y: auto;
 }
-.uploaded-images-section.container { max-width: 1200px; margin: 0 auto; min-height: 0; }
+.uploaded-images-section.container { max-width: 1200px; margin: 0 auto; height: auto; min-height: 0; overflow-y: auto; }
 .uploaded-images-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; gap: 16px; }
 .uploaded-images-header h3 { font-size: 19px; font-weight: 800; letter-spacing: -.02em; }
 .uploaded-images-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; margin-top: 18px; }
@@ -816,12 +837,15 @@ input[type=range].dr-range::-moz-range-thumb {
    9. RESPONSIVE  — collapse the 3-pane shell to a single scrolling column
    ---------------------------------------------------------------------------- */
 @media (max-width: 1024px) {
+    /* release the fixed editor frame → the whole page scrolls naturally */
+    .container { height: auto; min-height: 100vh; overflow: visible; }
     .main-content {
         grid-template-columns: 1fr;
         grid-template-rows: auto auto auto auto;
         grid-template-areas: "navi" "canvas" "modules" "film";
-        overflow-y: auto;
+        overflow: visible;
     }
+    .upload-section, .results-section { overflow: visible; }
     .upload-section { border-right: none; border-bottom: 1px solid var(--dr-line); }
     .results-section { border-left: none; border-top: 1px solid var(--dr-line); }
     .dr-canvas { min-height: 320px; }
