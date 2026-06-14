@@ -8,6 +8,15 @@
     <script src="theme-loader.js"></script>
     <link rel="stylesheet" href="darkroom.css">
     <script>
+      /* honor the theme chosen in Settings; defaults to dark */
+      (function () {
+        try {
+          var t = localStorage.getItem('selectedTheme') || localStorage.getItem('app_theme') || 'dark';
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
+    </script>
+    <script>
         // Placeholder for SimpleWebAuthn - will be loaded by module
         window.SimpleWebAuthnBrowser = null;
     </script>
