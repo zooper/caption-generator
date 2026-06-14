@@ -297,6 +297,7 @@
 
                 <!-- Export bar -->
                 <div class="dr-exportbar">
+                    <button id="exportBtn" class="copy-btn" onclick="window.exportImage && window.exportImage()" style="width:auto;margin:0;padding:10px 14px;">Export</button>
                     <button id="scheduleToggleBtn" class="copy-btn" onclick="toggleScheduling()" style="display:none;width:auto;margin:0;padding:10px 14px;">Schedule</button>
                     <div class="dr-postrow">
                         <span style="font-size:12px;color:var(--dr-ink-3);font-weight:600;">Post</span>
@@ -383,6 +384,7 @@
         // The WebGL develop engine pushes edited pixels here so caption/post use them.
         window.setEditedImage = function (b64) { if (b64) uploadedImage = b64; };
         window.getLibraryFileId = function () { return currentLibraryFileId; };
+        window.getCurrentFilename = function () { return currentImageFilename; };
 
         // Authentication functions
         async function checkAuth() {

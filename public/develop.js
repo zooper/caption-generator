@@ -215,6 +215,34 @@
     if (reset) reset.addEventListener('click', function (e) { e.stopPropagation(); api.reset(); });
   }
 
+  // Export the developed image: download client-side (exact match to preview),
+  // and for library files also save it into the server EXPORT_DIR. Defined
+  // unconditionally so it works even if WebGL is unavailable (falls back to the
+  // unedited preview image).
+  window.exportImage = function () {
+    var dataUrl = (api.getEdited && api.getEdited()) || null;
+    if (!dataUrl) { var pv = document.getElementById('previewImage'); dataUrl = pv && pv.getAttribute('src'); }
+    if (!dataUrl) { if (window.showError) showError('Load a photo first', 'Export'); return; }
+
+    var name = (window.getCurrentFilename && window.getCurrentFilename()) || 'caption-studio';
+    var stem = name.replace(/\.[^.]+$/, '');
+    var a = document.createElement('a');
+    a.href = dataUrl; a.download = stem + '_edited.jpg';
+    document.body.appendChild(a); a.click(); a.remove();
+
+    var id = window.getLibraryFileId && window.getLibraryFileId();
+    if (id) {
+      fetch('/api/library/' + id + '/export', {
+        method: 'POST', headers: authHeaders(), credentials: 'include',
+        body: JSON.stringify({ imageData: dataUrl.split(',')[1] }),
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) { if (j && window.showSuccess) showSuccess('Saved ' + j.filename + ' to exports', 'Export'); })
+        .catch(function () {});
+    } else if (window.showSuccess) {
+      showSuccess('Downloaded edited image', 'Export');
+    }
+  };
+
   function start() {
     if (!initGL()) { window.drDevelop = null; return; }
     ready = true;

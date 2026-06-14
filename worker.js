@@ -4391,6 +4391,24 @@ app.put('/api/library/:id/edits', authenticateToken, async (c) => {
     }
 });
 
+// Save the developed image (client canvas JPEG) into the server EXPORT_DIR.
+app.post('/api/library/:id/export', authenticateToken, async (c) => {
+    if (!c.env.IMAGING || !c.env.LIBRARY?.enabled) return libraryUnavailable(c);
+    try {
+        const { imageData } = await c.req.json();
+        if (!imageData) return c.json({ error: 'No image data' }, 400);
+        const database = new D1Database(c.env.DB);
+        const f = await database.getLibraryFileById(c.req.param('id'));
+        if (!f) return c.json({ error: 'File not found' }, 404);
+        const buf = Buffer.from(imageData, 'base64');
+        const filename = await c.env.IMAGING.saveExport(f.filename, buf);
+        return c.json({ success: true, filename });
+    } catch (e) {
+        console.error('library/export failed:', e);
+        return c.json({ error: 'Export failed' }, 500);
+    }
+});
+
 app.post('/api/library/rescan', authenticateToken, async (c) => {
     if (!c.env.LIBRARY?.enabled || !c.env.LIBRARY.rescan) return libraryUnavailable(c);
     try {

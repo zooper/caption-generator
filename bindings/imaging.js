@@ -84,6 +84,17 @@ export class Imaging {
         return buf;
     }
 
+    // Write developed pixels (a JPEG buffer from the client canvas) into EXPORT_DIR,
+    // named after the original. Originals on the NAS are never touched.
+    async saveExport(originalName, buffer) {
+        if (!this.exportDir) throw new Error('EXPORT_DIR not configured');
+        await fs.mkdir(this.exportDir, { recursive: true });
+        const stem = path.basename(originalName || 'export', path.extname(originalName || '')).replace(/[^\w.-]+/g, '_');
+        const name = `${stem}_edited.jpg`;
+        await fs.writeFile(path.join(this.exportDir, name), buffer);
+        return name;
+    }
+
     async _decodeRaw(absPath, longEdge) {
         return this.limiter.run(async () => {
             const tmp = path.join(os.tmpdir(), 'dr_' + crypto.randomBytes(7).toString('hex') + '.jpg');
