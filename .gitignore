@@ -71,3 +71,6 @@ public/AI Caption Studio Export Plugin.zip
 
 # Self-hosted runtime state
 data/
+
+# Local Cloudflare->self-host migration artifact (contains user data)
+migration-data/
