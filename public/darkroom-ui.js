@@ -250,6 +250,7 @@
       b.addEventListener('click', function () { renderGrid(opts.relPath); });
     } else {
       var th = b.querySelector('.dr-tile-thumb'); th.setAttribute('data-thumb', opts.id);
+      if (opts.edited) { var badge = document.createElement('span'); badge.className = 'dr-tile-edited'; badge.title = 'Has edits'; th.appendChild(badge); }
       if (thumbIO) thumbIO.observe(th); else fetch('/api/library/' + opts.id + '/thumb', { headers: authHeaders(), credentials: 'include' }).then(function (r) { return r.ok ? r.blob() : null; }).then(function (bl) { if (bl) th.style.backgroundImage = 'url("' + URL.createObjectURL(bl) + '")'; }).catch(function () {});
       b.addEventListener('click', function () { if (window.openLibraryFile) window.openLibraryFile(opts.id); setView('develop'); });
     }
@@ -274,7 +275,7 @@
         if (!data) return;
         if (data.parent !== null && data.parent !== undefined) wrap.appendChild(gridTile({ folder: true, name: '..', relPath: data.parent }));
         data.dirs.forEach(function (d) { wrap.appendChild(gridTile({ folder: true, name: d.name, relPath: d.relPath })); });
-        data.files.forEach(function (f) { wrap.appendChild(gridTile({ id: f.id, name: f.name })); });
+        data.files.forEach(function (f) { wrap.appendChild(gridTile({ id: f.id, name: f.name, edited: f.edited })); });
         if (!data.dirs.length && !data.files.length && (data.parent === null || data.parent === undefined)) el.querySelector('.dr-grid-wrap').innerHTML = '<div class="dr-grid-empty">Empty folder.</div>';
       })
       .catch(function () { el.innerHTML = '<div class="dr-grid-empty">Could not load library.</div>'; });
