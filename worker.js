@@ -69,7 +69,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 15;
+        this.CURRENT_SCHEMA_VERSION = 16;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -169,6 +169,18 @@ class D1Database {
                     console.log('Migration v15 completed successfully');
                 } catch (migrationError) {
                     console.error('Migration v15 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 16: Add photo library tables (NAS-backed editor)
+            if (fromVersion < 16) {
+                console.log('Running migration: Add photo library tables (v16)');
+                try {
+                    await this.migration_v16();
+                    await this.setSchemaVersion(16);
+                    console.log('Migration v16 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v16 failed:', migrationError);
                 }
             }
         } catch (error) {
@@ -1323,6 +1335,80 @@ class D1Database {
             console.error('Migration v15 failed:', error);
             throw error;
         }
+    }
+
+    async migration_v16() {
+        // Photo library catalog (files indexed from LIBRARY_DIR / NAS mount) and
+        // a proxy-cache registry. Originals live on disk; these tables only index.
+        await this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS library_files (
+                id TEXT PRIMARY KEY,
+                rel_path TEXT NOT NULL UNIQUE,
+                dir TEXT NOT NULL DEFAULT '',
+                filename TEXT NOT NULL,
+                ext TEXT,
+                format TEXT,                -- 'raw' | 'image'
+                size INTEGER,
+                mtime INTEGER,
+                width INTEGER,
+                height INTEGER,
+                camera_model TEXT,
+                lens TEXT,
+                iso TEXT,
+                aperture TEXT,
+                shutter_speed TEXT,
+                focal_length TEXT,
+                date_time TEXT,
+                lat REAL,
+                lon REAL,
+                location TEXT,
+                rating INTEGER DEFAULT 0,
+                indexed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `).run();
+        await this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_library_dir ON library_files(dir)`).run();
+        await this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS image_proxies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id TEXT NOT NULL,
+                kind TEXT NOT NULL,         -- 'thumb' | 'proxy'
+                proxy_path TEXT NOT NULL,
+                width INTEGER,
+                height INTEGER,
+                dirty INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `).run();
+        await this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_proxy_file ON image_proxies(file_id, kind)`).run();
+        console.log('Migration v16 completed: Added library_files + image_proxies tables');
+    }
+
+    // ---- Photo library helpers ----
+    async getLibraryFileById(id) {
+        return this.db.prepare('SELECT * FROM library_files WHERE id = ?').bind(id).first();
+    }
+    async getLibraryFilesInDir(dir) {
+        const r = await this.db.prepare(
+            'SELECT * FROM library_files WHERE dir = ? ORDER BY filename'
+        ).bind(dir || '').all();
+        return r.results || [];
+    }
+    async getLibrarySubdirs(dir) {
+        // Immediate child directories of `dir`, derived from indexed file paths.
+        const prefix = dir ? dir + '/' : '';
+        const r = await this.db.prepare('SELECT DISTINCT dir FROM library_files').all();
+        const set = new Set();
+        for (const row of (r.results || [])) {
+            const d = row.dir || '';
+            if (!d.startsWith(prefix) || d === dir) continue;
+            const rest = d.slice(prefix.length);
+            set.add(rest.split('/')[0]);
+        }
+        return [...set].sort();
+    }
+    async countLibraryFiles() {
+        const r = await this.db.prepare('SELECT COUNT(*) AS n FROM library_files').first();
+        return r ? r.n : 0;
     }
 
     // API Key Management Methods
@@ -4162,6 +4248,93 @@ app.post('/api/lightroom/upload-photo', authenticateApiKey, async (c) => {
     } catch (error) {
         console.error('Upload error:', error);
         return c.json({ error: 'Internal server error' }, 500);
+    }
+});
+
+// ============================================================================
+// Photo library API (NAS-backed editor). All routes are no-ops on Cloudflare
+// (c.env.LIBRARY/IMAGING are Node-only bindings injected by server-node.js).
+// ============================================================================
+function libraryUnavailable(c) {
+    return c.json({ error: 'Photo library not available on this deployment' }, 503);
+}
+
+// Browse a directory: immediate subfolders + files. ?dir= (relative, '' = root)
+app.get('/api/library/files', authenticateToken, async (c) => {
+    if (!c.env.LIBRARY?.enabled) return libraryUnavailable(c);
+    try {
+        const dir = (c.req.query('dir') || '').replace(/^\/+|\/+$/g, '');
+        const database = new D1Database(c.env.DB);
+        const [dirs, files] = await Promise.all([
+            database.getLibrarySubdirs(dir),
+            database.getLibraryFilesInDir(dir),
+        ]);
+        return c.json({
+            dir,
+            parent: dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : (dir ? '' : null),
+            dirs: dirs.map((name) => ({ name, relPath: dir ? `${dir}/${name}` : name })),
+            files: files.map((f) => ({
+                id: f.id, name: f.filename, relPath: f.rel_path, format: f.format,
+                ext: f.ext, width: f.width, height: f.height,
+            })),
+        });
+    } catch (e) {
+        console.error('library/files failed:', e);
+        return c.json({ error: 'Failed to list library' }, 500);
+    }
+});
+
+// Top-level directory listing + total count (for the catalog landing).
+app.get('/api/library/tree', authenticateToken, async (c) => {
+    if (!c.env.LIBRARY?.enabled) return libraryUnavailable(c);
+    try {
+        const database = new D1Database(c.env.DB);
+        const dirs = await database.getLibrarySubdirs('');
+        return c.json({ dirs, total: await database.countLibraryFiles() });
+    } catch (e) {
+        return c.json({ error: 'Failed to read library tree' }, 500);
+    }
+});
+
+app.get('/api/library/:id/meta', authenticateToken, async (c) => {
+    if (!c.env.LIBRARY?.enabled) return libraryUnavailable(c);
+    const database = new D1Database(c.env.DB);
+    const f = await database.getLibraryFileById(c.req.param('id'));
+    if (!f) return c.json({ error: 'File not found' }, 404);
+    return c.json(f);
+});
+
+async function serveLibraryImage(c, kind) {
+    if (!c.env.LIBRARY?.enabled || !c.env.IMAGING) return libraryUnavailable(c);
+    try {
+        const database = new D1Database(c.env.DB);
+        const f = await database.getLibraryFileById(c.req.param('id'));
+        if (!f) return c.json({ error: 'File not found' }, 404);
+        const abs = c.env.LIBRARY.absPath(f.rel_path);
+        const opts = { cacheId: f.id, mtimeMs: f.mtime, size: f.size };
+        const buf = kind === 'thumb'
+            ? await c.env.IMAGING.embeddedThumb(abs, { longEdge: 480 })
+            : await c.env.IMAGING.decodeProxy(abs, { ...opts, longEdge: 2048 });
+        if (!buf) return c.json({ error: 'Could not render image' }, 500);
+        return new Response(buf, {
+            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' },
+        });
+    } catch (e) {
+        console.error(`library/${kind} failed:`, e);
+        return c.json({ error: 'Failed to render image' }, 500);
+    }
+}
+app.get('/api/library/:id/thumb', authenticateToken, (c) => serveLibraryImage(c, 'thumb'));
+app.get('/api/library/:id/proxy', authenticateToken, (c) => serveLibraryImage(c, 'proxy'));
+
+app.post('/api/library/rescan', authenticateToken, async (c) => {
+    if (!c.env.LIBRARY?.enabled || !c.env.LIBRARY.rescan) return libraryUnavailable(c);
+    try {
+        const result = await c.env.LIBRARY.rescan();
+        return c.json({ success: true, ...result });
+    } catch (e) {
+        console.error('library/rescan failed:', e);
+        return c.json({ error: 'Rescan failed' }, 500);
     }
 });
 
