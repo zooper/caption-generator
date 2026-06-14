@@ -1971,8 +1971,18 @@ const app = new Hono();
 app.use('/*', cors());
 
 // JWT Configuration
-const JWT_SECRET = 'default-secret-change-this'; // In production, use environment variable
 const JWT_EXPIRES_IN = '7d';
+
+// Resolve the JWT signing secret from the environment. There is intentionally
+// no fallback: a missing secret must fail loudly rather than let anyone forge
+// tokens with a well-known default.
+function getJwtSecret(c) {
+    const secret = c.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error('JWT_SECRET is not configured');
+    }
+    return secret;
+}
 
 // Authentication middleware
 const authenticateToken = async (c, next) => {
@@ -1990,7 +2000,7 @@ const authenticateToken = async (c, next) => {
             return c.json({ error: 'Access token required' }, 401);
         }
 
-        const decoded = jwt.verify(token, c.env.JWT_SECRET || JWT_SECRET);
+        const decoded = jwt.verify(token, getJwtSecret(c));
         const database = new D1Database(c.env.DB);
         const session = await database.getSession(decoded.sessionId);
         
@@ -2580,12 +2590,14 @@ app.get('/auth/verify', async (c) => {
         await database.createSession(sessionId, user.id, sessionExpiresAt, ipAddress, userAgent);
 
         // Create JWT token
-        const jwtToken = jwt.sign({ sessionId }, c.env.JWT_SECRET || JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        const jwtToken = jwt.sign({ sessionId }, getJwtSecret(c), { expiresIn: JWT_EXPIRES_IN });
 
-        // Set secure cookie (httpOnly=false so JavaScript can access it for backup)
+        // Set secure cookie. The frontend authenticates via the Authorization
+        // header (token in localStorage from the response body), so the cookie
+        // can be httpOnly without breaking any flow.
         setCookie(c, 'auth_token', jwtToken, {
-            httpOnly: false,
-            secure: false, // Allow on HTTP for development/testing
+            httpOnly: true,
+            secure: true,
             maxAge: 7 * 24 * 60 * 60, // 7 days
             sameSite: 'Lax'
         });
@@ -2614,6 +2626,16 @@ app.get('/api/auth/me', authenticateToken, async (c) => {
     });
 });
 
+// Check registration status
+app.get('/api/auth/registration-status', async (c) => {
+    // For now, registration is always open
+    // You can add logic here to check environment variables or database settings
+    return c.json({
+        registrationOpen: true,
+        message: 'Registration is open'
+    });
+});
+
 // Logout endpoint - invalidate session
 app.post('/api/auth/logout', authenticateToken, async (c) => {
     try {
@@ -2624,10 +2646,10 @@ app.post('/api/auth/logout', authenticateToken, async (c) => {
         const stmt = database.db.prepare('DELETE FROM user_sessions WHERE session_id = ?');
         await stmt.bind(user.sessionId).run();
         
-        // Clear the cookie
+        // Clear the cookie (flags must match the cookie that was set)
         setCookie(c, 'auth_token', '', {
-            httpOnly: false,
-            secure: false,
+            httpOnly: true,
+            secure: true,
             maxAge: 0,
             expires: new Date(0),
             sameSite: 'Lax'
@@ -2692,9 +2714,10 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
             userName: user.email,
             userDisplayName: user.email,
             excludeCredentials: excludeCredentials,
+            timeout: 60000,  // 60 seconds timeout
             authenticatorSelection: {
                 residentKey: 'preferred',
-                userVerification: 'preferred'
+                userVerification: 'discouraged'
                 // Don't restrict to platform authenticators - allow security keys too
             }
         });
@@ -2735,7 +2758,8 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
             response: credential,
             expectedChallenge: challenge,
             expectedOrigin: origin,
-            expectedRPID: rpID
+            expectedRPID: rpID,
+            requireUserVerification: false  // Don't require user verification for Bitwarden compatibility
         });
 
         if (!verification.verified || !verification.registrationInfo) {
@@ -2819,24 +2843,13 @@ app.post('/api/auth/passkey/login-options', async (c) => {
         const origin = new URL(c.req.url).origin;
         const rpID = new URL(origin).hostname;
 
-        // Convert base64 credential IDs to Uint8Array
-        const allowCredentials = passkeys.map(passkey => {
-            const binaryString = atob(passkey.credential_id);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            return {
-                id: bytes,
-                type: 'public-key',
-                transports: passkey.transports || []
-            };
-        });
-
+        // Intentionally omit allowCredentials so the browser/authenticator can
+        // discover resident passkeys itself. This works better with password
+        // managers (e.g. Bitwarden) than restricting to specific credential IDs.
         const options = await generateAuthenticationOptions({
             rpID: rpID,
-            allowCredentials: allowCredentials,
-            userVerification: 'preferred'
+            userVerification: 'discouraged',
+            timeout: 60000  // 60 seconds timeout
         });
 
         // Challenge is already base64url encoded by generateAuthenticationOptions
@@ -2848,6 +2861,9 @@ app.post('/api/auth/passkey/login-options', async (c) => {
         });
     } catch (error) {
         console.error('Error generating authentication options:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
         return c.json({ error: 'Failed to generate authentication options' }, 500);
     }
 });
@@ -2904,7 +2920,8 @@ app.post('/api/auth/passkey/login-verify', async (c) => {
                 credentialID: credentialIdBytes,
                 credentialPublicKey: publicKeyBytes,
                 counter: passkey.counter
-            }
+            },
+            requireUserVerification: false  // Don't require user verification for Bitwarden compatibility
         });
 
         if (!verification.verified) {
@@ -2923,12 +2940,12 @@ app.post('/api/auth/passkey/login-verify', async (c) => {
         await database.createSession(sessionId, user.id, sessionExpiresAt, ipAddress, userAgent);
 
         // Create JWT token
-        const jwtToken = jwt.sign({ sessionId }, c.env.JWT_SECRET || JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        const jwtToken = jwt.sign({ sessionId }, getJwtSecret(c), { expiresIn: JWT_EXPIRES_IN });
 
         // Set secure cookie
         setCookie(c, 'auth_token', jwtToken, {
-            httpOnly: false,
-            secure: false,
+            httpOnly: true,
+            secure: true,
             maxAge: 7 * 24 * 60 * 60,
             sameSite: 'Lax'
         });
@@ -3061,12 +3078,12 @@ app.post('/api/auth/accept-invite', async (c) => {
         await database.createSession(sessionId, user.id, expiresAt, ipAddress, userAgent);
         
         // Create JWT token
-        const token = jwt.sign({ sessionId }, c.env.JWT_SECRET || JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        const token = jwt.sign({ sessionId }, getJwtSecret(c), { expiresIn: JWT_EXPIRES_IN });
         
         // Set auth cookie
         setCookie(c, 'auth_token', token, {
-            httpOnly: false,
-            secure: false,
+            httpOnly: true,
+            secure: true,
             maxAge: 7 * 24 * 60 * 60, // 7 days
             sameSite: 'Lax'
         });
