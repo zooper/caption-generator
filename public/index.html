@@ -6,6 +6,15 @@
     <title>AI Caption Studio</title>
     <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
     <link rel="stylesheet" href="darkroom.css">
+    <script>
+      /* apply the saved theme early (avoids a flash); defaults to dark */
+      (function () {
+        try {
+          var t = localStorage.getItem('selectedTheme') || localStorage.getItem('app_theme') || 'dark';
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
+    </script>
 </head>
 <body>
     <div class="container">
