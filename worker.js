@@ -1453,6 +1453,12 @@ class D1Database {
         const r = await this.db.prepare('SELECT COUNT(*) AS n FROM library_files').first();
         return r ? r.n : 0;
     }
+    async getAllLibraryDirs() {
+        const r = await this.db.prepare(
+            'SELECT dir, COUNT(*) AS n FROM library_files GROUP BY dir ORDER BY dir'
+        ).all();
+        return (r.results || []).map((row) => ({ dir: row.dir || '', count: row.n }));
+    }
 
     // API Key Management Methods
     async getUserApiKeys(userId) {
@@ -4327,12 +4333,13 @@ app.get('/api/library/files', authenticateToken, async (c) => {
     }
 });
 
-// Top-level directory listing + total count (for the catalog landing).
+// Full directory list (every folder that holds indexed files, with counts) so
+// the client can build a nested folder tree. Plus the total file count.
 app.get('/api/library/tree', authenticateToken, async (c) => {
     if (!c.env.LIBRARY?.enabled) return libraryUnavailable(c);
     try {
         const database = new D1Database(c.env.DB);
-        const dirs = await database.getLibrarySubdirs('');
+        const dirs = await database.getAllLibraryDirs();
         return c.json({ dirs, total: await database.countLibraryFiles() });
     } catch (e) {
         return c.json({ error: 'Failed to read library tree' }, 500);

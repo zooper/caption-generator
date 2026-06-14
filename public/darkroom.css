@@ -460,6 +460,22 @@ input, textarea, select { font-family: inherit; }
     overflow-y: auto;
 }
 
+/* Folder tree (left panel) */
+.dr-section-label { font-size: 10.5px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--dr-ink-3); padding: 0 4px; margin-bottom: 8px; }
+.dr-folders { padding: 14px; border-bottom: 1px solid var(--dr-line); flex: 1 1 auto; min-height: 90px; display: flex; flex-direction: column; }
+.dr-tree { flex: 1; min-height: 0; overflow-y: auto; }
+.dr-tree-empty { font-size: 12px; color: var(--dr-ink-4); padding: 4px; font-family: var(--dr-mono); }
+.dr-tree-row { display: flex; align-items: center; gap: 4px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--dr-ink-2); white-space: nowrap; transition: background .12s, color .12s; }
+.dr-tree-row:hover { background: var(--dr-elevated); color: var(--dr-ink); }
+.dr-tree-row.active { background: rgba(var(--dr-accent-rgb), .16); color: var(--dr-ink); }
+.dr-tree-caret { width: 14px; height: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--dr-ink-3); transition: transform .15s; }
+.dr-tree-caret.open { transform: rotate(90deg); }
+.dr-tree-caret.leaf { visibility: hidden; }
+.dr-tree-label { overflow: hidden; text-overflow: ellipsis; }
+.dr-tree-count { margin-left: auto; padding-left: 8px; font-family: var(--dr-mono); font-size: 10.5px; color: var(--dr-ink-4); }
+/* Folders is the main scroller; Style presets sits at natural height below it */
+.style-options { flex: 0 0 auto; }
+
 /* Preset dots + nav thumbnail + big center dropzone + weather checkbox */
 .dr-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 .dr-nav-thumb {
