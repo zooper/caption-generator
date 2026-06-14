@@ -231,6 +231,55 @@
   }
   window.drReloadCatalog = function () { loadCatalog(LIB.dir || ''); };
 
+  /* -------- module views (Library grid / Develop / Caption) -------- */
+  function setView(v) {
+    var mc = document.querySelector('.main-content'); if (!mc) return;
+    mc.setAttribute('data-view', v);
+    document.querySelectorAll('.dr-modtab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-view') === v); });
+    if (v === 'library') renderGrid(LIB.dir || '');
+  }
+  window.drSetView = setView;
+
+  function gridTile(opts) {
+    var b = document.createElement('button'); b.type = 'button';
+    b.className = 'dr-tile' + (opts.folder ? ' dr-tile-folder' : '');
+    b.innerHTML = '<div class="dr-tile-thumb"></div><span class="dr-tile-name"></span>';
+    b.querySelector('.dr-tile-name').textContent = opts.name;
+    if (opts.folder) {
+      b.querySelector('.dr-tile-thumb').innerHTML = '<svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+      b.addEventListener('click', function () { renderGrid(opts.relPath); });
+    } else {
+      var th = b.querySelector('.dr-tile-thumb'); th.setAttribute('data-thumb', opts.id);
+      if (thumbIO) thumbIO.observe(th); else fetch('/api/library/' + opts.id + '/thumb', { headers: authHeaders(), credentials: 'include' }).then(function (r) { return r.ok ? r.blob() : null; }).then(function (bl) { if (bl) th.style.backgroundImage = 'url("' + URL.createObjectURL(bl) + '")'; }).catch(function () {});
+      b.addEventListener('click', function () { if (window.openLibraryFile) window.openLibraryFile(opts.id); setView('develop'); });
+    }
+    return b;
+  }
+
+  function renderGrid(dir) {
+    var el = document.getElementById('libraryGrid'); if (!el) return;
+    LIB.dir = dir || '';
+    if (typeof renderTree === 'function') renderTree();
+    loadCatalog(LIB.dir); // keep the filmstrip in sync for when Develop opens
+    el.innerHTML = '<div class="dr-grid-crumb">' + (dir ? '/' + dir : '/') + '</div><div class="dr-grid-wrap" id="libraryGridWrap"></div>';
+    var wrap = document.getElementById('libraryGridWrap');
+    fetch('/api/library/files?dir=' + encodeURIComponent(dir || ''), { headers: authHeaders(), credentials: 'include' })
+      .then(function (r) {
+        if (r.status === 503) { el.innerHTML = '<div class="dr-grid-empty">Photo library is off. Set <code>LIBRARY_DIR</code> to browse a folder of photos, or switch to <b>Develop</b> to upload one.</div>'; return null; }
+        if (r.status === 401) { el.innerHTML = '<div class="dr-grid-empty">Sign in to browse your library.</div>'; return null; }
+        if (!r.ok) { el.innerHTML = '<div class="dr-grid-empty">Could not load library.</div>'; return null; }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (data.parent !== null && data.parent !== undefined) wrap.appendChild(gridTile({ folder: true, name: '..', relPath: data.parent }));
+        data.dirs.forEach(function (d) { wrap.appendChild(gridTile({ folder: true, name: d.name, relPath: d.relPath })); });
+        data.files.forEach(function (f) { wrap.appendChild(gridTile({ id: f.id, name: f.name })); });
+        if (!data.dirs.length && !data.files.length && (data.parent === null || data.parent === undefined)) el.querySelector('.dr-grid-wrap').innerHTML = '<div class="dr-grid-empty">Empty folder.</div>';
+      })
+      .catch(function () { el.innerHTML = '<div class="dr-grid-empty">Could not load library.</div>'; });
+  }
+
   /* -------- folder tree (left panel) -------- */
   var treeRoot = null;
   var treeExpanded = { '': true };
@@ -268,7 +317,11 @@
     cnt.className = 'dr-tree-count'; cnt.textContent = subtreeCount(node) || '';
     row.appendChild(caret); row.appendChild(label); row.appendChild(cnt);
     caret.addEventListener('click', function (e) { e.stopPropagation(); treeExpanded[node.path] = !treeExpanded[node.path]; renderTree(); });
-    row.addEventListener('click', function () { loadCatalog(node.path); });
+    row.addEventListener('click', function () {
+      var mc = document.querySelector('.main-content');
+      if (mc && mc.getAttribute('data-view') === 'library') renderGrid(node.path);
+      else loadCatalog(node.path);
+    });
     wrap.appendChild(row);
     if (kids.length && open) {
       kids.forEach(function (k) { wrap.appendChild(renderTreeNode(node.children[k], depth + 1)); });
@@ -296,8 +349,11 @@
     wireModules();
     wireSliders();
     wireImageMirror();
+    document.querySelectorAll('.dr-modtab').forEach(function (t) {
+      t.addEventListener('click', function () { setView(t.getAttribute('data-view')); });
+    });
     loadTree();
-    loadCatalog('');
+    setView('library'); // default to the catalog grid (also renders it)
     mirrorImage();
   });
 })();
