@@ -1,0 +1,14 @@
+# Caddy reverse proxy with automatic HTTPS for AI Caption Studio.
+# Install at /etc/caddy/Caddyfile (or import it) and `systemctl reload caddy`.
+# Caddy provisions and renews the TLS cert automatically — the public https
+# origin it serves must match PUBLIC_ORIGIN / RP_ID in .env.
+#
+# Requires: ports 80/443 reachable for ACME (public domain), or use Caddy's
+# internal CA / a DNS-01 challenge for a tailnet-only hostname.
+
+# Add this site to the central caddy (CT 114). The app runs on CT 153
+# (caption-studio) at 10.63.21.12:3000 on vmbr1.
+caption.linuxburken.se {
+	encode zstd gzip
+	reverse_proxy 10.63.21.12:3000
+}

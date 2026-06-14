@@ -1,0 +1,56 @@
+name: CI
+
+# Tests on every push/PR; on green main, deploys to the LXC over Tailscale SSH
+# (no SSH key secrets). Pattern: jonsson-labs/documentation ci-cd-deployment.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: npm }
+      - run: npm ci
+      # No build/test suite (vanilla JS app); gate on syntax of the runtime code.
+      - run: node --check worker.js
+      - run: node --check server-node.js
+      - run: node --check bindings/d1-sqlite.js
+      - run: node --check bindings/r2-fs.js
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest          # NOT a container — needs tailnet egress
+    concurrency: { group: deploy-caption-studio, cancel-in-progress: true }
+    env:
+      DEPLOY_TARGET: deploy@caption-studio.tailed6e7.ts.net   # CT 153, tag:server
+      APPDIR: /opt/caption-studio
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ship code and restart over Tailscale SSH
+        run: |
+          SSH="ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
+
+          # Code only — .env, data/, and node_modules live on the host and are
+          # never in this tarball, so runtime state survives every deploy.
+          tar czf - \
+            worker.js server-node.js bindings public schema.sql \
+            package.json package-lock.json \
+            | $SSH "$DEPLOY_TARGET" "tar xzf - -C $APPDIR"
+
+          $SSH "$DEPLOY_TARGET" "
+            set -e
+            cd $APPDIR
+            npm install --omit=dev --no-audit --no-fund
+            sudo systemctl restart caption-studio
+            sleep 3
+            if [ \"\$(sudo systemctl is-active caption-studio)\" = active ]; then
+              echo 'Deploy OK'
+            else
+              echo 'service failed to start:'; sudo journalctl -u caption-studio -n 40 --no-pager; exit 1
+            fi"

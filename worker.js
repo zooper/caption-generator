@@ -1984,6 +1984,18 @@ function getJwtSecret(c) {
     return secret;
 }
 
+// Public-facing origin and WebAuthn RP ID. On Cloudflare these are derived from
+// the request URL; when self-hosted behind a reverse proxy the request URL may
+// not reflect the public https origin, so PUBLIC_ORIGIN / RP_ID can override.
+// Passkeys are bound to RP_ID, so it must match the user-facing hostname.
+function getPublicOrigin(c) {
+    return (c.env && c.env.PUBLIC_ORIGIN) ? c.env.PUBLIC_ORIGIN : new URL(c.req.url).origin;
+}
+function getRpId(c) {
+    if (c.env && c.env.RP_ID) return c.env.RP_ID;
+    return new URL(getPublicOrigin(c)).hostname;
+}
+
 // Authentication middleware
 const authenticateToken = async (c, next) => {
     try {
@@ -2510,7 +2522,7 @@ app.post('/api/auth/request-login', async (c) => {
         await database.createLoginToken(email, token, expiresAt, ipAddress, userAgent);
 
         // Create magic link
-        const loginUrl = `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+        const loginUrl = `${getPublicOrigin(c)}/auth/verify?token=${token}`;
         
         // Send email using Resend
         try {
@@ -2676,8 +2688,8 @@ app.post('/api/auth/passkey/register-options', authenticateToken, async (c) => {
         console.log('📱 User has', existingPasskeys.length, 'existing passkeys');
 
         // Get RP (Relying Party) information from request
-        const origin = new URL(c.req.url).origin;
-        const rpID = new URL(origin).hostname;
+        const origin = getPublicOrigin(c);
+        const rpID = getRpId(c);
 
         console.log('🌐 RP Origin:', origin, 'RP ID:', rpID);
 
@@ -2749,8 +2761,8 @@ app.post('/api/auth/passkey/register-verify', authenticateToken, async (c) => {
 
         console.log('🔐 Verifying passkey registration for user:', user.email);
 
-        const origin = new URL(c.req.url).origin;
-        const rpID = new URL(origin).hostname;
+        const origin = getPublicOrigin(c);
+        const rpID = getRpId(c);
 
         // The challenge is already in base64url format from generateRegistrationOptions
         // verifyRegistrationResponse expects a string
@@ -2840,8 +2852,8 @@ app.post('/api/auth/passkey/login-options', async (c) => {
             return c.json({ error: 'No passkeys registered for this account' }, 400);
         }
 
-        const origin = new URL(c.req.url).origin;
-        const rpID = new URL(origin).hostname;
+        const origin = getPublicOrigin(c);
+        const rpID = getRpId(c);
 
         // Intentionally omit allowCredentials so the browser/authenticator can
         // discover resident passkeys itself. This works better with password
@@ -2893,8 +2905,8 @@ app.post('/api/auth/passkey/login-verify', async (c) => {
             return c.json({ error: 'Invalid passkey' }, 401);
         }
 
-        const origin = new URL(c.req.url).origin;
-        const rpID = new URL(origin).hostname;
+        const origin = getPublicOrigin(c);
+        const rpID = getRpId(c);
 
         // Convert base64 stored credentials to Uint8Array for verification
         const binaryCredentialId = atob(passkey.credential_id);
@@ -3436,7 +3448,7 @@ app.post('/api/admin/invite', authenticateToken, requireAdmin, async (c) => {
         await database.createInviteToken(email, user.id, token, expiresAt, tierId, personalMessage);
 
         // Create invite link
-        const inviteUrl = `${new URL(c.req.url).origin}/auth?invite=${token}&email=${encodeURIComponent(email)}`;
+        const inviteUrl = `${getPublicOrigin(c)}/auth?invite=${token}&email=${encodeURIComponent(email)}`;
 
         // Build personal message section for email
         const personalMessageHtml = personalMessage ? 
@@ -7940,6 +7952,11 @@ async function handleInstagramTokenRefresh(env) {
 }
 
 // Export the main app and the scheduled event handler
+// Named exports so non-Cloudflare runtimes (server-node.js) can attach static
+// file serving, reuse the same Hono app instance, and run schema migrations at
+// startup (D1Database.ensureInitialized) rather than lazily per-request.
+export { app, D1Database };
+
 export default {
     fetch: app.fetch,
     scheduled: async (event, env, ctx) => {
