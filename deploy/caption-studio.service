@@ -1,0 +1,24 @@
+# systemd unit for AI Caption Studio. Install at /etc/systemd/system/caption-studio.service
+#   systemctl daemon-reload && systemctl enable --now caption-studio
+# Adjust ExecStart to the absolute node path on the host (`which node`).
+[Unit]
+Description=AI Caption Studio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/caption-studio
+EnvironmentFile=/opt/caption-studio/.env
+ExecStart=/usr/bin/node server-node.js
+Restart=on-failure
+RestartSec=3
+# Runs as root so it can read the root-owned .env (matches the deploy model:
+# the unprivileged `deploy` user ships code but never reads secrets). To harden,
+# switch to a dedicated user and make .env group-readable by it.
+User=root
+# Persistent state lives under DATA_DIR (default /opt/caption-studio/data) and
+# is never shipped by the deploy, so it survives restarts and code updates.
+
+[Install]
+WantedBy=multi-user.target

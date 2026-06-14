@@ -68,3 +68,6 @@ set-secrets-with-values.sh
 # Plugin downloads (stored in R2 instead)
 public/AI Caption Studio Export Plugin.zip
 *.zip
+
+# Self-hosted runtime state
+data/
