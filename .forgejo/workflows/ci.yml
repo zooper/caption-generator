@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest          # NOT a container — needs tailnet egress
     concurrency: { group: deploy-caption-studio, cancel-in-progress: true }
     env:
-      DEPLOY_TARGET: deploy@caption-studio   # <-- set to your target's MagicDNS name / tailnet IP
+      DEPLOY_TARGET: deploy@caption-studio.tailed6e7.ts.net   # CT 153, tag:server
       APPDIR: /opt/caption-studio
     steps:
       - uses: actions/checkout@v4

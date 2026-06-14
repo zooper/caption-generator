@@ -6,7 +6,9 @@
 # Requires: ports 80/443 reachable for ACME (public domain), or use Caddy's
 # internal CA / a DNS-01 challenge for a tailnet-only hostname.
 
-captions.example.com {
+# Add this site to the central caddy (CT 114). The app runs on CT 153
+# (caption-studio) at 10.63.21.12:3000 on vmbr1.
+caption.linuxburken.se {
 	encode zstd gzip
-	reverse_proxy localhost:3000
+	reverse_proxy 10.63.21.12:3000
 }
