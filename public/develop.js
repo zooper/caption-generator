@@ -44,7 +44,7 @@
     'uniform float bw,bwRed,bwOrange,bwYellow,bwGreen,bwAqua,bwBlue,bwPurple,bwMagenta;',
     'uniform float ssHue,ssSat,shHue,shSat;',
     'uniform vec4 uCrop; uniform float uStraighten,uRot,uInAspect; uniform vec2 uFlip;',
-    'const vec3 LUM=vec3(0.299,0.587,0.114);',
+    'const vec3 LUM=vec3(0.2126,0.7152,0.0722);',  // Rec.709 luma
     'vec2 rot2(vec2 c,float a){ float s=sin(a),co=cos(a); return mat2(co,-s,s,co)*c; }',
     'vec2 srcUV(vec2 uv){',
     '  vec2 p = uCrop.xy + uv*uCrop.zw;',           // into the (possibly rotated) frame
@@ -62,10 +62,11 @@
     '  c = pow(pow(c,vec3(2.2))*pow(2.0,exposure*0.02),vec3(1.0/2.2));',  // exposure
     '  c.r += temp*0.0016; c.b -= temp*0.0016;',
     '  c.r -= tint*0.0006; c.g += tint*0.0012; c.b -= tint*0.0006;',
-    '  float bp=blacks*0.0012, wp=1.0+whites*0.0016; c=(c-bp)/max(0.0001,(wp-bp));',
+    '  float bp=blacks*0.0012, wp=max(1.0+whites*0.0016, bp+0.05); c=(c-bp)/(wp-bp);',  // guard: wp>bp so this can never blow up
     '  float l=dot(clamp(c,0.0,1.0),LUM);',
     '  c += shadows*0.0016*(1.0-smoothstep(0.0,0.5,l)) + highlights*0.0016*smoothstep(0.5,1.0,l);',
     '  c = (c-0.5)*(1.0+contrast*0.01)+0.5;',
+    '  c = clamp(c,0.0,1.0);',  // settle to display range before colour grading so saturation/hue/split-tone work on sane values
     '  if(bw>0.5){',
     '    float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b)); float s=mx<=0.0?0.0:(mx-mn)/mx; float h=hueOf(c);',
     '    float g=dot(clamp(c,0.0,1.0),LUM);',
@@ -97,15 +98,16 @@
   var FRAGFINAL = [
     'precision highp float; varying vec2 v_uv;',
     'uniform sampler2D u_base; uniform sampler2D u_blur;',
-    'uniform float clarity,texture_,sharpen,grain,grainSize,vignette,seed;',
-    'const vec3 LUM=vec3(0.299,0.587,0.114);',
+    'uniform float clarity,texture_,sharpen,grain,grainSize,vignette,seed,uAspect;',
+    'const vec3 LUM=vec3(0.2126,0.7152,0.0722);',  // Rec.709 luma
     'float rnd(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }',
     'void main(){',
     '  vec3 base=texture2D(u_base,v_uv).rgb; vec3 blur=texture2D(u_blur,v_uv).rgb;',
     '  vec3 detail=base-blur;',
     '  vec3 c = base + detail*(clarity*0.012) + detail*(texture_*0.010) + detail*(sharpen*0.02);',
+    '  c = clamp(c,0.0,1.0);',  // clamp detail boost before grain/vignette so noise + darkening act on display-range signal
     '  if(grain>0.0){ float n=rnd(v_uv*grainSize*6.0+seed)-0.5; c += n*(grain*0.0032); }',
-    '  if(abs(vignette)>0.0){ float d=distance(v_uv,vec2(0.5))*1.41421; c *= 1.0 - (vignette*0.006)*smoothstep(0.35,1.0,d); }',
+    '  if(abs(vignette)>0.0){ vec2 q=(v_uv-0.5)*vec2(uAspect,1.0); float d=length(q)/(0.5*sqrt(uAspect*uAspect+1.0)); c *= 1.0 - (vignette*0.006)*smoothstep(0.35,1.0,d); }',  // aspect-correct: circular in pixels, reaches all corners evenly
     '  gl_FragColor=vec4(clamp(c,0.0,1.0),1.0);',
     '}',
   ].join('\n');
@@ -192,6 +194,7 @@
     gl.uniform1f(u(progFinal, 'sharpen'), adj.sharpen); gl.uniform1f(u(progFinal, 'grain'), adj.grain);
     gl.uniform1f(u(progFinal, 'grainSize'), adj.grainSize); gl.uniform1f(u(progFinal, 'vignette'), adj.vignette);
     gl.uniform1f(u(progFinal, 'seed'), seed);
+    gl.uniform1f(u(progFinal, 'uAspect'), W / H);
     drawQuad();
     schedulePush();
   }
