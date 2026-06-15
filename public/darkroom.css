@@ -524,6 +524,14 @@ input, textarea, select { font-family: inherit; }
 .dr-switch.on > span { transform: translateX(18px); }
 .dr-curve-wrap { background: var(--dr-input); border: 1px solid var(--dr-line); border-radius: 8px; padding: 6px; }
 .dr-curve { display: block; width: 100%; height: auto; cursor: crosshair; }
+/* Histogram + clipping (#39) */
+.dr-histo-wrap { margin: 0 0 14px; }
+.dr-histo { display: block; width: 100%; height: auto; background: var(--dr-input); border: 1px solid var(--dr-line); border-radius: 8px; }
+.dr-histo-row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; min-height: 22px; }
+.dr-histo-stat { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--dr-ink-3, var(--dr-ink)); letter-spacing: .02em; }
+.dr-clip-toggle { font-size: 11px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--dr-line-2); background: var(--dr-elevated); color: var(--dr-ink-3, var(--dr-ink)); cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.dr-clip-toggle:hover { color: var(--dr-ink); border-color: var(--dr-accent); }
+.dr-clip-toggle.active { background: var(--dr-accent); border-color: var(--dr-accent); color: #fff; }
 /* Foldable develop sections */
 .dr-sub { border-top: 1px solid var(--dr-line); }
 .dr-sub:first-of-type { border-top: none; }

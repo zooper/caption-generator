@@ -192,6 +192,15 @@
                         <button type="button" id="devReset" class="dr-reset" title="Reset all adjustments">Reset</button>
                     </button>
                     <div class="dr-module-body" id="developBody">
+                        <!-- Histogram + clipping warnings (#39) -->
+                        <div class="dr-histo-wrap">
+                            <canvas id="devHisto" class="dr-histo" width="252" height="84" aria-label="Histogram"></canvas>
+                            <div class="dr-histo-row">
+                                <span class="dr-histo-stat" id="devClipStat"></span>
+                                <button type="button" id="devClipToggle" class="dr-clip-toggle" title="Show clipped highlights/shadows (J)">Clipping</button>
+                            </div>
+                        </div>
+
                         <!-- Presets row (populated by develop.js) -->
                         <div class="dr-presets" id="devPresets"></div>
 
