@@ -364,6 +364,10 @@
     if (bwBtn) bwBtn.addEventListener('click', function () { adj.bw = adj.bw ? 0 : 1; syncControls(); render(); });
     var reset = document.getElementById('devReset');
     if (reset) reset.addEventListener('click', function (e) { e.stopPropagation(); api.reset(); });
+    // foldable develop sections
+    document.querySelectorAll('#developBody .dr-subhead').forEach(function (h) {
+      h.addEventListener('click', function () { h.parentElement.classList.toggle('collapsed'); });
+    });
     initCurveWidget();
   }
 
@@ -426,8 +430,9 @@
     });
 
     function enterCrop() {
-      cropMode = true; pendCrop = [adj.cropX || 0, adj.cropY || 0, adj.cropW || 1, adj.cropH || 1];
-      if (pendCrop[2] >= 0.999 && pendCrop[3] >= 0.999) pendCrop = [0.06, 0.06, 0.88, 0.88];
+      cropMode = true;
+      // start from the current crop (the full frame when uncropped), so "Free" begins uncropped
+      pendCrop = [adj.cropX || 0, adj.cropY || 0, adj.cropW || 1, adj.cropH || 1];
       document.getElementById('devCropToggle').classList.add('on');
       overlay.classList.remove('hidden'); sizeCanvas(); render(); setTimeout(positionBox, 40);
     }
