@@ -130,21 +130,34 @@ export class Imaging {
 
     get enabled() { return true; }
 
-    // Fast path for grid thumbnails: the camera's embedded JPEG preview (full-res
-    // in RAW, extracted by parsing the TIFF/DNG in ~tens of ms — NOT a darktable
-    // demosaic). Falls back to exifr's small thumbnail, then darktable.
-    async embeddedThumb(absPath, { longEdge = 480 } = {}) {
+    // Grid thumbnail from the camera's embedded JPEG preview. Cached persistently
+    // on disk (PROXY_DIR/thumbs/, keyed by id+mtime+size) so the library grid
+    // never has to rebuild thumbnails — they're generated once per file and live
+    // in their own subdir, untouched by the proxy-cache eviction.
+    _thumbCachePath(cacheId, mtimeMs, size, longEdge) {
+        if (!this.proxyDir || !cacheId) return null;
+        return path.join(this.proxyDir, 'thumbs', `${String(cacheId).replace(/[^\w-]/g, '')}_${mtimeMs}_${size}_${longEdge}.jpg`);
+    }
+    async embeddedThumb(absPath, { longEdge = 480, cacheId, mtimeMs = 0, size = 0 } = {}) {
+        const cachePath = this._thumbCachePath(cacheId, mtimeMs, size, longEdge);
+        if (cachePath) { try { return await fs.readFile(cachePath); } catch { /* miss */ } }
+
+        let out = null;
         const src = await this._previewJpeg(absPath);
         if (src) {
             try {
                 let pipe = sharp(src.buf, { failOn: 'none' });
                 pipe = src.ori ? applyOrientation(pipe, src.ori) : pipe.rotate(); // RAW: explicit; else auto-from-EXIF
-                return await pipe.resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
+                out = await pipe.resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
                     .jpeg({ quality: 80 }).toBuffer();
             } catch { /* fall through */ }
         }
-        if (isRaw(absPath)) return this.decodeProxy(absPath, { longEdge });
-        return null;
+        if (!out && isRaw(absPath)) out = await this.decodeProxy(absPath, { longEdge });
+        if (out && cachePath) {
+            await fs.mkdir(path.dirname(cachePath), { recursive: true }).catch(() => {});
+            await fs.writeFile(cachePath, out).catch(() => {});
+        }
+        return out;
     }
 
     // Source to develop from + how to orient it: embedded preview for RAW (with

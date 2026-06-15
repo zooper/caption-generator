@@ -4413,14 +4413,14 @@ async function serveLibraryImage(c, kind) {
         if (kind === 'thumb') {
             // prefer the edited thumbnail (reflects the develop) when present
             const et = await c.env.IMAGING.getEditedThumb(f.id);
-            if (et) { buf = et; edited = true; } else { buf = await c.env.IMAGING.embeddedThumb(abs, { longEdge: 480 }); }
+            if (et) { buf = et; edited = true; } else { buf = await c.env.IMAGING.embeddedThumb(abs, { ...opts, longEdge: 480 }); }
         } else {
             buf = await c.env.IMAGING.decodeProxy(abs, { ...opts, longEdge: 2048 });
         }
         if (!buf) return c.json({ error: 'Could not render image' }, 500);
         // edited thumbnails change as the user develops, so don't let them cache stale
         return new Response(buf, {
-            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': edited ? 'private, no-cache' : 'private, max-age=86400' },
+            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': edited ? 'private, no-cache' : 'private, max-age=604800' },
         });
     } catch (e) {
         console.error(`library/${kind} failed:`, e);
