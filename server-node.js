@@ -18,7 +18,7 @@ import worker, { app, D1Database } from './worker.js';
 import { D1SQLite } from './bindings/d1-sqlite.js';
 import { R2FS } from './bindings/r2-fs.js';
 import { LibraryFS, scanLibrary } from './bindings/library-fs.js';
-import { Imaging } from './bindings/imaging.js';
+import { Imaging, warmLibrary } from './bindings/imaging.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,6 +50,7 @@ const LIBRARY_DIR = process.env.LIBRARY_DIR || '';
 const PROXY_DIR = process.env.PROXY_DIR || path.join(DATA_DIR, 'proxies');
 const EXPORT_DIR = process.env.EXPORT_DIR || path.join(DATA_DIR, 'exports');
 const DARKTABLE_BIN = process.env.DARKTABLE_BIN || 'darktable-cli';
+const DCRAW_EMU_BIN = process.env.DCRAW_EMU_BIN || 'dcraw_emu'; // libraw fast colour demosaic (libraw-bin)
 
 if (!process.env.JWT_SECRET) {
     console.error('FATAL: JWT_SECRET is not set. Refusing to start. Add it to your .env.');
@@ -59,7 +60,7 @@ if (!process.env.JWT_SECRET) {
 const DB = new D1SQLite(DB_PATH);
 const R2_BUCKET = new R2FS(IMAGES_DIR);
 const LIBRARY = new LibraryFS(LIBRARY_DIR);
-const IMAGING = new Imaging({ proxyDir: PROXY_DIR, exportDir: EXPORT_DIR, darktableBin: DARKTABLE_BIN });
+const IMAGING = new Imaging({ proxyDir: PROXY_DIR, exportDir: EXPORT_DIR, darktableBin: DARKTABLE_BIN, dcrawEmuBin: DCRAW_EMU_BIN });
 
 await bootstrapDatabase(DB);
 
@@ -70,11 +71,15 @@ const ENV = { ...process.env, DB, R2_BUCKET, LIBRARY, IMAGING };
 // Index the photo library on startup, then periodically. `rescan` is exposed on
 // the binding so the POST /api/library/rescan route can trigger it on demand.
 if (LIBRARY.enabled) {
+    // Pre-generate grid thumbnails in the background after each scan so browsing
+    // is instant; idempotent, so it only fills gaps for new/changed files.
+    const warm = () => warmLibrary(LIBRARY, DB, IMAGING, { log: (m) => console.log(m) })
+        .catch((e) => console.error('Thumbnail warm failed:', e));
     LIBRARY.rescan = () => scanLibrary(LIBRARY, DB, { log: (m) => console.log(m) });
-    LIBRARY.rescan().catch((e) => console.error('Initial library scan failed:', e));
+    LIBRARY.rescan().then(warm).catch((e) => console.error('Initial library scan failed:', e));
     const everyMin = Number(process.env.LIBRARY_RESCAN_MINUTES || 10);
     if (everyMin > 0) {
-        setInterval(() => LIBRARY.rescan().catch((e) => console.error('Library rescan failed:', e)),
+        setInterval(() => LIBRARY.rescan().then(warm).catch((e) => console.error('Library rescan failed:', e)),
             everyMin * 60 * 1000).unref();
     }
     // Keep the proxy cache bounded.

@@ -15,6 +15,15 @@ mkdir -p "$APPDIR" "$APPDIR/data"
 # sudo — needed so the deploy user can restart the root-owned service
 command -v sudo >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo; }
 
+# Imaging tools for the photo library / develop module:
+#   darktable-cli  — high-quality raw demosaic (export)
+#   libraw-bin     — dcraw_emu, fast half-size colour demosaic for thumbnails/proxies
+#                    (~30x faster than darktable; required for snappy smart previews)
+for pkg_bin in "darktable:darktable-cli" "libraw-bin:dcraw_emu"; do
+  pkg="${pkg_bin%%:*}"; bin="${pkg_bin##*:}"
+  command -v "$bin" >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg"; }
+done
+
 # deploy user — adopt the uid that already owns the code dir (if free) so it can
 # write in place without a chown sweep
 if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
