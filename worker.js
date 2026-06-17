@@ -208,6 +208,18 @@ class D1Database {
                     console.error('Migration v18 failed:', migrationError);
                 }
             }
+
+            // Migration to version 19: Develop edit history (undo/redo + History panel)
+            if (fromVersion < 19) {
+                console.log('Running migration: Add edit_history table (v19)');
+                try {
+                    await this.migration_v19();
+                    await this.setSchemaVersion(19);
+                    console.log('Migration v19 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v19 failed:', migrationError);
+                }
+            }
         } catch (error) {
             console.error('Migration failed:', error);
         }
@@ -1440,6 +1452,95 @@ class D1Database {
     }
     async deleteEditStack(fileId, userId) {
         await this.db.prepare('DELETE FROM edit_stacks WHERE file_id = ? AND user_id = ?').bind(fileId, userId).run();
+        await this.db.prepare('DELETE FROM edit_history WHERE file_id = ? AND user_id = ?').bind(fileId, userId).run();
+    }
+
+    async migration_v19() {
+        // Develop edit history: an ordered list of adjustment snapshots per file+
+        // user (LR-style History panel + undo/redo). edit_stacks holds the current
+        // HEAD; head_seq points at which history step HEAD reflects.
+        await this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS edit_history (
+                file_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                seq INTEGER NOT NULL,
+                adjustments TEXT NOT NULL,
+                label TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (file_id, user_id, seq)
+            )
+        `).run();
+        try { await this.db.prepare('ALTER TABLE edit_stacks ADD COLUMN head_seq INTEGER').run(); }
+        catch (e) { /* column already exists */ }
+        console.log('Migration v19 completed: Added edit_history table');
+    }
+
+    // Full history for a file: { head, steps:[{seq,label,created_at,adjustments}] }.
+    async getEditHistory(fileId, userId) {
+        const rows = await this.db.prepare(
+            'SELECT seq, label, created_at, adjustments FROM edit_history WHERE file_id = ? AND user_id = ? ORDER BY seq ASC'
+        ).bind(fileId, userId).all().catch(() => ({ results: [] }));
+        const steps = (rows.results || []).map((r) => {
+            let adj = null; try { adj = JSON.parse(r.adjustments); } catch { /* skip */ }
+            return { seq: r.seq, label: r.label || 'Edit', created_at: r.created_at, adjustments: adj };
+        });
+        const headRow = await this.db.prepare(
+            'SELECT head_seq FROM edit_stacks WHERE file_id = ? AND user_id = ?'
+        ).bind(fileId, userId).first().catch(() => null);
+        const head = headRow && headRow.head_seq != null
+            ? headRow.head_seq
+            : (steps.length ? steps[steps.length - 1].seq : -1);
+        return { head, steps };
+    }
+
+    // Append a new step after baseSeq, truncating any redo tail beyond it, and
+    // point HEAD at it. Keeps the last 100 steps. Returns the fresh history.
+    async appendEditHistory(fileId, userId, adjustments, label, baseSeq) {
+        let base = (baseSeq == null || baseSeq < -1) ? -1 : baseSeq;
+        // Drop any redo tail beyond the base.
+        await this.db.prepare('DELETE FROM edit_history WHERE file_id = ? AND user_id = ? AND seq > ?')
+            .bind(fileId, userId, base).run();
+        // Seed an "Original" baseline (the unedited raw, empty adjustments) as the
+        // first step so undo can always return to it.
+        if (base === -1) {
+            await this.db.prepare(
+                'INSERT INTO edit_history (file_id, user_id, seq, adjustments, label, created_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)'
+            ).bind(fileId, userId, 0, '{}', 'Original').run();
+            base = 0;
+        }
+        const newSeq = base + 1;
+        const adjJson = JSON.stringify(adjustments || {});
+        await this.db.prepare(
+            'INSERT INTO edit_history (file_id, user_id, seq, adjustments, label, created_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)'
+        ).bind(fileId, userId, newSeq, adjJson, label || 'Edit').run();
+        // HEAD mirrors the new step.
+        await this.db.prepare(`
+            INSERT INTO edit_stacks (file_id, user_id, adjustments, head_seq, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(file_id, user_id) DO UPDATE SET
+                adjustments = excluded.adjustments, head_seq = excluded.head_seq, updated_at = CURRENT_TIMESTAMP
+        `).bind(fileId, userId, adjJson, newSeq).run();
+        // Cap history length.
+        await this.db.prepare(
+            'DELETE FROM edit_history WHERE file_id = ? AND user_id = ? AND seq <= ?'
+        ).bind(fileId, userId, newSeq - 100).run();
+        return this.getEditHistory(fileId, userId);
+    }
+
+    // Move HEAD to an existing step (undo/redo/jump) and sync edit_stacks to it.
+    // Returns the adjustments at that step, or null if the step is gone.
+    async setEditHistoryHead(fileId, userId, seq) {
+        const row = await this.db.prepare(
+            'SELECT adjustments FROM edit_history WHERE file_id = ? AND user_id = ? AND seq = ?'
+        ).bind(fileId, userId, seq).first();
+        if (!row) return null;
+        await this.db.prepare(`
+            INSERT INTO edit_stacks (file_id, user_id, adjustments, head_seq, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(file_id, user_id) DO UPDATE SET
+                adjustments = excluded.adjustments, head_seq = excluded.head_seq, updated_at = CURRENT_TIMESTAMP
+        `).bind(fileId, userId, row.adjustments, seq).run();
+        try { return JSON.parse(row.adjustments); } catch { return null; }
     }
 
     async migration_v18() {
@@ -4539,6 +4640,43 @@ app.delete('/api/library/:id/edits', authenticateToken, async (c) => {
         return c.json({ success: true });
     } catch (e) {
         return c.json({ error: 'Failed to reset edits' }, 500);
+    }
+});
+
+// Develop edit history (undo/redo + History panel).
+app.get('/api/library/:id/history', authenticateToken, async (c) => {
+    try {
+        const database = new D1Database(c.env.DB);
+        return c.json(await database.getEditHistory(c.req.param('id'), c.get('user').id));
+    } catch (e) {
+        return c.json({ error: 'Failed to load history' }, 500);
+    }
+});
+// Append a new step (truncating any redo tail after baseSeq) and move HEAD to it.
+app.post('/api/library/:id/history', authenticateToken, async (c) => {
+    try {
+        const { adjustments, label, baseSeq } = await c.req.json();
+        const id = c.req.param('id');
+        const database = new D1Database(c.env.DB);
+        const history = await database.appendEditHistory(id, c.get('user').id, adjustments, label, baseSeq);
+        await writeEditSidecar(c, database, id, adjustments); // keep the sidecar in sync with HEAD
+        return c.json(history);
+    } catch (e) {
+        return c.json({ error: 'Failed to append history' }, 500);
+    }
+});
+// Move HEAD to an existing step (undo/redo/jump); returns that step's adjustments.
+app.put('/api/library/:id/history/head', authenticateToken, async (c) => {
+    try {
+        const { seq } = await c.req.json();
+        const id = c.req.param('id');
+        const database = new D1Database(c.env.DB);
+        const adjustments = await database.setEditHistoryHead(id, c.get('user').id, seq);
+        if (adjustments === null) return c.json({ error: 'No such history step' }, 404);
+        await writeEditSidecar(c, database, id, adjustments);
+        return c.json({ head: seq, adjustments });
+    } catch (e) {
+        return c.json({ error: 'Failed to move history head' }, 500);
     }
 });
 // Store the edited thumbnail (client canvas JPEG) so the grid shows the develop.

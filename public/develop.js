@@ -116,6 +116,17 @@
   var adj = defaults();
   var prog1, progBlur, progFinal, srcTex, lutTex, fboA, fboB, fboC, quad;
   var pushTimer = null, saveTimer = null, seed = 0.137, cropMode = false, pendCrop = null, exporting = false;
+  var history = [], headSeq = -1, lastLabel = 'Adjust';  // edit history (undo/redo + History panel)
+
+  // Pretty label for a history step, from the control that changed.
+  var ADJ_LABELS = {
+    exposure: 'Exposure', contrast: 'Contrast', highlights: 'Highlights', shadows: 'Shadows',
+    whites: 'Whites', blacks: 'Blacks', temp: 'Temp', tint: 'Tint', vibrance: 'Vibrance',
+    saturation: 'Saturation', clarity: 'Clarity', texture: 'Texture', sharpen: 'Sharpen',
+    grain: 'Grain', grainSize: 'Grain Size', vignette: 'Vignette', straighten: 'Straighten',
+    splitShadowHue: 'Split Tone', splitShadowSat: 'Split Tone', splitHighlightHue: 'Split Tone', splitHighlightSat: 'Split Tone',
+  };
+  function labelFor(k) { return (k && k.indexOf('bw') === 0) ? 'B&W Mix' : (ADJ_LABELS[k] || 'Adjust'); }
 
   function sh(type, src) { var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error('develop shader:', gl.getShaderInfoLog(s), src); return null; } return s; }
   function prog(fs) { var v = sh(gl.VERTEX_SHADER, VERT), f = sh(gl.FRAGMENT_SHADER, fs); if (!v || !f) return null; var p = gl.createProgram(); gl.attachShader(p, v); gl.attachShader(p, f); gl.bindAttribLocation(p, 0, 'p'); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { console.error('develop link:', gl.getProgramInfoLog(p)); return null; } return p; }
@@ -237,7 +248,13 @@
     if (exporting) return; // don't push transient high-res export frames
     clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { try { if (window.setEditedImage) window.setEditedImage(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]); } catch (e) {} }, 220);
-    if (fileId) { clearTimeout(saveTimer); saveTimer = setTimeout(saveEdits, 600); }
+  }
+  // Record a history step for a USER edit (debounced; rapid moves coalesce under
+  // one label). Programmatic renders (load, undo/redo, jump) never call this.
+  function scheduleSave(label) {
+    if (!fileId) return;
+    if (label) lastLabel = label;
+    clearTimeout(saveTimer); saveTimer = setTimeout(saveEdits, 600);
   }
   function adjIsDefault() {
     var d = defaults();
@@ -253,15 +270,74 @@
     c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
     return c.toDataURL('image/jpeg', 0.82).split(',')[1];
   }
+  function pushThumb(id) {
+    try { fetch('/api/library/' + id + '/thumb', { method: 'PUT', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ imageData: makeThumbB64() }) }).catch(function () {}); } catch (e) {}
+  }
+  // Persist the current edit as a new history step (server maintains HEAD,
+  // edit_stacks and the XMP sidecar). Appends after the current head, dropping
+  // any redo tail.
   function saveEdits() {
     if (!fileId) return;
-    if (adjIsDefault()) { // reset / no edits: clear the stack + edited thumbnail
-      fetch('/api/library/' + fileId + '/edits', { method: 'DELETE', headers: authHeaders(), credentials: 'include' }).catch(function () {});
-      return;
+    var id = fileId;
+    fetch('/api/library/' + id + '/history', {
+      method: 'POST', headers: authHeaders(), credentials: 'include',
+      body: JSON.stringify({ adjustments: adj, label: lastLabel, baseSeq: headSeq }),
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (h) {
+        if (!h || fileId !== id) return;
+        history = h.steps || []; headSeq = (h.head != null ? h.head : -1);
+        renderHistory();
+        pushThumb(id);
+      }).catch(function () {});
+  }
+
+  /* ---- edit history (undo / redo / jump) ---- */
+  function loadHistory() {
+    var id = fileId;
+    fetch('/api/library/' + id + '/history', { headers: authHeaders(), credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (h) {
+        if (!h || fileId !== id) return;
+        history = h.steps || []; headSeq = (h.head != null ? h.head : -1);
+        var cur = null; for (var i = 0; i < history.length; i++) if (history[i].seq === headSeq) cur = history[i];
+        api.applyAdjustments(cur && cur.adjustments ? cur.adjustments : {});
+        renderHistory();
+      }).catch(function () {});
+  }
+  function gotoSeq(seq) {
+    if (!fileId || seq === headSeq) return;
+    var id = fileId;
+    fetch('/api/library/' + id + '/history/head', { method: 'PUT', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ seq: seq }) })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || fileId !== id) return;
+        headSeq = d.head;
+        api.applyAdjustments(d.adjustments || {});
+        renderHistory();
+        pushThumb(id);
+      }).catch(function () {});
+  }
+  function headIndex() { for (var i = 0; i < history.length; i++) if (history[i].seq === headSeq) return i; return -1; }
+  function undo() { var i = headIndex(); if (i > 0) gotoSeq(history[i - 1].seq); }
+  function redo() { var i = headIndex(); if (i >= 0 && i < history.length - 1) gotoSeq(history[i + 1].seq); }
+  function renderHistory() {
+    var el = document.getElementById('devHistory');
+    if (el) {
+      el.innerHTML = '';
+      for (var i = history.length - 1; i >= 0; i--) { // newest first (LR-style)
+        var s = history[i];
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dr-hist' + (s.seq === headSeq ? ' active' : '');
+        b.textContent = s.label || 'Edit';
+        (function (seq) { b.addEventListener('click', function () { gotoSeq(seq); }); })(s.seq);
+        el.appendChild(b);
+      }
     }
-    fetch('/api/library/' + fileId + '/edits', { method: 'PUT', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ adjustments: adj }) })
-      .then(function () { try { fetch('/api/library/' + fileId + '/thumb', { method: 'PUT', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ imageData: makeThumbB64() }) }).catch(function () {}); } catch (e) {} })
-      .catch(function () {});
+    var i2 = headIndex();
+    var u = document.getElementById('devUndo'), r = document.getElementById('devRedo');
+    if (u) u.disabled = !(i2 > 0);
+    if (r) r.disabled = !(i2 >= 0 && i2 < history.length - 1);
   }
 
   /* ---- controls <-> adjustments ---- */
@@ -281,16 +357,17 @@
   var api = {
     load: function (opts) {
       opts = opts || {}; fileId = opts.fileId || null; adj = defaults();
+      history = []; headSeq = -1; renderHistory();
       seed = 0.05 + ((opts.fileId || '').length % 13) * 0.07;
       syncControls();
       var img = new Image();
-      img.onload = function () { setBaseImage(img); if (fileId) loadSavedEdits(); };
+      img.onload = function () { setBaseImage(img); if (fileId) loadHistory(); };
       img.onerror = function () { console.warn('develop: image load failed'); };
       img.src = opts.src;
     },
     getEdited: function () { try { return ready && baseImage ? canvas.toDataURL('image/jpeg', 0.92) : null; } catch (e) { return null; } },
     getAdjustments: function () { return JSON.parse(JSON.stringify(adj)); },
-    reset: function () { adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render(); },
+    reset: function () { adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render(); scheduleSave('Reset'); },
     set: function (k, v) { adj[k] = v; if (k === 'cropW' || k === 'cropH' || k === 'rotate90') sizeCanvas(); render(); },
     applyAdjustments: function (obj) {
       adj = defaults();
@@ -298,15 +375,8 @@
       if (!adj.curve || adj.curve.length < 2) adj.curve = [[0, 0], [1, 1]];
       syncControls(); sizeCanvas(); uploadLUT(); render();
     },
+    undo: undo, redo: redo,
   };
-
-  function loadSavedEdits() {
-    var id = fileId;
-    fetch('/api/library/' + id + '/edits', { headers: authHeaders(), credentials: 'include' })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (data) { if (!data || !data.adjustments || fileId !== id) return; api.applyAdjustments(data.adjustments); })
-      .catch(function () {});
-  }
 
   // Re-run the exact edit pipeline at a higher resolution, then restore the proxy.
   function renderAt(srcImg, target) {
@@ -360,16 +430,29 @@
       inp.addEventListener('input', function () {
         var k = inp.getAttribute('data-adj'); adj[k] = +inp.value;
         var out = document.getElementById(inp.id + 'Out'); if (out) out.textContent = inp.value;
-        render();
+        render(); scheduleSave(labelFor(k));
       });
     });
     var bwBtn = document.getElementById('devBW');
-    if (bwBtn) bwBtn.addEventListener('click', function () { adj.bw = adj.bw ? 0 : 1; syncControls(); render(); });
+    if (bwBtn) bwBtn.addEventListener('click', function () { adj.bw = adj.bw ? 0 : 1; syncControls(); render(); scheduleSave('Black & White'); });
     var reset = document.getElementById('devReset');
     if (reset) reset.addEventListener('click', function (e) { e.stopPropagation(); api.reset(); });
+    var undoBtn = document.getElementById('devUndo'); if (undoBtn) undoBtn.addEventListener('click', undo);
+    var redoBtn = document.getElementById('devRedo'); if (redoBtn) redoBtn.addEventListener('click', redo);
     // foldable develop sections
     document.querySelectorAll('#developBody .dr-subhead').forEach(function (h) {
       h.addEventListener('click', function () { h.parentElement.classList.toggle('collapsed'); });
+    });
+    // Undo/redo keyboard shortcuts (only while the Develop view is visible and
+    // not typing in a field).
+    document.addEventListener('keydown', function (e) {
+      if (!fileId) return;
+      var t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      var key = (e.key || '').toLowerCase(); if (key !== 'z' && key !== 'y') return;
+      var body = document.getElementById('developBody'); if (body && body.offsetParent === null) return;
+      e.preventDefault();
+      if (key === 'y' || e.shiftKey) redo(); else undo();
     });
     initCurveWidget();
   }
@@ -393,7 +476,7 @@
     }
     function hit(x, y) { for (var i = 0; i < pts().length; i++) { var px = toPx(pts()[i]); if (Math.abs(px[0] - x) < 9 && Math.abs(px[1] - y) < 9) return i; } return -1; }
     function pos(e) { var r = cv.getBoundingClientRect(); var t = e.touches ? e.touches[0] : e; return [(t.clientX - r.left) * W / r.width, (t.clientY - r.top) * H / r.height]; }
-    function changed() { adj.curve = pts(); uploadLUT(); render(); draw(); }
+    function changed() { adj.curve = pts(); uploadLUT(); render(); draw(); scheduleSave('Tone Curve'); }
     cv.addEventListener('mousedown', function (e) { var pp = pos(e); drag = hit(pp[0], pp[1]); if (drag < 0) { var n = toNorm(pp[0], pp[1]); adj.curve.push(n); adj.curve.sort(function (a, b) { return a[0] - b[0]; }); drag = adj.curve.indexOf(n); changed(); } });
     window.addEventListener('mousemove', function (e) { if (drag < 0) return; var pp = pos(e); var n = toNorm(pp[0], pp[1]); if (drag > 0 && drag < adj.curve.length - 1) adj.curve[drag] = n; else adj.curve[drag] = [adj.curve[drag][0], n[1]]; changed(); });
     window.addEventListener('mouseup', function () { drag = -1; });
@@ -416,9 +499,9 @@
     function positionBox() { var c = canvasRect(); box.style.left = (c.l + pendCrop[0] * c.w) + 'px'; box.style.top = (c.t + pendCrop[1] * c.h) + 'px'; box.style.width = (pendCrop[2] * c.w) + 'px'; box.style.height = (pendCrop[3] * c.h) + 'px'; }
 
     function on(id, ev, fn) { var el = document.getElementById(id); if (el) el.addEventListener(ev, fn); }
-    on('devRotate', 'click', function () { if (!baseImage) return; adj.rotate90 = ((adj.rotate90 || 0) + 1) % 4; sizeCanvas(); render(); });
-    on('devFlipH', 'click', function (e) { adj.flipH = adj.flipH ? 0 : 1; e.currentTarget.classList.toggle('on', !!adj.flipH); render(); });
-    on('devFlipV', 'click', function (e) { adj.flipV = adj.flipV ? 0 : 1; e.currentTarget.classList.toggle('on', !!adj.flipV); render(); });
+    on('devRotate', 'click', function () { if (!baseImage) return; adj.rotate90 = ((adj.rotate90 || 0) + 1) % 4; sizeCanvas(); render(); scheduleSave('Rotate'); });
+    on('devFlipH', 'click', function (e) { adj.flipH = adj.flipH ? 0 : 1; e.currentTarget.classList.toggle('on', !!adj.flipH); render(); scheduleSave('Flip'); });
+    on('devFlipV', 'click', function (e) { adj.flipV = adj.flipV ? 0 : 1; e.currentTarget.classList.toggle('on', !!adj.flipV); render(); scheduleSave('Flip'); });
 
     document.querySelectorAll('#devAspect .dr-aspect-btn').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -427,8 +510,8 @@
         var v = b.getAttribute('data-aspect'); aspect = v === 'free' ? null : parseFloat(v);
         if (!baseImage) return;
         if (cropMode) { if (aspect) { pendCrop = constrainAspect(pendCrop, aspect); positionBox(); } }
-        else if (aspect) { var r = centeredRect(aspect); adj.cropX = r[0]; adj.cropY = r[1]; adj.cropW = r[2]; adj.cropH = r[3]; sizeCanvas(); render(); }
-        else { adj.cropX = 0; adj.cropY = 0; adj.cropW = 1; adj.cropH = 1; sizeCanvas(); render(); }
+        else if (aspect) { var r = centeredRect(aspect); adj.cropX = r[0]; adj.cropY = r[1]; adj.cropW = r[2]; adj.cropH = r[3]; sizeCanvas(); render(); scheduleSave('Crop'); }
+        else { adj.cropX = 0; adj.cropY = 0; adj.cropW = 1; adj.cropH = 1; sizeCanvas(); render(); scheduleSave('Crop'); }
       });
     });
 
@@ -442,7 +525,7 @@
     function exitCrop(apply) {
       if (apply) { adj.cropX = pendCrop[0]; adj.cropY = pendCrop[1]; adj.cropW = pendCrop[2]; adj.cropH = pendCrop[3]; }
       cropMode = false; document.getElementById('devCropToggle').classList.remove('on');
-      overlay.classList.add('hidden'); sizeCanvas(); render(); if (apply) schedulePush();
+      overlay.classList.add('hidden'); sizeCanvas(); render(); if (apply) scheduleSave('Crop');
     }
     on('devCropToggle', 'click', function () { if (cropMode) exitCrop(false); else if (baseImage) enterCrop(); });
     on('cropDone', 'click', function () { exitCrop(true); });
@@ -483,18 +566,18 @@
   var savedPresets = [];
 
   function lookOnly(a) { var o = {}; Object.keys(a).forEach(function (k) { if (GEOM_KEYS.indexOf(k) < 0) o[k] = a[k]; }); return o; }
-  function applyPresetLook(p) {
+  function applyPresetLook(p, name) {
     var look = p || {};
     Object.keys(look).forEach(function (k) { if (GEOM_KEYS.indexOf(k) < 0) adj[k] = (k === 'curve') ? JSON.parse(JSON.stringify(look[k])) : look[k]; });
     if (!adj.curve || adj.curve.length < 2) adj.curve = [[0, 0], [1, 1]];
-    syncControls(); uploadLUT(); render();
+    syncControls(); uploadLUT(); render(); scheduleSave(name ? ('Preset: ' + name) : 'Preset');
   }
   function renderPresets() {
     var el = document.getElementById('devPresets'); if (!el) return;
     el.innerHTML = '';
     BUILTIN.concat(savedPresets).forEach(function (p) {
       var b = document.createElement('button'); b.type = 'button'; b.className = 'dr-preset'; b.textContent = p.name;
-      b.addEventListener('click', function () { applyPresetLook(p.adjustments); });
+      b.addEventListener('click', function () { applyPresetLook(p.adjustments, p.name); });
       if (!p.builtin) {
         var x = document.createElement('span'); x.textContent = ' ✕'; x.style.opacity = '.6';
         x.addEventListener('click', function (e) { e.stopPropagation(); deletePreset(p.id); });
