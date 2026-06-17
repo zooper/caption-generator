@@ -6497,10 +6497,10 @@ async function buildPromptFromImageWithExtraction(base64Image, includeWeather = 
         '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
         (context.some(item => item.startsWith('Weather:')) ? '   - MUST use the exact weather data provided in context - do not make up different weather conditions\\n' : '') +
-        '\\n2. MANDATORY: Generate EXACTLY ' + hashtagCount + ' hashtags - COUNT TO ' + hashtagCount + ':\\n' +
-        '   - YOU MUST PROVIDE EXACTLY ' + hashtagCount + ' HASHTAGS - NO EXCEPTIONS\\n' +
-        '   - COUNT: 1, 2, 3... up to ' + hashtagCount + ' - DO NOT STOP BEFORE ' + hashtagCount + '\\n' +
-        '   - VERIFY: Your hashtag count must equal ' + hashtagCount + ' exactly\\n' +
+        '\\n2. Generate EXACTLY ' + hashtagCount + ' hashtags:\\n' +
+        '   - Provide exactly ' + hashtagCount + ' hashtags - no more, no less\\n' +
+        '   - Do NOT number the hashtags or include any list numbers (e.g. no #1, #2)\\n' +
+        '   - Every hashtag must be a real word/phrase tag, never a bare number\\n' +
         '   - Mix popular (#photography, #instagood) and niche tags\\n' +
         '   - Are relevant to image content\\n' +
         '   - Include location-based tags if applicable\\n' +
@@ -6675,10 +6675,10 @@ async function buildEnhancedPromptWithUserContext(base64Image, includeWeather, s
         '   - CRITICAL: Separate caption and hashtags completely. Do not include any # symbols in the caption\\n' +
         (context.length > 0 ? '   - Incorporates the provided context naturally\\n' : '') +
         (context.some(item => item.startsWith('Weather:')) ? '   - MUST use the exact weather data provided in context - do not make up different weather conditions\\n' : '') +
-        '\\n2. MANDATORY: Generate EXACTLY ' + hashtagCount + ' hashtags - COUNT TO ' + hashtagCount + ':\\n' +
-        '   - YOU MUST PROVIDE EXACTLY ' + hashtagCount + ' HASHTAGS - NO EXCEPTIONS\\n' +
-        '   - COUNT: 1, 2, 3... up to ' + hashtagCount + ' - DO NOT STOP BEFORE ' + hashtagCount + '\\n' +
-        '   - VERIFY: Your hashtag count must equal ' + hashtagCount + ' exactly\\n' +
+        '\\n2. Generate EXACTLY ' + hashtagCount + ' hashtags:\\n' +
+        '   - Provide exactly ' + hashtagCount + ' hashtags - no more, no less\\n' +
+        '   - Do NOT number the hashtags or include any list numbers (e.g. no #1, #2)\\n' +
+        '   - Every hashtag must be a real word/phrase tag, never a bare number\\n' +
         '   - Mix popular (#photography, #instagood) and niche tags\\n' +
         '   - Are relevant to image content\\n' +
         '   - Include location-based tags if applicable\\n' +
