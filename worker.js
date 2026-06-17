@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { getCookie, setCookie } from 'hono/cookie';
 import jwt from 'jsonwebtoken';
 import exifr from 'exifr';
+import { buildXmp, parseXmp } from './bindings/xmp-sidecar.js';
 import {
     generateRegistrationOptions,
     verifyRegistrationResponse,
@@ -4448,10 +4449,68 @@ app.get('/api/library/:id/full', authenticateToken, async (c) => {
 });
 
 // Non-destructive edit stack for a library file (per user).
+// Write the XMP sidecar for a library file from the develop adjustments, mixing
+// in portable metadata from the indexed row. Best-effort and only on the
+// filesystem-backed library (no-op on Cloudflare Workers). Never throws.
+async function writeEditSidecar(c, database, id, adjustments) {
+    const lib = c.env.LIBRARY;
+    if (!lib?.enabled) return;
+    try {
+        const f = await database.getLibraryFileById(id);
+        if (!f) return;
+        // Merge into any existing sidecar (e.g. a darktable import carrying GPS,
+        // keywords, rating) so we never clobber another tool's metadata.
+        const existing = await lib.readSidecar(f.rel_path).catch(() => null);
+        const xml = buildXmp(adjustments, {
+            rating: f.rating, make: f.camera_model ? String(f.camera_model).split(' ')[0] : null,
+            model: f.camera_model, lens: f.lens, dateTime: f.date_time, lat: f.lat, lon: f.lon,
+        }, existing);
+        await lib.writeSidecar(f.rel_path, xml);
+    } catch (e) {
+        console.error('sidecar write failed:', e);
+    }
+}
+
+// On reset, strip only OUR data from the sidecar; never delete a file that
+// belongs to another tool (darktable etc.). If we authored it from scratch and
+// there's nothing else of substance, remove it.
+async function clearEditSidecar(c, database, id) {
+    const lib = c.env.LIBRARY;
+    if (!lib?.enabled) return;
+    try {
+        const f = await database.getLibraryFileById(id);
+        if (!f) return;
+        const existing = await lib.readSidecar(f.rel_path).catch(() => null);
+        if (!existing) return;
+        const stripped = existing
+            .replace(/\s+xmlns:cstudio="[^"]*"/g, '')
+            .replace(/\s+cstudio:version="[^"]*"/g, '')
+            .replace(/\s+cstudio:adjustments="[^"]*"/g, '');
+        // If we authored the packet ourselves and nothing else remains, drop it.
+        if (existing.includes('x:xmptk="AI Caption Studio"') && !/<(darktable|dc|lr|exif|tiff|aux|xmp):/.test(stripped)) {
+            await lib.deleteSidecar(f.rel_path).catch(() => {});
+        } else {
+            await lib.writeSidecar(f.rel_path, stripped);
+        }
+    } catch (e) {
+        console.error('sidecar clear failed:', e);
+    }
+}
+
 app.get('/api/library/:id/edits', authenticateToken, async (c) => {
     try {
+        const id = c.req.param('id');
         const database = new D1Database(c.env.DB);
-        const adjustments = await database.getEditStack(c.req.param('id'), c.get('user').id);
+        let adjustments = await database.getEditStack(id, c.get('user').id);
+        // Fall back to a sidecar on disk (e.g. written in a prior session or by
+        // another instance) when the DB has no edits for this file.
+        if (!adjustments && c.env.LIBRARY?.enabled) {
+            const f = await database.getLibraryFileById(id);
+            if (f) {
+                const xml = await c.env.LIBRARY.readSidecar(f.rel_path).catch(() => null);
+                adjustments = parseXmp(xml);
+            }
+        }
         return c.json({ adjustments: adjustments || null });
     } catch (e) {
         return c.json({ error: 'Failed to load edits' }, 500);
@@ -4460,20 +4519,23 @@ app.get('/api/library/:id/edits', authenticateToken, async (c) => {
 app.put('/api/library/:id/edits', authenticateToken, async (c) => {
     try {
         const { adjustments } = await c.req.json();
+        const id = c.req.param('id');
         const database = new D1Database(c.env.DB);
-        await database.saveEditStack(c.req.param('id'), c.get('user').id, adjustments);
+        await database.saveEditStack(id, c.get('user').id, adjustments);
+        await writeEditSidecar(c, database, id, adjustments);
         return c.json({ success: true });
     } catch (e) {
         return c.json({ error: 'Failed to save edits' }, 500);
     }
 });
-// Reset: drop the edit stack + the edited thumbnail for this file/user.
+// Reset: drop the edit stack + the edited thumbnail + the sidecar for this file.
 app.delete('/api/library/:id/edits', authenticateToken, async (c) => {
     try {
         const id = c.req.param('id');
         const database = new D1Database(c.env.DB);
         await database.deleteEditStack(id, c.get('user').id);
         if (c.env.IMAGING) await c.env.IMAGING.deleteEditedThumb(id);
+        await clearEditSidecar(c, database, id);
         return c.json({ success: true });
     } catch (e) {
         return c.json({ error: 'Failed to reset edits' }, 500);
