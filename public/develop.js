@@ -115,8 +115,9 @@
   var canvas, gl, baseImage = null, ready = false, fileId = null;
   var adj = defaults();
   var prog1, progBlur, progFinal, srcTex, lutTex, fboA, fboB, fboC, quad;
-  var pushTimer = null, saveTimer = null, seed = 0.137, cropMode = false, pendCrop = null, exporting = false;
+  var pushTimer = null, saveTimer = null, seed = 0.137, cropMode = false, pendCrop = null, exporting = false, comparing = false;
   var history = [], headSeq = -1, lastLabel = 'Adjust';  // edit history (undo/redo + History panel)
+  var clipboard = null, compareSaved = null;             // copy/paste settings + before/after compare
 
   // Pretty label for a history step, from the control that changed.
   var ADJ_LABELS = {
@@ -245,7 +246,7 @@
   /* ---- push edited pixels + persist ---- */
   function authHeaders() { var t = localStorage.getItem('auth_token'); var h = { 'Content-Type': 'application/json' }; if (t) h.Authorization = 'Bearer ' + t; return h; }
   function schedulePush() {
-    if (exporting) return; // don't push transient high-res export frames
+    if (exporting || comparing) return; // don't push transient export/compare frames
     clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { try { if (window.setEditedImage) window.setEditedImage(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]); } catch (e) {} }, 220);
   }
@@ -447,6 +448,30 @@
     } else if (window.showSuccess) { showSuccess('Downloaded edited image', 'Export'); }
   };
 
+  /* ---- before/after compare + copy/paste settings ---- */
+  // Hold to show the unedited image (adjustments off + default curve), release
+  // to return to the edited result. comparing=true suppresses the page preview push.
+  function showBefore() {
+    if (!baseImage || comparing) return;
+    comparing = true; compareSaved = adj; adj = defaults(); uploadLUT(); render(); adj = compareSaved;
+  }
+  function showAfter() {
+    if (!comparing) return;
+    comparing = false; uploadLUT(); render();
+  }
+  function copySettings() {
+    clipboard = JSON.parse(JSON.stringify(adj));
+    try { localStorage.setItem('dr_clipboard', JSON.stringify(clipboard)); } catch (e) {}
+    var pb = document.getElementById('devPaste'); if (pb) pb.disabled = false;
+    if (window.showSuccess) showSuccess('Settings copied', 'Develop');
+  }
+  function pasteSettings() {
+    if (!clipboard || !fileId) return;
+    api.applyAdjustments(clipboard);
+    scheduleSave('Paste settings');
+    if (window.showSuccess) showSuccess('Settings pasted', 'Develop');
+  }
+
   function wireControls() {
     document.querySelectorAll('#developBody input[data-adj]').forEach(function (inp) {
       inp.addEventListener('input', function () {
@@ -461,6 +486,18 @@
     if (reset) reset.addEventListener('click', function (e) { e.stopPropagation(); api.reset(); });
     var undoBtn = document.getElementById('devUndo'); if (undoBtn) undoBtn.addEventListener('click', undo);
     var redoBtn = document.getElementById('devRedo'); if (redoBtn) redoBtn.addEventListener('click', redo);
+    // before/after (hold) + copy/paste
+    try { var cb = localStorage.getItem('dr_clipboard'); if (cb) clipboard = JSON.parse(cb); } catch (e) {}
+    var beforeBtn = document.getElementById('devBefore');
+    if (beforeBtn) {
+      beforeBtn.addEventListener('mousedown', showBefore);
+      beforeBtn.addEventListener('mouseup', showAfter);
+      beforeBtn.addEventListener('mouseleave', showAfter);
+      beforeBtn.addEventListener('touchstart', function (e) { e.preventDefault(); showBefore(); }, { passive: false });
+      beforeBtn.addEventListener('touchend', showAfter);
+    }
+    var copyBtn = document.getElementById('devCopy'); if (copyBtn) copyBtn.addEventListener('click', copySettings);
+    var pasteBtn = document.getElementById('devPaste'); if (pasteBtn) { pasteBtn.addEventListener('click', pasteSettings); pasteBtn.disabled = !clipboard; }
     // foldable develop sections
     document.querySelectorAll('#developBody .dr-subhead').forEach(function (h) {
       h.addEventListener('click', function () { h.parentElement.classList.toggle('collapsed'); });
