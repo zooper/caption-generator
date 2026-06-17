@@ -125,6 +125,23 @@ async function extractRawPreview(absPath) {
     finally { if (fh) await fh.close().catch(() => {}); }
 }
 
+// Is a JPEG effectively grayscale? Embedded RAW previews follow the camera's
+// JPEG rendering, so an in-camera monochrome film simulation (e.g. Fujifilm
+// ACROS) yields a B&W preview even though the raw sensor data is full colour.
+// We sample chroma spread on a tiny decode; near-zero => treat as grayscale so
+// the caller demosaics the raw for real colour instead of trusting the preview.
+async function isGrayscaleJpeg(buf) {
+    try {
+        const { data, info } = await sharp(buf, { failOn: 'none' })
+            .resize(48, 48, { fit: 'inside' }).raw().toBuffer({ resolveWithObject: true });
+        const ch = info.channels;
+        if (ch < 3) return true;
+        let s = 0; const n = info.width * info.height;
+        for (let i = 0; i < n; i++) { const o = i * ch; s += Math.abs(data[o] - data[o + 1]) + Math.abs(data[o + 1] - data[o + 2]); }
+        return (s / n) < 3;
+    } catch { return false; } // on error, keep the preview rather than force a slow demosaic
+}
+
 // Minimal async concurrency limiter (darktable-cli is heavy; don't fork dozens).
 class Limiter {
     constructor(n) { this.max = n; this.active = 0; this.queue = []; }
@@ -181,9 +198,17 @@ export class Imaging {
     // sharp .rotate()). null if a RAW has no usable embedded preview.
     async _previewJpeg(absPath) {
         if (isRaw(absPath)) {
+            // Only trust an embedded preview if it's actually colour — a grayscale
+            // one is an in-camera monochrome rendering that hides the raw's colour,
+            // so we return null and let the caller demosaic with darktable instead.
             const p = await extractRawPreview(absPath);
-            if (p) return { buf: p.jpeg, ori: p.ori };
-            try { const t = await exifr.thumbnail(absPath); if (t && t.byteLength) return { buf: Buffer.from(t), ori: 1 }; } catch { /* none */ }
+            if (p && !(await isGrayscaleJpeg(p.jpeg))) return { buf: p.jpeg, ori: p.ori };
+            if (!p) {
+                try {
+                    const t = await exifr.thumbnail(absPath);
+                    if (t && t.byteLength) { const tb = Buffer.from(t); if (!(await isGrayscaleJpeg(tb))) return { buf: tb, ori: 1 }; }
+                } catch { /* none */ }
+            }
             return null;
         }
         try { return { buf: await fs.readFile(absPath), ori: 0 }; } catch { return null; }
