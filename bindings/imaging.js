@@ -98,6 +98,22 @@ async function extractRawPreview(absPath) {
         const headLen = Math.min(1 << 20, size);
         const head = Buffer.alloc(headLen);
         await fh.read(head, 0, headLen, 0);
+
+        // Fujifilm RAF isn't TIFF, so locatePreview() can't see its preview and
+        // the file would fall through to a slow darktable demosaic. The embedded
+        // full-size JPEG's offset/length live in the RAF header at 0x54/0x58
+        // (big-endian). That JPEG carries its own EXIF orientation, so return
+        // ori 0 and let sharp auto-rotate.
+        if (head.toString('latin1', 0, 15) === 'FUJIFILMCCD-RAW') {
+            const off = head.readUInt32BE(0x54), len = head.readUInt32BE(0x58);
+            if (off > 0 && len > 0 && off + len <= size) {
+                const jpeg = Buffer.alloc(len);
+                await fh.read(jpeg, 0, len, off);
+                if (jpeg[0] === 0xFF && jpeg[1] === 0xD8) return { jpeg, ori: 0 };
+            }
+            return null;
+        }
+
         let loc = locatePreview(head), parsed = head;
         if (!loc && size > headLen) { const all = Buffer.alloc(size); await fh.read(all, 0, size, 0); loc = locatePreview(all); parsed = all; }
         if (!loc || loc.off + loc.len > size) return null;
