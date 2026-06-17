@@ -1015,18 +1015,21 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         const altTextMatch = responseText.match(/ALT_TEXT:\s*(.*?)$/s);
 
         const caption = captionMatch ? captionMatch[1].trim() : 'Caption could not be generated';
-        const hashtags = hashtagsMatch ? hashtagsMatch[1].trim() : '';
+        const rawHashtags = hashtagsMatch ? hashtagsMatch[1].trim() : '';
         const altText = altTextMatch ? altTextMatch[1].trim() : '';
+
+        // Keep only real hashtags, dropping any bare list numbers like #1, #2 the model may emit
+        const hashtagArray = rawHashtags.split(/\s+/).filter(tag => tag.startsWith('#') && !/^#\d+$/.test(tag));
+        const hashtags = hashtagArray.join(' ');
 
         this.captionText.textContent = caption;
         this.hashtagsText.textContent = hashtags;
         this.alttextText.textContent = altText || 'No alt text generated';
-        
+
         // Store alt text for Mastodon posting
         this.currentAltText = altText;
-        
+
         this.charCount.textContent = `${caption.length} characters`;
-        const hashtagArray = hashtags.split(' ').filter(tag => tag.startsWith('#'));
         this.hashtagCount.textContent = `${hashtagArray.length} tags`;
         this.alttextCount.textContent = altText ? `${altText.length} chars` : 'None';
         
