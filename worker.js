@@ -70,7 +70,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 18;
+        this.CURRENT_SCHEMA_VERSION = 19;
         this._initialized = false;
         // Don't run async operations in constructor
     }
