@@ -543,6 +543,13 @@ input, textarea, select { font-family: inherit; }
 .dr-preset:hover { color: var(--dr-ink); border-color: var(--dr-accent); }
 .dr-preset.add { color: var(--dr-accent); border-style: dashed; }
 
+/* Edit history (undo/redo + History panel) */
+.dr-history { display: flex; flex-direction: column; gap: 1px; max-height: 220px; overflow-y: auto; }
+.dr-hist { text-align: left; font-size: 12px; color: var(--dr-ink-2); background: transparent; border: 0; border-radius: 5px; padding: 5px 9px; cursor: pointer; transition: background .12s, color .12s; }
+.dr-hist:hover { background: var(--dr-panel-2); color: var(--dr-ink); }
+.dr-hist.active { background: var(--dr-panel-2); color: var(--dr-ink); box-shadow: inset 2px 0 0 var(--dr-accent); }
+.dr-reset[disabled] { opacity: .4; cursor: default; pointer-events: none; }
+
 /* Geometry controls + crop overlay */
 .dr-geo-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .dr-geo-btn { flex: 1; min-width: 58px; padding: 7px 8px; font-size: 12px; font-weight: 600; color: var(--dr-ink-2); background: var(--dr-panel-2); border: 1px solid var(--dr-line-2); border-radius: 8px; cursor: pointer; transition: all .15s; }
