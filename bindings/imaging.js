@@ -154,11 +154,13 @@ class Limiter {
 }
 
 export class Imaging {
-    constructor({ proxyDir, exportDir, darktableBin = 'darktable-cli', maxConcurrent = 2 } = {}) {
+    constructor({ proxyDir, exportDir, darktableBin = 'darktable-cli', dcrawEmuBin = 'dcraw_emu', maxConcurrent = 2, maxRawConcurrent = 4 } = {}) {
         this.proxyDir = proxyDir || null;
         this.exportDir = exportDir || null;
         this.darktable = darktableBin;
-        this.limiter = new Limiter(maxConcurrent);
+        this.dcrawEmu = dcrawEmuBin;
+        this.limiter = new Limiter(maxConcurrent);          // darktable (heavy, export quality)
+        this.rawLimiter = new Limiter(maxRawConcurrent);    // dcraw_emu (light, fast color demosaic)
     }
 
     get enabled() { return true; }
@@ -234,7 +236,11 @@ export class Imaging {
             buf = await pipe.resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
                 .jpeg({ quality: 88 }).toBuffer();
         } else if (isRaw(absPath)) {
-            buf = await this._decodeRaw(absPath, longEdge); // darktable fallback
+            // No usable colour embedded preview (e.g. a monochrome film-sim raw):
+            // demosaic to colour. dcraw_emu (libraw) is ~30x faster than darktable
+            // and plenty for thumbnails/proxies; darktable is the fallback.
+            try { buf = await this._decodeRawFast(absPath, longEdge); }
+            catch { buf = await this._decodeRaw(absPath, longEdge); }
         } else {
             throw new Error('cannot decode ' + absPath);
         }
@@ -294,6 +300,38 @@ export class Imaging {
         return removed;
     }
 
+    // Fast colour demosaic via libraw's dcraw_emu (~1-4s, half-size). Output is
+    // already oriented and sRGB, so sharp just resizes/encodes. Used for grid
+    // thumbnails and develop proxies; darktable is reserved for export quality.
+    async _decodeRawFast(absPath, longEdge) {
+        return this.rawLimiter.run(async () => {
+            const tmp = path.join(os.tmpdir(), 'le_' + crypto.randomBytes(7).toString('hex') + '.tiff');
+            try {
+                await this._dcrawEmu(absPath, tmp);
+                const decoded = await fs.readFile(tmp);
+                return await sharp(decoded, { failOn: 'none' })
+                    .resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
+                    .jpeg({ quality: 88 }).toBuffer();
+            } finally {
+                fs.unlink(tmp).catch(() => {});
+            }
+        });
+    }
+
+    _dcrawEmu(src, dst) {
+        return new Promise((resolve, reject) => {
+            // -h half-size (fast), -w camera white balance, -o 1 sRGB, -T TIFF, -Z out
+            const args = ['-h', '-w', '-o', '1', '-T', '-Z', dst, src];
+            const ps = spawn(this.dcrawEmu, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+            let err = '';
+            ps.stderr.on('data', (d) => { err += d.toString(); });
+            ps.on('error', reject);
+            ps.on('close', (code) => code === 0
+                ? resolve()
+                : reject(new Error(`dcraw_emu exit ${code}: ${err.slice(-300)}`)));
+        });
+    }
+
     async _decodeRaw(absPath, longEdge) {
         return this.limiter.run(async () => {
             const tmp = path.join(os.tmpdir(), 'dr_' + crypto.randomBytes(7).toString('hex') + '.jpg');
@@ -329,4 +367,30 @@ export class Imaging {
                 : reject(new Error(`darktable-cli exit ${code}: ${err.slice(-400)}`)));
         });
     }
+}
+
+// Smart previews: pre-generate grid thumbnails in the background so browsing is
+// instant and the first-touch demosaic never blocks the UI. Idempotent —
+// embeddedThumb returns the cached file when present, so re-runs only fill gaps
+// (new/changed files). Newest files first, since that's what the user opens.
+export async function warmLibrary(library, db, imaging, { log = () => {}, longEdge = 480, concurrency = 4 } = {}) {
+    if (!library?.enabled || !imaging) return { warmed: 0, failed: 0, total: 0 };
+    const rows = (await db.prepare(
+        'SELECT id, rel_path, mtime, size FROM library_files ORDER BY mtime DESC'
+    ).all().catch(() => ({ results: [] }))).results || [];
+    let warmed = 0, failed = 0, i = 0;
+    async function worker() {
+        while (i < rows.length) {
+            const r = rows[i++];
+            try {
+                await imaging.embeddedThumb(library.absPath(r.rel_path), { cacheId: r.id, mtimeMs: r.mtime, size: r.size, longEdge });
+                warmed++;
+            } catch { failed++; }
+            const done = warmed + failed;
+            if (done % 250 === 0) log(`thumbnail warm: ${done}/${rows.length}`);
+        }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, concurrency) }, () => worker()));
+    log(`thumbnail warm done: ${warmed} ok, ${failed} failed of ${rows.length}`);
+    return { warmed, failed, total: rows.length };
 }
