@@ -70,7 +70,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 19;
+        this.CURRENT_SCHEMA_VERSION = 20;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -218,6 +218,19 @@ class D1Database {
                     console.log('Migration v19 completed successfully');
                 } catch (migrationError) {
                     console.error('Migration v19 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 20: per-image "colour base" (Reset switches a
+            // raw from its as-shot rendering to the flat colour demosaic).
+            if (fromVersion < 20) {
+                console.log('Running migration: Add color_base to edit_stacks (v20)');
+                try {
+                    await this.migration_v20();
+                    await this.setSchemaVersion(20);
+                    console.log('Migration v20 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v20 failed:', migrationError);
                 }
             }
         } catch (error) {
@@ -1433,6 +1446,28 @@ class D1Database {
             )
         `).run();
         console.log('Migration v17 completed: Added edit_stacks table');
+    }
+
+    async migration_v20() {
+        try { await this.db.prepare('ALTER TABLE edit_stacks ADD COLUMN color_base INTEGER DEFAULT 0').run(); }
+        catch (e) { /* column already exists */ }
+        console.log('Migration v20 completed: Added color_base to edit_stacks');
+    }
+
+    // Whether the user has Reset this raw to the flat colour demosaic (vs the
+    // as-shot embedded rendering). Persists across opens.
+    async getColorBase(fileId, userId) {
+        const row = await this.db.prepare(
+            'SELECT color_base FROM edit_stacks WHERE file_id = ? AND user_id = ?'
+        ).bind(fileId, userId).first().catch(() => null);
+        return !!(row && row.color_base);
+    }
+    async setColorBase(fileId, userId, on) {
+        await this.db.prepare(`
+            INSERT INTO edit_stacks (file_id, user_id, adjustments, color_base, updated_at)
+            VALUES (?, ?, '{}', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(file_id, user_id) DO UPDATE SET color_base = excluded.color_base, updated_at = CURRENT_TIMESTAMP
+        `).bind(fileId, userId, on ? 1 : 0).run();
     }
 
     async getEditStack(fileId, userId) {
@@ -4510,7 +4545,10 @@ async function serveLibraryImage(c, kind) {
         const f = await database.getLibraryFileById(c.req.param('id'));
         if (!f) return c.json({ error: 'File not found' }, 404);
         const abs = c.env.LIBRARY.absPath(f.rel_path);
-        const opts = { cacheId: f.id, mtimeMs: f.mtime, size: f.size };
+        // If the user has Reset this raw to colour, serve the colour demosaic
+        // instead of the as-shot embedded preview.
+        const color = await database.getColorBase(f.id, c.get('user').id);
+        const opts = { cacheId: f.id, mtimeMs: f.mtime, size: f.size, color };
         let buf, edited = false;
         if (kind === 'thumb') {
             // prefer the edited thumbnail (reflects the develop) when present
@@ -4677,6 +4715,22 @@ app.put('/api/library/:id/history/head', authenticateToken, async (c) => {
         return c.json({ head: seq, adjustments });
     } catch (e) {
         return c.json({ error: 'Failed to move history head' }, 500);
+    }
+});
+// Reset a raw to the flat colour demosaic: clear all edits/history and switch
+// this image's base from its as-shot rendering to colour (persists across opens).
+app.post('/api/library/:id/reset', authenticateToken, async (c) => {
+    try {
+        const id = c.req.param('id');
+        const userId = c.get('user').id;
+        const database = new D1Database(c.env.DB);
+        await database.deleteEditStack(id, userId);     // clears edit_stacks + edit_history
+        await database.setColorBase(id, userId, true);  // recreate row with colour base on
+        if (c.env.IMAGING) await c.env.IMAGING.deleteEditedThumb(id);
+        await clearEditSidecar(c, database, id);
+        return c.json({ success: true });
+    } catch (e) {
+        return c.json({ error: 'Failed to reset' }, 500);
     }
 });
 // Store the edited thumbnail (client canvas JPEG) so the grid shows the develop.

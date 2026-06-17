@@ -367,7 +367,29 @@
     },
     getEdited: function () { try { return ready && baseImage ? canvas.toDataURL('image/jpeg', 0.92) : null; } catch (e) { return null; } },
     getAdjustments: function () { return JSON.parse(JSON.stringify(adj)); },
-    reset: function () { adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render(); scheduleSave('Reset'); },
+    reset: function () {
+      // Clear adjustments immediately for snappy feedback…
+      adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render();
+      if (!fileId) return;
+      var id = fileId;
+      // …then persist the reset: clears edits/history and switches this raw to
+      // the flat COLOUR demosaic on the server, and reload the colour base.
+      fetch('/api/library/' + id + '/reset', { method: 'POST', headers: authHeaders(), credentials: 'include' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (ok) {
+          if (!ok || fileId !== id) return;
+          history = []; headSeq = -1; renderHistory();
+          return fetch('/api/library/' + id + '/proxy?v=' + Date.now(), { headers: authHeaders(), credentials: 'include' })
+            .then(function (r) { return r.ok ? r.blob() : null; })
+            .then(function (b) {
+              if (!b || fileId !== id) return;
+              var url = URL.createObjectURL(b);
+              var img = new Image();
+              img.onload = function () { setBaseImage(img); try { URL.revokeObjectURL(url); } catch (e) {} };
+              img.src = url;
+            });
+        }).catch(function () {});
+    },
     set: function (k, v) { adj[k] = v; if (k === 'cropW' || k === 'cropH' || k === 'rotate90') sizeCanvas(); render(); },
     applyAdjustments: function (obj) {
       adj = defaults();
