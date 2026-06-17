@@ -1,10 +1,13 @@
 // Filesystem-backed photo library, rooted at LIBRARY_DIR (e.g. a NAS mount).
 //
 // Node-only binding injected as c.env.LIBRARY (like R2_BUCKET / DB). worker.js
-// routes treat it as optional so they no-op on Cloudflare Workers. Originals are
-// READ-ONLY here — this binding never writes into the library root.
+// routes treat it as optional so they no-op on Cloudflare Workers. Original
+// images are READ-ONLY — the only thing this binding ever writes is the .xmp
+// sidecar next to a file (see writeSidecar/deleteSidecar); originals are never
+// modified.
 //
-// Surface used by worker.js:  enabled, absPath(rel), readFile(rel), rescan()
+// Surface used by worker.js:  enabled, absPath(rel), readFile(rel), rescan(),
+//                             readSidecar(rel), writeSidecar(rel), deleteSidecar(rel)
 // Indexing (scanLibrary) walks the tree and upserts rows into `library_files`.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -52,6 +55,39 @@ export class LibraryFS {
 
     async readFile(relPath) {
         return fs.readFile(this.absPath(relPath));
+    }
+
+    // Sidecar path for an image, using the appended convention (darktable style):
+    // L1041238.DNG -> L1041238.DNG.xmp. Resolved through absPath so traversal is
+    // still guarded.
+    sidecarPath(relPath) {
+        return this.absPath(relPath) + '.xmp';
+    }
+
+    // Read a sidecar's XMP text. Tries the appended form first, then the
+    // replaced-extension form (Lightroom style: L1041238.xmp). Returns null if
+    // neither exists.
+    async readSidecar(relPath) {
+        const appended = this.sidecarPath(relPath);
+        const replaced = appended.replace(/\.[^./\\]+\.xmp$/, '.xmp');
+        const candidates = replaced === appended ? [appended] : [appended, replaced];
+        for (const p of candidates) {
+            try {
+                return await fs.readFile(p, 'utf8');
+            } catch { /* try next */ }
+        }
+        return null;
+    }
+
+    // Write the sidecar. This is the ONLY write LibraryFS performs into the
+    // library root, and it only ever touches the .xmp file — never the original.
+    async writeSidecar(relPath, xml) {
+        await fs.writeFile(this.sidecarPath(relPath), xml, 'utf8');
+    }
+
+    // Remove the sidecar (used on edit reset). Best-effort; missing file is fine.
+    async deleteSidecar(relPath) {
+        await fs.rm(this.sidecarPath(relPath), { force: true });
     }
 
     // Recursively yield image/raw files (skips dotfiles and unsupported types).
