@@ -16,6 +16,11 @@ import sharp from 'sharp';
 import exifr from 'exifr';
 import { RAW_EXTS } from './library-fs.js';
 
+// Bump when the decode logic changes so stale proxies/thumbnails on disk are
+// ignored (the cache key embeds it). v2: as-shot embedded preview by default,
+// colour demosaic only on demand.
+const CACHE_VERSION = 2;
+
 function isRaw(p) {
     return RAW_EXTS.has(path.extname(p).slice(1).toLowerCase());
 }
@@ -125,23 +130,6 @@ async function extractRawPreview(absPath) {
     finally { if (fh) await fh.close().catch(() => {}); }
 }
 
-// Is a JPEG effectively grayscale? Embedded RAW previews follow the camera's
-// JPEG rendering, so an in-camera monochrome film simulation (e.g. Fujifilm
-// ACROS) yields a B&W preview even though the raw sensor data is full colour.
-// We sample chroma spread on a tiny decode; near-zero => treat as grayscale so
-// the caller demosaics the raw for real colour instead of trusting the preview.
-async function isGrayscaleJpeg(buf) {
-    try {
-        const { data, info } = await sharp(buf, { failOn: 'none' })
-            .resize(48, 48, { fit: 'inside' }).raw().toBuffer({ resolveWithObject: true });
-        const ch = info.channels;
-        if (ch < 3) return true;
-        let s = 0; const n = info.width * info.height;
-        for (let i = 0; i < n; i++) { const o = i * ch; s += Math.abs(data[o] - data[o + 1]) + Math.abs(data[o + 1] - data[o + 2]); }
-        return (s / n) < 3;
-    } catch { return false; } // on error, keep the preview rather than force a slow demosaic
-}
-
 // Minimal async concurrency limiter (darktable-cli is heavy; don't fork dozens).
 class Limiter {
     constructor(n) { this.max = n; this.active = 0; this.queue = []; }
@@ -169,16 +157,19 @@ export class Imaging {
     // on disk (PROXY_DIR/thumbs/, keyed by id+mtime+size) so the library grid
     // never has to rebuild thumbnails — they're generated once per file and live
     // in their own subdir, untouched by the proxy-cache eviction.
-    _thumbCachePath(cacheId, mtimeMs, size, longEdge) {
+    _thumbCachePath(cacheId, mtimeMs, size, longEdge, color) {
         if (!this.proxyDir || !cacheId) return null;
-        return path.join(this.proxyDir, 'thumbs', `${String(cacheId).replace(/[^\w-]/g, '')}_${mtimeMs}_${size}_${longEdge}.jpg`);
+        const tag = `v${CACHE_VERSION}${color ? 'c' : ''}`;
+        return path.join(this.proxyDir, 'thumbs', `${String(cacheId).replace(/[^\w-]/g, '')}_${mtimeMs}_${size}_${longEdge}_${tag}.jpg`);
     }
-    async embeddedThumb(absPath, { longEdge = 480, cacheId, mtimeMs = 0, size = 0 } = {}) {
-        const cachePath = this._thumbCachePath(cacheId, mtimeMs, size, longEdge);
+    async embeddedThumb(absPath, { longEdge = 480, cacheId, mtimeMs = 0, size = 0, color = false } = {}) {
+        const cachePath = this._thumbCachePath(cacheId, mtimeMs, size, longEdge, color);
         if (cachePath) { try { return await fs.readFile(cachePath); } catch { /* miss */ } }
 
         let out = null;
-        const src = await this._previewJpeg(absPath);
+        // `color` forces a colour demosaic (Reset path); otherwise use the as-shot
+        // embedded preview.
+        const src = color ? null : await this._previewJpeg(absPath);
         if (src) {
             try {
                 let pipe = sharp(src.buf, { failOn: 'none' });
@@ -187,7 +178,7 @@ export class Imaging {
                     .jpeg({ quality: 80 }).toBuffer();
             } catch { /* fall through */ }
         }
-        if (!out && isRaw(absPath)) out = await this.decodeProxy(absPath, { longEdge });
+        if (!out && isRaw(absPath)) out = await this.decodeProxy(absPath, { longEdge, color });
         if (out && cachePath) {
             await fs.mkdir(path.dirname(cachePath), { recursive: true }).catch(() => {});
             await fs.writeFile(cachePath, out).catch(() => {});
@@ -195,50 +186,47 @@ export class Imaging {
         return out;
     }
 
-    // Source to develop from + how to orient it: embedded preview for RAW (with
-    // the DNG orientation to apply), the file itself otherwise (ori 0 = auto via
-    // sharp .rotate()). null if a RAW has no usable embedded preview.
+    // Source to develop from + how to orient it: the camera's embedded preview
+    // for RAW (the as-shot rendering — kept even when it's a monochrome film sim,
+    // so opening a B&W shot stays B&W and is instant), the file itself otherwise.
+    // Colour from the raw sensor is available on demand via the `color` decode
+    // path (see decodeProxy/embeddedThumb), e.g. when the user Resets. null if a
+    // RAW has no usable embedded preview, so the caller demosaics instead.
     async _previewJpeg(absPath) {
         if (isRaw(absPath)) {
-            // Only trust an embedded preview if it's actually colour — a grayscale
-            // one is an in-camera monochrome rendering that hides the raw's colour,
-            // so we return null and let the caller demosaic with darktable instead.
             const p = await extractRawPreview(absPath);
-            if (p && !(await isGrayscaleJpeg(p.jpeg))) return { buf: p.jpeg, ori: p.ori };
-            if (!p) {
-                try {
-                    const t = await exifr.thumbnail(absPath);
-                    if (t && t.byteLength) { const tb = Buffer.from(t); if (!(await isGrayscaleJpeg(tb))) return { buf: tb, ori: 1 }; }
-                } catch { /* none */ }
-            }
+            if (p) return { buf: p.jpeg, ori: p.ori };
+            try { const t = await exifr.thumbnail(absPath); if (t && t.byteLength) return { buf: Buffer.from(t), ori: 1 }; } catch { /* none */ }
             return null;
         }
         try { return { buf: await fs.readFile(absPath), ori: 0 }; } catch { return null; }
     }
 
-    _cachePath(cacheId, longEdge, mtimeMs, size) {
+    _cachePath(cacheId, longEdge, mtimeMs, size, color) {
         if (!this.proxyDir) return null;
-        return path.join(this.proxyDir, `${cacheId}_${mtimeMs}_${size}_${longEdge}.jpg`);
+        const tag = `v${CACHE_VERSION}${color ? 'c' : ''}`;
+        return path.join(this.proxyDir, `${cacheId}_${mtimeMs}_${size}_${longEdge}_${tag}.jpg`);
     }
 
     // Editing/preview/export proxy: a quality JPEG at `longEdge`, cached on disk.
-    // Uses the embedded full-res preview for RAW (fast); darktable only if absent.
-    async decodeProxy(absPath, { longEdge = 2048, mtimeMs = 0, size = 0, cacheId } = {}) {
+    // Default uses the as-shot embedded preview for RAW (instant). `color` forces
+    // a colour demosaic of the raw sensor (the Reset path); darktable is the
+    // fallback when dcraw_emu can't handle the file.
+    async decodeProxy(absPath, { longEdge = 2048, mtimeMs = 0, size = 0, cacheId, color = false } = {}) {
         const id = cacheId || crypto.createHash('sha1').update(absPath).digest('hex').slice(0, 16);
-        const cachePath = this._cachePath(id, longEdge, mtimeMs, size);
+        const cachePath = this._cachePath(id, longEdge, mtimeMs, size, color);
         if (cachePath) { try { return await fs.readFile(cachePath); } catch { /* miss */ } }
 
         let buf;
-        const src = await this._previewJpeg(absPath);
+        const src = color ? null : await this._previewJpeg(absPath);
         if (src) {
             let pipe = sharp(src.buf, { failOn: 'none' });
             pipe = src.ori ? applyOrientation(pipe, src.ori) : pipe.rotate();
             buf = await pipe.resize(longEdge, longEdge, { fit: 'inside', withoutEnlargement: true })
                 .jpeg({ quality: 88 }).toBuffer();
         } else if (isRaw(absPath)) {
-            // No usable colour embedded preview (e.g. a monochrome film-sim raw):
-            // demosaic to colour. dcraw_emu (libraw) is ~30x faster than darktable
-            // and plenty for thumbnails/proxies; darktable is the fallback.
+            // Colour requested, or no embedded preview: demosaic the raw sensor.
+            // dcraw_emu (libraw) is ~30x faster than darktable; darktable is fallback.
             try { buf = await this._decodeRawFast(absPath, longEdge); }
             catch { buf = await this._decodeRaw(absPath, longEdge); }
         } else {
