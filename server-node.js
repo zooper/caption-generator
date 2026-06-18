@@ -125,7 +125,16 @@ if (LIBRARY.enabled) {
 // Serve static assets from /public. Registered after all worker routes are
 // imported, so it acts as the final fallback — API/UI routes match first, and
 // only unmatched paths (index.html, styles.css, /templates/*, …) hit the disk.
-app.use('/*', serveStatic({ root: './public' }));
+app.use('/*', serveStatic({
+    root: './public',
+    // Markup/code must always revalidate, otherwise the browser keeps serving a
+    // cached page/script after a deploy (which is exactly how a freshly added
+    // Settings section can stay invisible). `no-cache` = store but check with the
+    // server before reuse (cheap 304s); other assets keep the default.
+    onFound: (filePath, c) => {
+        if (/\.(html|js|css)$/i.test(filePath)) c.header('Cache-Control', 'no-cache');
+    },
+}));
 
 serve({ fetch: (request) => app.fetch(request, ENV), port: PORT }, (info) => {
     console.log(`AI Caption Studio listening on http://localhost:${info.port}`);
