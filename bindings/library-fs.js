@@ -136,6 +136,9 @@ export async function scanLibrary(library, db, { log = () => {} } = {}) {
     let scanned = 0, indexed = 0, skipped = 0;
     for await (const f of library.walk()) {
         scanned++;
+        // Yield to the event loop periodically so a large initial scan (EXIF reads
+        // over the NAS) doesn't starve incoming HTTP requests.
+        if (scanned % 40 === 0) await new Promise((r) => setImmediate(r));
         const id = fileId(f.relPath);
         const existing = await db.prepare(
             'SELECT mtime, size FROM library_files WHERE id = ?'
