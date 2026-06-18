@@ -1153,6 +1153,24 @@ class D1Database {
         }
     }
 
+    // Per-user module switches (Caption / Photo-editing). Stored as
+    // integration_type='modules' rows; absence means enabled (default on).
+    async getUserModules(userId) {
+        const rows = await this.getUserSettings(userId, 'modules');
+        const m = { caption: true, develop: true };
+        for (const r of rows) {
+            if (r.setting_key === 'caption') m.caption = r.setting_value !== '0';
+            if (r.setting_key === 'develop') m.develop = r.setting_value !== '0';
+        }
+        return m;
+    }
+
+    async setUserModules(userId, mods) {
+        await this.setUserSetting(userId, 'modules', 'caption', mods.caption ? '1' : '0');
+        await this.setUserSetting(userId, 'modules', 'develop', mods.develop ? '1' : '0');
+        return true;
+    }
+
     async deleteUserSetting(userId, category, settingKey) {
         try {
             await this.ensureUserSettingsTable();
@@ -4584,6 +4602,7 @@ app.get('/api/library/files', authenticateToken, async (c) => {
     try {
         const dir = (c.req.query('dir') || '').replace(/^\/+|\/+$/g, '');
         const database = new D1Database(c.env.DB);
+        if (!(await database.getUserModules(c.get('user').id)).develop) return libraryUnavailable(c);
         const [dirs, files] = await Promise.all([
             database.getLibrarySubdirs(dir),
             database.getLibraryFilesInDir(dir, c.get('user').id),
@@ -4609,6 +4628,7 @@ app.get('/api/library/tree', authenticateToken, async (c) => {
     if (!c.env.LIBRARY?.enabled) return libraryUnavailable(c);
     try {
         const database = new D1Database(c.env.DB);
+        if (!(await database.getUserModules(c.get('user').id)).develop) return libraryUnavailable(c);
         const dirs = await database.getAllLibraryDirs();
         return c.json({ dirs, total: await database.countLibraryFiles() });
     } catch (e) {
@@ -5303,10 +5323,31 @@ app.get('/api/settings', authenticateToken, async (c) => {
         if (!settings.locationZoom) {
             settings.locationZoom = 18;
         }
-        
+
+        // Module switches (Caption / Photo-editing), default both on.
+        settings.modules = await database.getUserModules(user.id);
+
         return c.json(settings);
     } catch (error) {
         return c.json({ error: 'Failed to load settings: ' + error.message }, 500);
+    }
+});
+
+// Save the per-user module switches. At least one module must stay enabled.
+app.post('/api/settings/modules', authenticateToken, async (c) => {
+    try {
+        const user = c.get('user');
+        const body = await c.req.json().catch(() => ({}));
+        const caption = body.caption !== false;
+        const develop = body.develop !== false;
+        if (!caption && !develop) {
+            return c.json({ error: 'At least one module must stay enabled' }, 400);
+        }
+        const database = new D1Database(c.env.DB);
+        await database.setUserModules(user.id, { caption, develop });
+        return c.json({ success: true, modules: { caption, develop } });
+    } catch (error) {
+        return c.json({ error: 'Failed to save modules: ' + error.message }, 500);
     }
 });
 
