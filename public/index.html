@@ -203,7 +203,8 @@
                         <button type="button" id="devPaste" class="dr-reset" title="Paste copied settings" disabled>Paste</button>
                         <button type="button" id="devUndo" class="dr-reset" title="Undo (Ctrl/Cmd+Z)" disabled>Undo</button>
                         <button type="button" id="devRedo" class="dr-reset" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>Redo</button>
-                        <button type="button" id="devReset" class="dr-reset" title="Reset all adjustments">Reset</button>
+                        <button type="button" id="devOriginal" class="dr-reset" title="Restore the camera's original look (as imported)">As imported</button>
+                        <button type="button" id="devReset" class="dr-reset" title="Reset all edits to the flat colour raw">Reset</button>
                     </button>
                     <div class="dr-module-body" id="developBody">
                         <!-- Presets + History now live in the left panel (data-views="develop") -->
@@ -4043,6 +4044,61 @@ NOTE: The system automatically provides camera info, location, weather, and cont
         function showInfo(message, title = null, duration = 4000) {
             return showToast(message, 'info', title, duration);
         }
+
+        // ---- Modal dialogs (replace browser alert/confirm/prompt) ----
+        // Promise-based. drConfirm -> bool, drPrompt -> string|null, drAlert -> true.
+        function drDialog(opts) {
+            opts = opts || {};
+            return new Promise((resolve) => {
+                const ov = document.createElement('div');
+                ov.className = 'dr-dialog-overlay';
+                const box = document.createElement('div');
+                box.className = 'dr-dialog';
+                box.innerHTML =
+                    '<div class="dr-dialog-title"></div>' +
+                    '<div class="dr-dialog-msg"></div>' +
+                    (opts.input ? '<input class="dr-dialog-input" type="text">' : '') +
+                    (opts.requireText ? '<input class="dr-dialog-input dr-dialog-reqtext" type="text">' : '') +
+                    '<div class="dr-dialog-actions">' +
+                    (opts.cancelLabel === null ? '' : '<button class="dr-dialog-btn cancel"></button>') +
+                    '<button class="dr-dialog-btn confirm' + (opts.danger ? ' danger' : '') + '"></button>' +
+                    '</div>';
+                box.querySelector('.dr-dialog-title').textContent = opts.title || '';
+                const msgEl = box.querySelector('.dr-dialog-msg');
+                msgEl.textContent = opts.message || '';
+                if (!opts.message) msgEl.style.display = 'none';
+                const input = opts.input ? box.querySelector('.dr-dialog-input:not(.dr-dialog-reqtext)') : null;
+                if (input) { input.value = opts.inputValue || ''; input.placeholder = opts.inputPlaceholder || ''; }
+                const reqInput = opts.requireText ? box.querySelector('.dr-dialog-reqtext') : null;
+                if (reqInput) reqInput.placeholder = 'Type "' + opts.requireText + '" to confirm';
+                const confirmBtn = box.querySelector('.confirm');
+                confirmBtn.textContent = opts.confirmLabel || 'OK';
+                const cancelBtn = box.querySelector('.cancel');
+                if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+                ov.appendChild(box);
+                document.body.appendChild(ov);
+                setTimeout(() => ov.classList.add('show'), 10);
+                (input || reqInput || confirmBtn).focus();
+                if (input) input.select();
+
+                const cancelVal = opts.input ? null : false;
+                function close(val) { ov.classList.remove('show'); document.removeEventListener('keydown', onKey); setTimeout(() => ov.remove(), 160); resolve(val); }
+                function doConfirm() {
+                    if (opts.requireText && (!reqInput || reqInput.value.trim() !== opts.requireText)) {
+                        box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake'); return;
+                    }
+                    close(opts.input ? (input ? input.value.trim() : true) : true);
+                }
+                confirmBtn.addEventListener('click', doConfirm);
+                if (cancelBtn) cancelBtn.addEventListener('click', () => close(cancelVal));
+                ov.addEventListener('click', (e) => { if (e.target === ov) close(cancelVal); });
+                function onKey(e) { if (e.key === 'Escape') close(cancelVal); else if (e.key === 'Enter') { e.preventDefault(); doConfirm(); } }
+                document.addEventListener('keydown', onKey);
+            });
+        }
+        window.drConfirm = (message, opts) => { opts = opts || {}; return drDialog({ title: opts.title || 'Are you sure?', message, confirmLabel: opts.confirmLabel || 'Confirm', cancelLabel: opts.cancelLabel || 'Cancel', danger: opts.danger, requireText: opts.requireText }); };
+        window.drPrompt = (message, opts) => { opts = opts || {}; return drDialog({ title: opts.title || message, message: opts.title ? message : '', input: true, inputValue: opts.defaultValue || '', inputPlaceholder: opts.placeholder || '', confirmLabel: opts.confirmLabel || 'OK' }); };
+        window.drAlert = (message, opts) => { opts = opts || {}; return drDialog({ title: opts.title || 'Notice', message, cancelLabel: null, confirmLabel: 'OK' }); };
     </script>
 
     <!-- Footer -->

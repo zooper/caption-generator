@@ -402,6 +402,30 @@
     if (window.drCurve) window.drCurve.setPoints(adj.curve);
   }
 
+  // Shared by Reset (/reset -> colour base) and Restore-original (/edits DELETE ->
+  // as-shot): hit the endpoint to clear server state, then reload the proxy (the
+  // server picks colour vs as-shot from color_base) and clear local adj/history.
+  function clearAndReload(endpoint, method) {
+    if (!fileId) { adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render(); return; }
+    var id = fileId;
+    fetch('/api/library/' + id + endpoint, { method: method, headers: authHeaders(), credentials: 'include' })
+      .then(function (r) { return r && r.ok ? r.json().catch(function () { return {}; }) : null; })
+      .then(function (ok) {
+        if (ok === null || fileId !== id) return;
+        history = []; headSeq = -1; renderHistory();
+        adj = defaults(); syncControls();
+        return fetch('/api/library/' + id + '/proxy?v=' + Date.now(), { headers: authHeaders(), credentials: 'include' })
+          .then(function (r) { return r.ok ? r.blob() : null; })
+          .then(function (b) {
+            if (!b || fileId !== id) return;
+            var url = URL.createObjectURL(b);
+            var img = new Image();
+            img.onload = function () { setBaseImage(img); try { URL.revokeObjectURL(url); } catch (e) {} };
+            img.src = url;
+          });
+      }).catch(function () {});
+  }
+
   var api = {
     load: function (opts) {
       opts = opts || {}; fileId = opts.fileId || null; adj = defaults();
@@ -415,29 +439,11 @@
     },
     getEdited: function () { try { return ready && baseImage ? canvas.toDataURL('image/jpeg', 0.92) : null; } catch (e) { return null; } },
     getAdjustments: function () { return JSON.parse(JSON.stringify(adj)); },
-    reset: function () {
-      // Clear adjustments immediately for snappy feedback…
-      adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render();
-      if (!fileId) return;
-      var id = fileId;
-      // …then persist the reset: clears edits/history and switches this raw to
-      // the flat COLOUR demosaic on the server, and reload the colour base.
-      fetch('/api/library/' + id + '/reset', { method: 'POST', headers: authHeaders(), credentials: 'include' })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (ok) {
-          if (!ok || fileId !== id) return;
-          history = []; headSeq = -1; renderHistory();
-          return fetch('/api/library/' + id + '/proxy?v=' + Date.now(), { headers: authHeaders(), credentials: 'include' })
-            .then(function (r) { return r.ok ? r.blob() : null; })
-            .then(function (b) {
-              if (!b || fileId !== id) return;
-              var url = URL.createObjectURL(b);
-              var img = new Image();
-              img.onload = function () { setBaseImage(img); try { URL.revokeObjectURL(url); } catch (e) {} };
-              img.src = url;
-            });
-        }).catch(function () {});
-    },
+    // Reset = clear edits + switch this raw to the flat COLOUR demosaic (persists).
+    reset: function () { adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render(); clearAndReload('/reset', 'POST'); },
+    // Restore the camera's as-imported look (embedded rendering): clear all edits
+    // and turn the colour base off, then reload the as-shot proxy.
+    restoreOriginal: function () { clearAndReload('/edits', 'DELETE'); },
     set: function (k, v) { adj[k] = v; if (k === 'cropW' || k === 'cropH' || k === 'rotate90') sizeCanvas(); render(); },
     applyAdjustments: function (obj) {
       adj = defaults();
@@ -565,6 +571,8 @@
     if (bwBtn) bwBtn.addEventListener('click', function () { adj.bw = adj.bw ? 0 : 1; syncControls(); render(); scheduleSave('Black & White'); });
     var reset = document.getElementById('devReset');
     if (reset) reset.addEventListener('click', function (e) { e.stopPropagation(); api.reset(); });
+    var original = document.getElementById('devOriginal');
+    if (original) original.addEventListener('click', function (e) { e.stopPropagation(); api.restoreOriginal(); });
     var undoBtn = document.getElementById('devUndo'); if (undoBtn) undoBtn.addEventListener('click', undo);
     var redoBtn = document.getElementById('devRedo'); if (redoBtn) redoBtn.addEventListener('click', redo);
     // before/after (hold) + copy/paste
@@ -730,20 +738,44 @@
     if (!adj.curve || adj.curve.length < 2) adj.curve = [[0, 0], [1, 1]];
     syncControls(); uploadLUT(); render(); scheduleSave(name ? ('Preset: ' + name) : 'Preset');
   }
+  // Folder a built-in preset belongs to (derived, so we don't touch BUILTIN data).
+  function builtinFolder(p) { return (p.adjustments && p.adjustments.bw) ? 'Black & White' : 'Color'; }
+  var presetGroupCollapsed = {};  // session-remembered fold state per group
+
   function renderPresets() {
     var el = document.getElementById('devPresets'); if (!el) return;
     el.innerHTML = '';
-    BUILTIN.concat(savedPresets).forEach(function (p) {
-      var b = document.createElement('button'); b.type = 'button'; b.className = 'dr-preset'; b.textContent = p.name;
-      b.addEventListener('click', function () { applyPresetLook(p.adjustments, p.name); });
-      if (!p.builtin) {
-        var x = document.createElement('span'); x.textContent = ' ✕'; x.style.opacity = '.6';
-        x.addEventListener('click', function (e) { e.stopPropagation(); deletePreset(p.id); });
-        b.appendChild(x);
-      }
-      el.appendChild(b);
+    // Group: built-ins (by B&W/Color) first, then saved presets (by folder).
+    var groups = [], byName = {};
+    function bucket(name) { if (!byName[name]) { byName[name] = { name: name, items: [] }; groups.push(byName[name]); } return byName[name]; }
+    BUILTIN.forEach(function (p) { bucket(builtinFolder(p)).items.push({ name: p.name, adjustments: p.adjustments, builtin: true }); });
+    savedPresets.forEach(function (p) { bucket((p.folder && p.folder.trim()) || 'My Presets').items.push({ id: p.id, name: p.name, adjustments: p.adjustments }); });
+
+    var tree = document.createElement('div'); tree.className = 'dr-preset-tree';
+    groups.forEach(function (g) {
+      var grp = document.createElement('div'); grp.className = 'dr-preset-group' + (presetGroupCollapsed[g.name] ? ' collapsed' : '');
+      var head = document.createElement('button'); head.type = 'button'; head.className = 'dr-preset-grouphead';
+      head.innerHTML = '<svg class="dr-presetchev" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>';
+      head.appendChild(document.createTextNode(g.name));
+      head.addEventListener('click', function () { presetGroupCollapsed[g.name] = grp.classList.toggle('collapsed'); });
+      grp.appendChild(head);
+      var children = document.createElement('div'); children.className = 'dr-preset-children';
+      g.items.forEach(function (p) {
+        var row = document.createElement('div'); row.className = 'dr-preset-item';
+        var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = p.name; row.appendChild(nm);
+        row.addEventListener('click', function () { applyPresetLook(p.adjustments, p.name); });
+        if (!p.builtin) {
+          var del = document.createElement('button'); del.type = 'button'; del.className = 'dr-preset-del'; del.title = 'Delete preset'; del.textContent = '🗑';
+          del.addEventListener('click', function (e) { e.stopPropagation(); deletePreset(p.id, p.name); });
+          row.appendChild(del);
+        }
+        children.appendChild(row);
+      });
+      grp.appendChild(children);
+      tree.appendChild(grp);
     });
-    var add = document.createElement('button'); add.type = 'button'; add.className = 'dr-preset add'; add.textContent = '+ Save';
+    el.appendChild(tree);
+    var add = document.createElement('button'); add.type = 'button'; add.className = 'dr-preset-add'; add.textContent = '+ Save current as preset';
     add.addEventListener('click', saveCurrentPreset); el.appendChild(add);
   }
   function loadPresets() {
@@ -753,15 +785,27 @@
       .catch(function () { renderPresets(); });
   }
   function saveCurrentPreset() {
-    var name = window.prompt('Preset name'); if (!name) return;
-    fetch('/api/develop-presets', { method: 'POST', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ name: name, adjustments: lookOnly(adj) }) })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { if (j && j.success) { loadPresets(); if (window.showSuccess) showSuccess('Saved preset “' + name + '”', 'Develop'); } })
-      .catch(function () {});
+    if (!window.drPrompt) return;
+    window.drPrompt('Name this preset. Use "Folder/Name" to group it.', { title: 'Save preset', placeholder: 'e.g. Portraits/Warm' })
+      .then(function (raw) {
+        if (!raw) return;
+        var folder = '', name = raw.trim();
+        var slash = name.lastIndexOf('/');
+        if (slash > 0) { folder = name.slice(0, slash).trim(); name = name.slice(slash + 1).trim(); }
+        if (!name) return;
+        return fetch('/api/develop-presets', { method: 'POST', headers: authHeaders(), credentials: 'include', body: JSON.stringify({ name: name, folder: folder, adjustments: lookOnly(adj) }) })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { if (j && j.success) { loadPresets(); if (window.showSuccess) showSuccess('Saved preset “' + name + '”', 'Develop'); } });
+      }).catch(function () {});
   }
-  function deletePreset(id) {
-    fetch('/api/develop-presets/' + id, { method: 'DELETE', headers: authHeaders(), credentials: 'include' })
-      .then(function () { loadPresets(); }).catch(function () {});
+  function deletePreset(id, name) {
+    if (!window.drConfirm) return;
+    window.drConfirm('Delete the preset “' + (name || 'this preset') + '”? This can’t be undone.', { title: 'Delete preset', danger: true, confirmLabel: 'Delete' })
+      .then(function (ok) {
+        if (!ok) return;
+        return fetch('/api/develop-presets/' + id, { method: 'DELETE', headers: authHeaders(), credentials: 'include' })
+          .then(function () { loadPresets(); if (window.showSuccess) showSuccess('Preset deleted', 'Develop'); });
+      }).catch(function () {});
   }
 
   // Build the Colour Mixer sliders (Hue/Saturation/Luminance × 8 bands) into the
