@@ -70,7 +70,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 21;
+        this.CURRENT_SCHEMA_VERSION = 23;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -243,6 +243,31 @@ class D1Database {
                     console.log('Migration v21 completed successfully');
                 } catch (migrationError) {
                     console.error('Migration v21 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 22: drop the unused image_proxies table
+            if (fromVersion < 22) {
+                console.log('Running migration: Drop unused image_proxies table (v22)');
+                try {
+                    await this.migration_v22();
+                    await this.setSchemaVersion(22);
+                    console.log('Migration v22 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v22 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 23: allow multiple named API keys per user
+            // (drop the UNIQUE(user_id, integration_type) constraint)
+            if (fromVersion < 23) {
+                console.log('Running migration: Allow multiple API keys per user (v23)');
+                try {
+                    await this.migration_v23();
+                    await this.setSchemaVersion(23);
+                    console.log('Migration v23 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v23 failed:', migrationError);
                 }
             }
         } catch (error) {
@@ -1608,6 +1633,49 @@ class D1Database {
         catch (e) { /* column already exists */ }
         console.log('Migration v21 completed: Added folder to develop_presets');
     }
+    async migration_v22() {
+        await this.db.prepare('DROP INDEX IF EXISTS idx_proxy_file').run();
+        await this.db.prepare('DROP TABLE IF EXISTS image_proxies').run();
+        console.log('Migration v22 completed: dropped unused image_proxies table');
+    }
+    async migration_v23() {
+        // Rebuild user_api_keys without UNIQUE(user_id, integration_type) so a user
+        // can hold several named keys (the old constraint made each new key silently
+        // overwrite the previous one). api_key stays globally unique.
+        // Disable FK enforcement during the rebuild (SQLite's recommended procedure).
+        try { await this.db.prepare('PRAGMA foreign_keys=OFF').run(); } catch (e) { /* ok */ }
+        await this.db.prepare(`
+            CREATE TABLE IF NOT EXISTS user_api_keys_v23 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                integration_type TEXT NOT NULL,
+                api_key TEXT UNIQUE NOT NULL,
+                name TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_used DATETIME NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        `).run();
+        await this.db.prepare(`
+            INSERT INTO user_api_keys_v23 (id, user_id, integration_type, api_key, name, created_at, last_used)
+            SELECT id, user_id, integration_type, api_key, name, created_at, last_used FROM user_api_keys
+        `).run();
+        await this.db.prepare('DROP TABLE user_api_keys').run();
+        await this.db.prepare('ALTER TABLE user_api_keys_v23 RENAME TO user_api_keys').run();
+        await this.db.prepare('CREATE INDEX IF NOT EXISTS idx_api_keys_user ON user_api_keys(user_id)').run();
+        try { await this.db.prepare('PRAGMA foreign_keys=ON').run(); } catch (e) { /* ok */ }
+        console.log('Migration v23 completed: user_api_keys allows multiple keys per user');
+    }
+    // Always insert a distinct key (for user-named keys, which may share the
+    // 'general' integration_type — multiple are allowed since v23).
+    async createApiKey(userId, integrationType, apiKey, name = null) {
+        try {
+            await this.db.prepare(
+                'INSERT INTO user_api_keys (user_id, integration_type, api_key, name, created_at, last_used) VALUES (?, ?, ?, ?, datetime(\'now\'), NULL)'
+            ).bind(userId, integrationType, apiKey, name).run();
+            return true;
+        } catch (e) { return false; }
+    }
     async getDevelopPresets(userId) {
         const r = await this.db.prepare(
             'SELECT id, name, folder, adjustments, created_at FROM develop_presets WHERE user_id = ? ORDER BY folder, name'
@@ -1665,8 +1733,8 @@ class D1Database {
     async getUserApiKeys(userId) {
         try {
             const stmt = this.db.prepare(`
-                SELECT id, integration_type, api_key, created_at, last_used 
-                FROM user_api_keys 
+                SELECT id, integration_type, api_key, name, created_at, last_used
+                FROM user_api_keys
                 WHERE user_id = ?
                 ORDER BY created_at DESC
             `);
@@ -4046,12 +4114,13 @@ app.post('/api/settings/api-keys', authenticateToken, async (c) => {
         
         // Generate a new API key using Web Crypto API
         const apiKey = 'acs_' + generateRandomId().replace(/-/g, '') + '_' + Date.now().toString(36);
-        
+
         const database = new D1Database(c.env.DB);
-        const success = await database.createOrUpdateApiKey(user.id, integration_type, apiKey, name.trim());
-        
+        // Named keys are distinct rows (multiple allowed) — don't upsert/overwrite.
+        const success = await database.createApiKey(user.id, integration_type, apiKey, name.trim());
+
         if (success) {
-            return c.json({ 
+            return c.json({
                 success: true,
                 apiKey: apiKey,  // Use camelCase to match frontend expectations
                 api_key: apiKey, // Also include snake_case for compatibility
