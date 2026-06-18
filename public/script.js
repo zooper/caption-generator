@@ -373,9 +373,10 @@ class CaptionGenerator {
         const prompt = this.customPrompts.find(p => p.id === promptId);
         if (!prompt) return;
 
-        if (!confirm(`Are you sure you want to delete "${prompt.name}"? This action cannot be undone.`)) {
-            return;
-        }
+        const ok = window.drConfirm
+            ? await window.drConfirm(`Delete the custom prompt “${prompt.name}”? This can’t be undone.`, { title: 'Delete prompt', danger: true, confirmLabel: 'Delete' })
+            : true;
+        if (!ok) return;
 
         try {
             const response = await fetch(`/api/custom-prompts/${promptId}`, {
@@ -908,14 +909,17 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
             includeWeather: this.weatherToggle.checked
         };
 
-        const templateName = prompt('Enter a name for this context template:');
-        if (templateName) {
+        const ask = window.drPrompt
+            ? window.drPrompt('Name this context template', { title: 'Save template' })
+            : Promise.resolve(null);
+        ask.then((templateName) => {
+            if (!templateName) return;
             const savedTemplates = JSON.parse(localStorage.getItem('contextTemplates') || '{}');
             savedTemplates[templateName] = template;
             localStorage.setItem('contextTemplates', JSON.stringify(savedTemplates));
             this.showNotification(`Template "${templateName}" saved!`);
             this.loadTemplateList(); // Refresh the dropdown
-        }
+        });
     }
 
     loadTemplateList() {
@@ -974,15 +978,19 @@ ALT_TEXT: [descriptive alt text for accessibility]`;
         const templateName = this.templateSelect.value;
         if (!templateName) return;
         
-        if (confirm(`Are you sure you want to delete the template "${templateName}"?`)) {
+        const ask = window.drConfirm
+            ? window.drConfirm(`Delete the template “${templateName}”?`, { title: 'Delete template', danger: true, confirmLabel: 'Delete' })
+            : Promise.resolve(true);
+        ask.then((ok) => {
+            if (!ok) return;
             const savedTemplates = JSON.parse(localStorage.getItem('contextTemplates') || '{}');
             delete savedTemplates[templateName];
             localStorage.setItem('contextTemplates', JSON.stringify(savedTemplates));
-            
+
             this.showNotification(`Template "${templateName}" deleted!`);
             this.loadTemplateList(); // Refresh the dropdown
             this.onTemplateSelectChange(); // Update button states
-        }
+        });
     }
 
     async callLocalAPI(prompt, base64Image) {
@@ -1544,7 +1552,7 @@ window.scriptLoaded = true;
 
 // Simple test function that should always work
 window.simpleTest = function() {
-    alert('Script is loaded and working!');
+    (window.showInfo || window.alert)('Script is loaded and working!');
 };
 
 // Global test function for debugging

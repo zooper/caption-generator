@@ -70,7 +70,7 @@ function getFallbackTemplate(templateName, data) {
 class D1Database {
     constructor(db) {
         this.db = db;
-        this.CURRENT_SCHEMA_VERSION = 20;
+        this.CURRENT_SCHEMA_VERSION = 21;
         this._initialized = false;
         // Don't run async operations in constructor
     }
@@ -231,6 +231,18 @@ class D1Database {
                     console.log('Migration v20 completed successfully');
                 } catch (migrationError) {
                     console.error('Migration v20 failed:', migrationError);
+                }
+            }
+
+            // Migration to version 21: develop preset folders (tree grouping)
+            if (fromVersion < 21) {
+                console.log('Running migration: Add folder to develop_presets (v21)');
+                try {
+                    await this.migration_v21();
+                    await this.setSchemaVersion(21);
+                    console.log('Migration v21 completed successfully');
+                } catch (migrationError) {
+                    console.error('Migration v21 failed:', migrationError);
                 }
             }
         } catch (error) {
@@ -1591,19 +1603,24 @@ class D1Database {
         await this.db.prepare('CREATE INDEX IF NOT EXISTS idx_presets_user ON develop_presets(user_id)').run();
         console.log('Migration v18 completed: Added develop_presets table');
     }
+    async migration_v21() {
+        try { await this.db.prepare("ALTER TABLE develop_presets ADD COLUMN folder TEXT DEFAULT ''").run(); }
+        catch (e) { /* column already exists */ }
+        console.log('Migration v21 completed: Added folder to develop_presets');
+    }
     async getDevelopPresets(userId) {
         const r = await this.db.prepare(
-            'SELECT id, name, adjustments, created_at FROM develop_presets WHERE user_id = ? ORDER BY name'
+            'SELECT id, name, folder, adjustments, created_at FROM develop_presets WHERE user_id = ? ORDER BY folder, name'
         ).bind(userId).all();
         return (r.results || []).map((row) => {
             let adj = {}; try { adj = JSON.parse(row.adjustments); } catch {}
-            return { id: row.id, name: row.name, adjustments: adj };
+            return { id: row.id, name: row.name, folder: row.folder || '', adjustments: adj };
         });
     }
-    async createDevelopPreset(id, userId, name, adjustments) {
+    async createDevelopPreset(id, userId, name, adjustments, folder) {
         await this.db.prepare(
-            'INSERT INTO develop_presets (id, user_id, name, adjustments) VALUES (?, ?, ?, ?)'
-        ).bind(id, userId, name, JSON.stringify(adjustments || {})).run();
+            'INSERT INTO develop_presets (id, user_id, name, folder, adjustments) VALUES (?, ?, ?, ?, ?)'
+        ).bind(id, userId, name, folder || '', JSON.stringify(adjustments || {})).run();
     }
     async deleteDevelopPreset(id, userId) {
         await this.db.prepare('DELETE FROM develop_presets WHERE id = ? AND user_id = ?').bind(id, userId).run();
@@ -4781,11 +4798,11 @@ app.get('/api/develop-presets', authenticateToken, async (c) => {
 });
 app.post('/api/develop-presets', authenticateToken, async (c) => {
     try {
-        const { name, adjustments } = await c.req.json();
+        const { name, adjustments, folder } = await c.req.json();
         if (!name || !String(name).trim()) return c.json({ error: 'Name required' }, 400);
         const database = new D1Database(c.env.DB);
         const id = (crypto.randomUUID && crypto.randomUUID()) || ('p' + Date.now() + Math.random().toString(36).slice(2, 8));
-        await database.createDevelopPreset(id, c.get('user').id, String(name).trim().slice(0, 60), adjustments);
+        await database.createDevelopPreset(id, c.get('user').id, String(name).trim().slice(0, 60), adjustments, String(folder || '').trim().slice(0, 40));
         return c.json({ success: true, id });
     } catch (e) {
         console.error('develop-presets create failed:', e);
