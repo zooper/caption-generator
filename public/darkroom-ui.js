@@ -118,7 +118,12 @@
     new MutationObserver(mirrorImage).observe(img, { attributes: true, attributeFilter: ['src', 'class'] });
 
     var thumb = $('navThumb'), fi = $('fileInput');
-    if (thumb && fi) thumb.addEventListener('click', function () { fi.click(); });
+    // The navigator thumb chooses a file only in the Caption module; in Develop you
+    // load photos from the library, so it must not pop the file picker there.
+    if (thumb && fi) thumb.addEventListener('click', function () {
+      var mc = document.querySelector('.main-content');
+      if (mc && mc.getAttribute('data-view') === 'caption') fi.click();
+    });
     if (fi) fi.addEventListener('change', function () { setTimeout(mirrorImage, 0); });
 
     // Capture dropped filename (inline logic owns the actual file read).
@@ -358,6 +363,20 @@
     document.querySelectorAll('.dr-modtab').forEach(function (t) {
       t.addEventListener('click', function () { setView(t.getAttribute('data-view')); });
     });
+
+    // Module shortcuts: G = Library, D = Develop, C = Caption. Ignored while typing
+    // in a field or with a modifier held (so Ctrl/Cmd-C copy etc. still work).
+    var VIEW_KEYS = { g: 'library', d: 'develop', c: 'caption' };
+    document.addEventListener('keydown', function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      var v = VIEW_KEYS[(e.key || '').toLowerCase()];
+      if (!v) return;
+      e.preventDefault();
+      setView(v);
+    });
+
     loadTree();
     setView('library'); // default to the catalog grid (also renders it)
     mirrorImage();
