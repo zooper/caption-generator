@@ -22,8 +22,8 @@
     mixHueRed: 0, mixHueOrange: 0, mixHueYellow: 0, mixHueGreen: 0, mixHueAqua: 0, mixHueBlue: 0, mixHuePurple: 0, mixHueMagenta: 0,
     mixSatRed: 0, mixSatOrange: 0, mixSatYellow: 0, mixSatGreen: 0, mixSatAqua: 0, mixSatBlue: 0, mixSatPurple: 0, mixSatMagenta: 0,
     mixLumRed: 0, mixLumOrange: 0, mixLumYellow: 0, mixLumGreen: 0, mixLumAqua: 0, mixLumBlue: 0, mixLumPurple: 0, mixLumMagenta: 0,
-    clarity: 0, texture: 0, sharpen: 0, grain: 0, grainSize: 40,
-    splitShadowHue: 210, splitShadowSat: 0, splitHighlightHue: 40, splitHighlightSat: 0,
+    clarity: 0, texture: 0, sharpen: 0, grain: 0, grainSize: 40, dehaze: 0, noise: 0,
+    splitShadowHue: 210, splitShadowSat: 0, splitMidHue: 280, splitMidSat: 0, splitHighlightHue: 40, splitHighlightSat: 0,
     vignette: 0,
     // geometry
     cropX: 0, cropY: 0, cropW: 1, cropH: 1, straighten: 0, rotate90: 0, flipH: 0, flipV: 0,
@@ -49,7 +49,7 @@
     'uniform float exposure,contrast,highlights,shadows,whites,blacks,temp,tint,vibrance,saturation;',
     'uniform float bw,bwRed,bwOrange,bwYellow,bwGreen,bwAqua,bwBlue,bwPurple,bwMagenta;',
     'uniform float mixHue[8],mixSat[8],mixLum[8];',   // per-hue Colour Mixer (HSL)
-    'uniform float ssHue,ssSat,shHue,shSat;',
+    'uniform float ssHue,ssSat,mtHue,mtSat,shHue,shSat;',   // colour grading: shadows / midtones / highlights
     'uniform vec4 uCrop; uniform float uStraighten,uRot,uInAspect; uniform vec2 uFlip;',
     'const vec3 LUM=vec3(0.2126,0.7152,0.0722);',  // Rec.709 luma
     'vec2 rot2(vec2 c,float a){ float s=sin(a),co=cos(a); return mat2(co,-s,s,co)*c; }',
@@ -94,8 +94,9 @@
     '    hsl.x=fract(hsl.x+wH*0.0009); hsl.y=clamp(hsl.y*(1.0+wS*0.01),0.0,1.0); hsl.z=clamp(hsl.z*(1.0+wL*0.006),0.0,1.0);',
     '    c=hsl2rgb(hsl);',
     '  }',
-    '  float lum2=dot(clamp(c,0.0,1.0),LUM);',                          // split tone
+    '  float lum2=dot(clamp(c,0.0,1.0),LUM);',                          // colour grading (shadows/mid/highlights)
     '  c += (hue2rgb(ssHue/360.0)-0.5)*(ssSat*0.006)*(1.0-smoothstep(0.0,0.6,lum2));',
+    '  c += (hue2rgb(mtHue/360.0)-0.5)*(mtSat*0.006)*(1.0-smoothstep(0.0,0.5,abs(lum2-0.5)));',
     '  c += (hue2rgb(shHue/360.0)-0.5)*(shSat*0.006)*smoothstep(0.4,1.0,lum2);',
     '  c = clamp(c,0.0,1.0);',
     '  c = vec3(texture2D(u_lut,vec2(c.r,0.5)).r, texture2D(u_lut,vec2(c.g,0.5)).g, texture2D(u_lut,vec2(c.b,0.5)).b);', // tone curve: R/G/B columns hold master->per-channel composite
@@ -116,13 +117,17 @@
   var FRAGFINAL = [
     'precision highp float; varying vec2 v_uv;',
     'uniform sampler2D u_base; uniform sampler2D u_blur;',
-    'uniform float clarity,texture_,sharpen,grain,grainSize,vignette,seed,uAspect;',
+    'uniform float clarity,texture_,sharpen,grain,grainSize,vignette,dehaze,noise,seed,uAspect;',
     'const vec3 LUM=vec3(0.2126,0.7152,0.0722);',  // Rec.709 luma
     'float rnd(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }',
     'void main(){',
     '  vec3 base=texture2D(u_base,v_uv).rgb; vec3 blur=texture2D(u_blur,v_uv).rgb;',
     '  vec3 detail=base-blur;',
     '  vec3 c = base + detail*(clarity*0.012) + detail*(texture_*0.010) + detail*(sharpen*0.02);',
+    '  float nrf = 1.0 - smoothstep(0.0, 0.07, length(detail));',                  // flat (low-detail) regions
+    '  c = mix(c, blur, clamp(noise*0.01,0.0,1.0)*nrf);',                          // luminance noise reduction (preview-grade)
+    '  float dz = dehaze*0.01;',                                                   // dehaze: local contrast + saturation + gentle black pull
+    '  c += detail*(dz*1.6); float lz=dot(clamp(c,0.0,1.0),LUM); c=mix(vec3(lz),c,1.0+dz*0.7); c-=dz*0.018*(1.0-smoothstep(0.0,0.35,lz));',
     '  c = clamp(c,0.0,1.0);',  // clamp detail boost before grain/vignette so noise + darkening act on display-range signal
     '  if(grain>0.0){ float n=rnd(v_uv*grainSize*6.0+seed)-0.5; c += n*(grain*0.0032); }',
     '  if(abs(vignette)>0.0){ vec2 q=(v_uv-0.5)*vec2(uAspect,1.0); float d=length(q)/(0.5*sqrt(uAspect*uAspect+1.0)); c *= 1.0 - (vignette*0.006)*smoothstep(0.35,1.0,d); }',  // aspect-correct: circular in pixels, reaches all corners evenly
@@ -143,7 +148,9 @@
     whites: 'Whites', blacks: 'Blacks', temp: 'Temp', tint: 'Tint', vibrance: 'Vibrance',
     saturation: 'Saturation', clarity: 'Clarity', texture: 'Texture', sharpen: 'Sharpen',
     grain: 'Grain', grainSize: 'Grain Size', vignette: 'Vignette', straighten: 'Straighten',
-    splitShadowHue: 'Split Tone', splitShadowSat: 'Split Tone', splitHighlightHue: 'Split Tone', splitHighlightSat: 'Split Tone',
+    dehaze: 'Dehaze', noise: 'Noise Reduction',
+    splitShadowHue: 'Color Grading', splitShadowSat: 'Color Grading', splitMidHue: 'Color Grading', splitMidSat: 'Color Grading',
+    splitHighlightHue: 'Color Grading', splitHighlightSat: 'Color Grading',
   };
   function labelFor(k) { return (k && k.indexOf('bw') === 0) ? 'B&W Mix' : (ADJ_LABELS[k] || 'Adjust'); }
 
@@ -216,6 +223,7 @@
     gl.uniform1fv(u(prog1, 'mixSat[0]'), new Float32Array(MIX_BANDS.map(function (b) { return adj['mixSat' + b] || 0; })));
     gl.uniform1fv(u(prog1, 'mixLum[0]'), new Float32Array(MIX_BANDS.map(function (b) { return adj['mixLum' + b] || 0; })));
     gl.uniform1f(u(prog1, 'ssHue'), adj.splitShadowHue); gl.uniform1f(u(prog1, 'ssSat'), adj.splitShadowSat);
+    gl.uniform1f(u(prog1, 'mtHue'), adj.splitMidHue); gl.uniform1f(u(prog1, 'mtSat'), adj.splitMidSat);
     gl.uniform1f(u(prog1, 'shHue'), adj.splitHighlightHue); gl.uniform1f(u(prog1, 'shSat'), adj.splitHighlightSat);
     if (cropMode) gl.uniform4f(u(prog1, 'uCrop'), 0, 0, 1, 1); // crop mode previews the full frame
     else gl.uniform4f(u(prog1, 'uCrop'), adj.cropX, adj.cropY, adj.cropW, adj.cropH);
@@ -239,6 +247,7 @@
     gl.uniform1f(u(progFinal, 'clarity'), adj.clarity); gl.uniform1f(u(progFinal, 'texture_'), adj.texture);
     gl.uniform1f(u(progFinal, 'sharpen'), adj.sharpen); gl.uniform1f(u(progFinal, 'grain'), adj.grain);
     gl.uniform1f(u(progFinal, 'grainSize'), adj.grainSize); gl.uniform1f(u(progFinal, 'vignette'), adj.vignette);
+    gl.uniform1f(u(progFinal, 'dehaze'), adj.dehaze || 0); gl.uniform1f(u(progFinal, 'noise'), adj.noise || 0);
     gl.uniform1f(u(progFinal, 'seed'), seed);
     gl.uniform1f(u(progFinal, 'uAspect'), W / H);
     drawQuad();
@@ -707,6 +716,10 @@
     { name: 'B&W Soft', builtin: true, adjustments: { bw: 1, contrast: -8, highlights: -20, shadows: 25, clarity: -10, curve: [[0, 0.08], [1, 0.92]] } },
     { name: 'B&W Film + Grain', builtin: true, adjustments: { bw: 1, contrast: 20, clarity: 18, grain: 45, grainSize: 55, vignette: 25, bwOrange: 15 } },
     { name: 'Selenium Tone', builtin: true, adjustments: { bw: 1, contrast: 18, splitShadowHue: 265, splitShadowSat: 28, splitHighlightHue: 35, splitHighlightSat: 12 } },
+    { name: 'Warm Film', builtin: true, adjustments: { bw: 0, temp: 14, contrast: 12, highlights: -14, shadows: 12, vibrance: 16, splitShadowHue: 40, splitShadowSat: 14, splitHighlightHue: 50, splitHighlightSat: 10, curve: [[0, 0.06], [0.75, 0.8], [1, 0.96]] } },
+    { name: 'Cool Matte', builtin: true, adjustments: { bw: 0, temp: -10, contrast: -10, blacks: 14, vibrance: -8, saturation: -6, splitShadowHue: 210, splitShadowSat: 16, curve: [[0, 0.1], [1, 0.92]] } },
+    { name: 'Punchy', builtin: true, adjustments: { bw: 0, contrast: 22, clarity: 18, vibrance: 24, saturation: 6, blacks: -16, whites: 12, dehaze: 14 } },
+    { name: 'Faded', builtin: true, adjustments: { bw: 0, contrast: -16, blacks: 20, highlights: -10, vibrance: -10, splitHighlightHue: 45, splitHighlightSat: 10, curve: [[0, 0.14], [1, 0.88]] } },
   ];
   var savedPresets = [];
 
