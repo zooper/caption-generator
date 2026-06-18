@@ -35,6 +35,7 @@
   function defaults() {
     var a = {}; NUM_KEYS.forEach(function (k) { a[k] = DEFAULTS[k]; });
     a.bw = 0; a.curve = [[0, 0], [1, 1]];
+    a.curveR = [[0, 0], [1, 1]]; a.curveG = [[0, 0], [1, 1]]; a.curveB = [[0, 0], [1, 1]];
     return a;
   }
 
@@ -97,7 +98,7 @@
     '  c += (hue2rgb(ssHue/360.0)-0.5)*(ssSat*0.006)*(1.0-smoothstep(0.0,0.6,lum2));',
     '  c += (hue2rgb(shHue/360.0)-0.5)*(shSat*0.006)*smoothstep(0.4,1.0,lum2);',
     '  c = clamp(c,0.0,1.0);',
-    '  c = vec3(texture2D(u_lut,vec2(c.r,0.5)).r, texture2D(u_lut,vec2(c.g,0.5)).r, texture2D(u_lut,vec2(c.b,0.5)).r);', // curve
+    '  c = vec3(texture2D(u_lut,vec2(c.r,0.5)).r, texture2D(u_lut,vec2(c.g,0.5)).g, texture2D(u_lut,vec2(c.b,0.5)).b);', // tone curve: R/G/B columns hold master->per-channel composite
     '  gl_FragColor = vec4(c,1.0);',
     '}',
   ].join('\n');
@@ -163,21 +164,33 @@
     return true;
   }
 
+  // Sort curve points by x (a valid [[0,0],[1,1]] line if missing/short).
+  function sortCurve(c) { return (c && c.length >= 2) ? c.slice().sort(function (a, b) { return a[0] - b[0]; }) : [[0, 0], [1, 1]]; }
+  // Piecewise-linear sample of a sorted curve at x in [0,1].
+  function sampleCurve(p, x) {
+    var y = p[0][1];
+    for (var j = 0; j < p.length - 1; j++) {
+      if (x >= p[j][0] && x <= p[j + 1][0]) {
+        var t = (p[j + 1][0] - p[j][0]) > 1e-6 ? (x - p[j][0]) / (p[j + 1][0] - p[j][0]) : 0;
+        return p[j][1] + t * (p[j + 1][1] - p[j][1]);
+      }
+      if (x > p[j + 1][0]) y = p[j + 1][1];
+    }
+    return y;
+  }
   function uploadLUT() {
-    // monotone-ish piecewise-linear curve through sorted points -> 256 LUT
-    var pts = (adj.curve && adj.curve.length >= 2) ? adj.curve.slice().sort(function (a, b) { return a[0] - b[0]; }) : [[0, 0], [1, 1]];
+    // One 256x1 RGBA LUT whose R/G/B columns each hold the master curve composed
+    // with that channel's curve: out = channel(master(x)). Identity channel curves
+    // make all three columns equal (= the old single-curve behaviour).
+    var M = sortCurve(adj.curve), R = sortCurve(adj.curveR), G = sortCurve(adj.curveG), B = sortCurve(adj.curveB);
+    var clamp8 = function (y) { return Math.max(0, Math.min(255, Math.round(y * 255))); };
     var lut = new Uint8Array(256 * 4);
     for (var i = 0; i < 256; i++) {
-      var x = i / 255, y = pts[0][1];
-      for (var j = 0; j < pts.length - 1; j++) {
-        if (x >= pts[j][0] && x <= pts[j + 1][0]) {
-          var t = (pts[j + 1][0] - pts[j][0]) > 1e-6 ? (x - pts[j][0]) / (pts[j + 1][0] - pts[j][0]) : 0;
-          y = pts[j][1] + t * (pts[j + 1][1] - pts[j][1]); break;
-        }
-        if (x > pts[j + 1][0]) y = pts[j + 1][1];
-      }
-      var v = Math.max(0, Math.min(255, Math.round(y * 255)));
-      lut[i * 4] = lut[i * 4 + 1] = lut[i * 4 + 2] = v; lut[i * 4 + 3] = 255;
+      var m = sampleCurve(M, i / 255);
+      lut[i * 4] = clamp8(sampleCurve(R, m));
+      lut[i * 4 + 1] = clamp8(sampleCurve(G, m));
+      lut[i * 4 + 2] = clamp8(sampleCurve(B, m));
+      lut[i * 4 + 3] = 255;
     }
     gl.bindTexture(gl.TEXTURE_2D, lutTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, lut);
@@ -281,7 +294,7 @@
   function adjIsDefault() {
     var d = defaults();
     for (var k in d) {
-      if (k === 'curve') { if (JSON.stringify(adj.curve) !== JSON.stringify(d.curve)) return false; }
+      if (k.indexOf('curve') === 0) { if (JSON.stringify(adj[k]) !== JSON.stringify(d[k])) return false; }
       else if (adj[k] !== d[k]) return false;
     }
     return true;
@@ -416,7 +429,7 @@
     applyAdjustments: function (obj) {
       adj = defaults();
       Object.keys(obj || {}).forEach(function (k) { if (k in adj || k === 'bw' || k === 'curve') adj[k] = obj[k]; });
-      if (!adj.curve || adj.curve.length < 2) adj.curve = [[0, 0], [1, 1]];
+      ['curve', 'curveR', 'curveG', 'curveB'].forEach(function (k) { if (!adj[k] || adj[k].length < 2) adj[k] = [[0, 0], [1, 1]]; });
       syncControls(); sizeCanvas(); uploadLUT(); render();
     },
     undo: undo, redo: redo,
@@ -576,7 +589,9 @@
   function initCurveWidget() {
     var cv = document.getElementById('devCurve'); if (!cv) return;
     var ctx = cv.getContext('2d'); var W = cv.width, H = cv.height, drag = -1;
-    function pts() { return adj.curve; }
+    var curveKey = 'curve';                                  // active channel: curve|curveR|curveG|curveB
+    var STROKE = { curve: '#9B7BFF', curveR: '#ff5b5b', curveG: '#54cc6a', curveB: '#5b9bff' };
+    function pts() { if (!adj[curveKey] || adj[curveKey].length < 2) adj[curveKey] = [[0, 0], [1, 1]]; return adj[curveKey]; }
     function toPx(p) { return [p[0] * W, H - p[1] * H]; }
     function toNorm(x, y) { return [Math.max(0, Math.min(1, x / W)), Math.max(0, Math.min(1, 1 - y / H))]; }
     function draw() {
@@ -584,19 +599,30 @@
       ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 1;
       for (var i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(W * i / 4, 0); ctx.lineTo(W * i / 4, H); ctx.moveTo(0, H * i / 4); ctx.lineTo(W, H * i / 4); ctx.stroke(); }
       var p = pts().slice().sort(function (a, b) { return a[0] - b[0]; });
-      ctx.strokeStyle = '#9B7BFF'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.strokeStyle = STROKE[curveKey] || '#9B7BFF'; ctx.lineWidth = 2; ctx.beginPath();
       for (var x = 0; x <= W; x += 3) { var nx = x / W, ny = p[0][1]; for (var j = 0; j < p.length - 1; j++) { if (nx >= p[j][0] && nx <= p[j + 1][0]) { var t = (p[j + 1][0] - p[j][0]) > 1e-6 ? (nx - p[j][0]) / (p[j + 1][0] - p[j][0]) : 0; ny = p[j][1] + t * (p[j + 1][1] - p[j][1]); break; } if (nx > p[j + 1][0]) ny = p[j + 1][1]; } if (x === 0) ctx.moveTo(0, H - ny * H); else ctx.lineTo(x, H - ny * H); }
       ctx.stroke();
       ctx.fillStyle = '#fff'; pts().forEach(function (pt) { var px = toPx(pt); ctx.beginPath(); ctx.arc(px[0], px[1], 4, 0, 6.29); ctx.fill(); });
     }
     function hit(x, y) { for (var i = 0; i < pts().length; i++) { var px = toPx(pts()[i]); if (Math.abs(px[0] - x) < 9 && Math.abs(px[1] - y) < 9) return i; } return -1; }
     function pos(e) { var r = cv.getBoundingClientRect(); var t = e.touches ? e.touches[0] : e; return [(t.clientX - r.left) * W / r.width, (t.clientY - r.top) * H / r.height]; }
-    function changed() { adj.curve = pts(); uploadLUT(); render(); draw(); scheduleSave('Tone Curve'); }
-    cv.addEventListener('mousedown', function (e) { var pp = pos(e); drag = hit(pp[0], pp[1]); if (drag < 0) { var n = toNorm(pp[0], pp[1]); adj.curve.push(n); adj.curve.sort(function (a, b) { return a[0] - b[0]; }); drag = adj.curve.indexOf(n); changed(); } });
-    window.addEventListener('mousemove', function (e) { if (drag < 0) return; var pp = pos(e); var n = toNorm(pp[0], pp[1]); if (drag > 0 && drag < adj.curve.length - 1) adj.curve[drag] = n; else adj.curve[drag] = [adj.curve[drag][0], n[1]]; changed(); });
+    function changed() { uploadLUT(); render(); draw(); scheduleSave(curveKey === 'curve' ? 'Tone Curve' : 'Curve ' + curveKey.slice(5)); }
+    cv.addEventListener('mousedown', function (e) { var c = pts(); var pp = pos(e); drag = hit(pp[0], pp[1]); if (drag < 0) { var n = toNorm(pp[0], pp[1]); c.push(n); c.sort(function (a, b) { return a[0] - b[0]; }); drag = c.indexOf(n); changed(); } });
+    window.addEventListener('mousemove', function (e) { if (drag < 0) return; var c = pts(); var pp = pos(e); var n = toNorm(pp[0], pp[1]); if (drag > 0 && drag < c.length - 1) c[drag] = n; else c[drag] = [c[drag][0], n[1]]; changed(); });
     window.addEventListener('mouseup', function () { drag = -1; });
-    cv.addEventListener('dblclick', function (e) { var pp = pos(e); var i = hit(pp[0], pp[1]); if (i > 0 && i < adj.curve.length - 1) { adj.curve.splice(i, 1); changed(); } });
-    window.drCurve = { setPoints: function (p) { adj.curve = (p && p.length >= 2) ? p : [[0, 0], [1, 1]]; draw(); }, redraw: draw };
+    cv.addEventListener('dblclick', function (e) { var c = pts(); var pp = pos(e); var i = hit(pp[0], pp[1]); if (i > 0 && i < c.length - 1) { c.splice(i, 1); changed(); } });
+    // channel tabs (RGB master + R/G/B)
+    var tabs = document.querySelectorAll('#devCurveTabs [data-curve]');
+    tabs.forEach(function (b) {
+      b.addEventListener('click', function () {
+        curveKey = b.getAttribute('data-curve');
+        tabs.forEach(function (x) { x.classList.toggle('active', x === b); });
+        draw();
+      });
+    });
+    // setPoints() is called on load/undo/reset — return the widget to the master
+    // channel and redraw against the freshly-applied adj.
+    window.drCurve = { setPoints: function () { curveKey = 'curve'; tabs.forEach(function (x) { x.classList.toggle('active', x.getAttribute('data-curve') === 'curve'); }); draw(); }, redraw: draw };
     draw();
   }
 
