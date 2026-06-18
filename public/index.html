@@ -686,7 +686,13 @@
             const uploadPlaceholder = document.getElementById('uploadPlaceholder');
             const generateBtn = document.getElementById('generateBtn');
 
-            uploadArea.addEventListener('click', () => fileInput.click());
+            // Uploading a new file is a Caption-module action only. In Library/Develop
+            // you open photos from the catalog, so clicking the canvas must NOT pop the
+            // file picker (that's how you'd caption an image not in your library).
+            uploadArea.addEventListener('click', () => {
+                var mc = document.querySelector('.main-content');
+                if (mc && mc.getAttribute('data-view') === 'caption') fileInput.click();
+            });
             uploadArea.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 uploadArea.classList.add('dragover');
