@@ -227,7 +227,15 @@
 
                         <div class="dr-sub">
                             <button class="dr-subhead" type="button"><svg class="dr-subchev" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>Tone curve</button>
-                            <div class="dr-subbody"><div class="dr-curve-wrap"><canvas id="devCurve" class="dr-curve" width="252" height="160"></canvas></div></div>
+                            <div class="dr-subbody">
+                                <div class="dr-curve-tabs" id="devCurveTabs">
+                                    <button type="button" class="dr-curve-tab active" data-curve="curve" title="RGB (master)">RGB</button>
+                                    <button type="button" class="dr-curve-tab ch-r" data-curve="curveR" title="Red channel">R</button>
+                                    <button type="button" class="dr-curve-tab ch-g" data-curve="curveG" title="Green channel">G</button>
+                                    <button type="button" class="dr-curve-tab ch-b" data-curve="curveB" title="Blue channel">B</button>
+                                </div>
+                                <div class="dr-curve-wrap"><canvas id="devCurve" class="dr-curve" width="252" height="160"></canvas></div>
+                            </div>
                         </div>
 
                         <div class="dr-sub" data-group="color">
