@@ -19,6 +19,9 @@
     exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0,
     temp: 0, tint: 0, vibrance: 0, saturation: 0,
     bwRed: 0, bwOrange: 0, bwYellow: 0, bwGreen: 0, bwAqua: 0, bwBlue: 0, bwPurple: 0, bwMagenta: 0,
+    mixHueRed: 0, mixHueOrange: 0, mixHueYellow: 0, mixHueGreen: 0, mixHueAqua: 0, mixHueBlue: 0, mixHuePurple: 0, mixHueMagenta: 0,
+    mixSatRed: 0, mixSatOrange: 0, mixSatYellow: 0, mixSatGreen: 0, mixSatAqua: 0, mixSatBlue: 0, mixSatPurple: 0, mixSatMagenta: 0,
+    mixLumRed: 0, mixLumOrange: 0, mixLumYellow: 0, mixLumGreen: 0, mixLumAqua: 0, mixLumBlue: 0, mixLumPurple: 0, mixLumMagenta: 0,
     clarity: 0, texture: 0, sharpen: 0, grain: 0, grainSize: 40,
     splitShadowHue: 210, splitShadowSat: 0, splitHighlightHue: 40, splitHighlightSat: 0,
     vignette: 0,
@@ -26,6 +29,8 @@
     cropX: 0, cropY: 0, cropW: 1, cropH: 1, straighten: 0, rotate90: 0, flipH: 0, flipV: 0,
   };
   var NUM_KEYS = Object.keys(DEFAULTS);
+  // Colour Mixer hue bands, in the same order as the shader's hue-weight centres.
+  var MIX_BANDS = ['Red', 'Orange', 'Yellow', 'Green', 'Aqua', 'Blue', 'Purple', 'Magenta'];
 
   function defaults() {
     var a = {}; NUM_KEYS.forEach(function (k) { a[k] = DEFAULTS[k]; });
@@ -42,6 +47,7 @@
     'uniform sampler2D u_img; uniform sampler2D u_lut;',
     'uniform float exposure,contrast,highlights,shadows,whites,blacks,temp,tint,vibrance,saturation;',
     'uniform float bw,bwRed,bwOrange,bwYellow,bwGreen,bwAqua,bwBlue,bwPurple,bwMagenta;',
+    'uniform float mixHue[8],mixSat[8],mixLum[8];',   // per-hue Colour Mixer (HSL)
     'uniform float ssHue,ssSat,shHue,shSat;',
     'uniform vec4 uCrop; uniform float uStraighten,uRot,uInAspect; uniform vec2 uFlip;',
     'const vec3 LUM=vec3(0.2126,0.7152,0.0722);',  // Rec.709 luma
@@ -57,6 +63,10 @@
     '  float h; if(mx==c.r)h=mod((c.g-c.b)/d,6.0); else if(mx==c.g)h=(c.b-c.r)/d+2.0; else h=(c.r-c.g)/d+4.0; return h/6.0; }',
     'float hw(float h,float c){ float d=abs(fract(h-c+0.5)-0.5); return max(0.0,1.0-d/0.0833); }',
     'vec3 hue2rgb(float h){ return clamp(abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0,0.0,1.0); }',
+    'vec3 rgb2hsl(vec3 c){ float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b)),d=mx-mn; float L=(mx+mn)*0.5; float H=0.0,S=0.0;',
+    '  if(d>1e-5){ S = L>0.5 ? d/(2.0-mx-mn) : d/(mx+mn); if(mx==c.r)H=mod((c.g-c.b)/d,6.0); else if(mx==c.g)H=(c.b-c.r)/d+2.0; else H=(c.r-c.g)/d+4.0; H/=6.0; } return vec3(H,S,L); }',
+    'float h2c(float p,float q,float t){ if(t<0.0)t+=1.0; if(t>1.0)t-=1.0; if(t<0.16667)return p+(q-p)*6.0*t; if(t<0.5)return q; if(t<0.66667)return p+(q-p)*(0.66667-t)*6.0; return p; }',
+    'vec3 hsl2rgb(vec3 hsl){ float H=hsl.x,S=hsl.y,L=hsl.z; if(S<1e-5)return vec3(L); float q=L<0.5?L*(1.0+S):L+S-L*S; float p=2.0*L-q; return vec3(h2c(p,q,H+0.33333),h2c(p,q,H),h2c(p,q,H-0.33333)); }',
     'void main(){',
     '  vec3 c = texture2D(u_img, srcUV(v_uv)).rgb;',
     '  c = pow(pow(c,vec3(2.2))*pow(2.0,exposure*0.02),vec3(1.0/2.2));',  // exposure
@@ -75,6 +85,13 @@
     '  } else {',
     '    float lum=dot(clamp(c,0.0,1.0),LUM); c=mix(vec3(lum),c,1.0+saturation*0.01);',
     '    float mx=max(c.r,max(c.g,c.b)),mn=min(c.r,min(c.g,c.b)); c=mix(vec3(lum),c,1.0+(vibrance*0.012)*(1.0-(mx-mn)));',
+    '    vec3 hsl=rgb2hsl(clamp(c,0.0,1.0)); float hh=hsl.x;',  // per-hue Colour Mixer
+    '    float w0=hw(hh,0.0),w1=hw(hh,0.083),w2=hw(hh,0.166),w3=hw(hh,0.333),w4=hw(hh,0.5),w5=hw(hh,0.666),w6=hw(hh,0.78),w7=hw(hh,0.888);',
+    '    float wH=mixHue[0]*w0+mixHue[1]*w1+mixHue[2]*w2+mixHue[3]*w3+mixHue[4]*w4+mixHue[5]*w5+mixHue[6]*w6+mixHue[7]*w7;',
+    '    float wS=mixSat[0]*w0+mixSat[1]*w1+mixSat[2]*w2+mixSat[3]*w3+mixSat[4]*w4+mixSat[5]*w5+mixSat[6]*w6+mixSat[7]*w7;',
+    '    float wL=mixLum[0]*w0+mixLum[1]*w1+mixLum[2]*w2+mixLum[3]*w3+mixLum[4]*w4+mixLum[5]*w5+mixLum[6]*w6+mixLum[7]*w7;',
+    '    hsl.x=fract(hsl.x+wH*0.0009); hsl.y=clamp(hsl.y*(1.0+wS*0.01),0.0,1.0); hsl.z=clamp(hsl.z*(1.0+wL*0.006),0.0,1.0);',
+    '    c=hsl2rgb(hsl);',
     '  }',
     '  float lum2=dot(clamp(c,0.0,1.0),LUM);',                          // split tone
     '  c += (hue2rgb(ssHue/360.0)-0.5)*(ssSat*0.006)*(1.0-smoothstep(0.0,0.6,lum2));',
@@ -181,6 +198,10 @@
       'bwRed', 'bwOrange', 'bwYellow', 'bwGreen', 'bwAqua', 'bwBlue', 'bwPurple', 'bwMagenta']
       .forEach(function (k) { gl.uniform1f(u(prog1, k), adj[k] || 0); });
     gl.uniform1f(u(prog1, 'bw'), adj.bw ? 1 : 0);
+    // per-hue Colour Mixer arrays (8 bands, in shader band order)
+    gl.uniform1fv(u(prog1, 'mixHue[0]'), new Float32Array(MIX_BANDS.map(function (b) { return adj['mixHue' + b] || 0; })));
+    gl.uniform1fv(u(prog1, 'mixSat[0]'), new Float32Array(MIX_BANDS.map(function (b) { return adj['mixSat' + b] || 0; })));
+    gl.uniform1fv(u(prog1, 'mixLum[0]'), new Float32Array(MIX_BANDS.map(function (b) { return adj['mixLum' + b] || 0; })));
     gl.uniform1f(u(prog1, 'ssHue'), adj.splitShadowHue); gl.uniform1f(u(prog1, 'ssSat'), adj.splitShadowSat);
     gl.uniform1f(u(prog1, 'shHue'), adj.splitHighlightHue); gl.uniform1f(u(prog1, 'shSat'), adj.splitHighlightSat);
     if (cropMode) gl.uniform4f(u(prog1, 'uCrop'), 0, 0, 1, 1); // crop mode previews the full frame
@@ -472,6 +493,40 @@
     if (window.showSuccess) showSuccess('Settings pasted', 'Develop');
   }
 
+  /* ---- Auto tone ---- */
+  // Analyse the (unedited) base image's luminance and set exposure + black/white
+  // points for a balanced result — a starting point, like Lightroom's Auto.
+  // Reads the source image directly (independent of the live edit), so it's
+  // stable regardless of current adjustments.
+  function autoTone() {
+    if (!baseImage) return;
+    var iw = baseImage.naturalWidth || baseImage.width, ih = baseImage.naturalHeight || baseImage.height;
+    if (!iw || !ih) return;
+    var sw = 200, sh = Math.max(1, Math.round(sw * ih / iw));
+    var cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+    var ctx = cv.getContext('2d'); ctx.drawImage(baseImage, 0, 0, sw, sh);
+    var data;
+    try { data = ctx.getImageData(0, 0, sw, sh).data; } catch (e) { return; }
+    var n = sw * sh, hist = new Array(256);
+    for (var i = 0; i < 256; i++) hist[i] = 0;
+    for (var p = 0; p < n; p++) {
+      var L = Math.round(0.2126 * data[p * 4] + 0.7152 * data[p * 4 + 1] + 0.0722 * data[p * 4 + 2]);
+      hist[L < 0 ? 0 : L > 255 ? 255 : L]++;
+    }
+    function pct(q) { var t = n * q, acc = 0; for (var k = 0; k < 256; k++) { acc += hist[k]; if (acc >= t) return k; } return 255; }
+    var lo = pct(0.005), hi = pct(0.995), med = pct(0.5);
+    var clamp = function (v) { return Math.max(-100, Math.min(100, Math.round(v))); };
+    // Stretch endpoints (shader: bp=blacks*0.0012, wp=1+whites*0.0016).
+    var blacks = clamp((lo / 255) / 0.0012);
+    var whites = clamp(((hi / 255) - 1) / 0.0016);
+    // Nudge midtone toward ~0.46 (half strength so Auto stays gentle).
+    var m = Math.max(1, med) / 255;
+    var exposure = clamp((Math.log(0.46 / m) / Math.log(2)) / 0.02 * 0.6);
+    // Set only the tone values; leave colour/crop/detail edits intact.
+    adj.exposure = exposure; adj.blacks = blacks; adj.whites = whites;
+    syncControls(); render(); scheduleSave('Auto tone');
+  }
+
   function wireControls() {
     document.querySelectorAll('#developBody input[data-adj]').forEach(function (inp) {
       inp.addEventListener('input', function () {
@@ -496,6 +551,7 @@
       beforeBtn.addEventListener('touchstart', function (e) { e.preventDefault(); showBefore(); }, { passive: false });
       beforeBtn.addEventListener('touchend', showAfter);
     }
+    var autoBtn = document.getElementById('devAuto'); if (autoBtn) autoBtn.addEventListener('click', autoTone);
     var copyBtn = document.getElementById('devCopy'); if (copyBtn) copyBtn.addEventListener('click', copySettings);
     var pasteBtn = document.getElementById('devPaste'); if (pasteBtn) { pasteBtn.addEventListener('click', pasteSettings); pasteBtn.disabled = !clipboard; }
     // foldable develop sections
@@ -665,6 +721,27 @@
       .then(function () { loadPresets(); }).catch(function () {});
   }
 
-  function start() { if (!initGL()) { window.drDevelop = null; return; } ready = true; wireControls(); wireGeometry(); renderPresets(); loadPresets(); window.drDevelop = api; }
+  // Build the Colour Mixer sliders (Hue/Saturation/Luminance × 8 bands) into the
+  // page so wireControls()/syncControls() pick them up like the static sliders.
+  function buildColorMixer() {
+    var host = document.getElementById('devColorMix'); if (!host) return;
+    host.innerHTML = '';
+    [['Hue', 'mixHue'], ['Saturation', 'mixSat'], ['Luminance', 'mixLum']].forEach(function (g) {
+      var label = document.createElement('div'); label.className = 'dr-mix-grouplabel'; label.textContent = g[0];
+      host.appendChild(label);
+      var wrap = document.createElement('div'); wrap.className = 'dr-sliders';
+      MIX_BANDS.forEach(function (band) {
+        var adjKey = g[1] + band;
+        var id = 'dev' + g[1].charAt(0).toUpperCase() + g[1].slice(1) + band;
+        var row = document.createElement('div'); row.className = 'dr-slider-row';
+        row.innerHTML = '<div class="dr-slider-label"><span>' + band + '</span><span class="dr-readout" id="' + id + 'Out">0</span></div>' +
+          '<input type="range" class="dr-range" id="' + id + '" data-adj="' + adjKey + '" min="-100" max="100" value="0">';
+        wrap.appendChild(row);
+      });
+      host.appendChild(wrap);
+    });
+  }
+
+  function start() { if (!initGL()) { window.drDevelop = null; return; } ready = true; buildColorMixer(); wireControls(); wireGeometry(); renderPresets(); loadPresets(); window.drDevelop = api; }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

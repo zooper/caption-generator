@@ -550,6 +550,10 @@ input, textarea, select { font-family: inherit; }
 .dr-hist.active { background: var(--dr-panel-2); color: var(--dr-ink); box-shadow: inset 2px 0 0 var(--dr-accent); }
 .dr-reset[disabled] { opacity: .4; cursor: default; pointer-events: none; }
 
+/* Colour Mixer group labels (Hue / Saturation / Luminance) */
+.dr-mix-grouplabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--dr-ink-2); margin: 10px 0 4px; }
+.dr-mix-grouplabel:first-child { margin-top: 0; }
+
 /* Geometry controls + crop overlay */
 .dr-geo-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .dr-geo-btn { flex: 1; min-width: 58px; padding: 7px 8px; font-size: 12px; font-weight: 600; color: var(--dr-ink-2); background: var(--dr-panel-2); border: 1px solid var(--dr-line-2); border-radius: 8px; cursor: pointer; transition: all .15s; }

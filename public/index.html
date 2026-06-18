@@ -189,6 +189,7 @@
                     <button class="dr-module-head" type="button">
                         <svg class="dr-chevron" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>
                         <span class="dr-module-title">Develop</span>
+                        <button type="button" id="devAuto" class="dr-reset" title="Auto tone (analyse + balance exposure/levels)">Auto</button>
                         <button type="button" id="devBefore" class="dr-reset" title="Hold to compare with the original">Before</button>
                         <button type="button" id="devCopy" class="dr-reset" title="Copy these settings">Copy</button>
                         <button type="button" id="devPaste" class="dr-reset" title="Paste copied settings" disabled>Paste</button>
@@ -237,6 +238,11 @@
                                 <div class="dr-slider-row"><div class="dr-slider-label"><span>Vibrance</span><span class="dr-readout" id="devVibranceOut">0</span></div><input type="range" class="dr-range" id="devVibrance" data-adj="vibrance" min="-100" max="100" value="0"></div>
                                 <div class="dr-slider-row"><div class="dr-slider-label"><span>Saturation</span><span class="dr-readout" id="devSaturationOut">0</span></div><input type="range" class="dr-range" id="devSaturation" data-adj="saturation" min="-100" max="100" value="0"></div>
                             </div></div>
+                        </div>
+
+                        <div class="dr-sub" data-group="colormix">
+                            <button class="dr-subhead" type="button"><svg class="dr-subchev" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>Color mixer</button>
+                            <div class="dr-subbody"><div id="devColorMix"></div></div>
                         </div>
 
                         <div class="dr-sub" data-group="bw">
