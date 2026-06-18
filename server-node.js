@@ -71,15 +71,46 @@ const ENV = { ...process.env, DB, R2_BUCKET, LIBRARY, IMAGING };
 // Index the photo library on startup, then periodically. `rescan` is exposed on
 // the binding so the POST /api/library/rescan route can trigger it on demand.
 if (LIBRARY.enabled) {
+    // The photo-editing module is per-user. The NAS scan/warm is global, so it
+    // runs only when at least one user still has Photo-editing enabled (default
+    // on; a fresh DB with no users counts as enabled so a new box still indexes).
+    // When everyone has flipped to caption-only, the NAS work idles.
+    const developInUse = async () => {
+        try {
+            const r = await DB.prepare(`
+                SELECT (SELECT COUNT(*) FROM users) AS users,
+                       EXISTS(
+                           SELECT 1 FROM users u
+                           WHERE NOT EXISTS (
+                               SELECT 1 FROM user_settings s
+                               WHERE s.user_id = u.id AND s.integration_type = 'modules'
+                                 AND s.setting_key = 'develop' AND s.setting_value = '0'
+                           )
+                       ) AS any_dev
+            `).first();
+            if (!r) return true;
+            return Number(r.users) === 0 ? true : !!r.any_dev;
+        } catch {
+            return true; // never block indexing on a query/schema hiccup
+        }
+    };
     // Pre-generate grid thumbnails in the background after each scan so browsing
     // is instant; idempotent, so it only fills gaps for new/changed files.
     const warm = () => warmLibrary(LIBRARY, DB, IMAGING, { log: (m) => console.log(m) })
         .catch((e) => console.error('Thumbnail warm failed:', e));
     LIBRARY.rescan = () => scanLibrary(LIBRARY, DB, { log: (m) => console.log(m) });
-    LIBRARY.rescan().then(warm).catch((e) => console.error('Initial library scan failed:', e));
+    const cycle = async () => {
+        if (!(await developInUse())) {
+            console.log('Library scan skipped: Photo-editing module disabled for all users');
+            return;
+        }
+        await LIBRARY.rescan();
+        await warm();
+    };
+    cycle().catch((e) => console.error('Initial library scan failed:', e));
     const everyMin = Number(process.env.LIBRARY_RESCAN_MINUTES || 10);
     if (everyMin > 0) {
-        setInterval(() => LIBRARY.rescan().then(warm).catch((e) => console.error('Library rescan failed:', e)),
+        setInterval(() => cycle().catch((e) => console.error('Library rescan failed:', e)),
             everyMin * 60 * 1000).unref();
     }
     // Keep the proxy cache bounded.
