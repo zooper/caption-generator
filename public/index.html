@@ -636,6 +636,18 @@
                     .forEach(elId => { const el = document.getElementById(elId); if (el) { el.value = ''; el.dataset.autoDetected = 'false'; } });
                 setVal('cameraInput', meta.camera_model);
                 setVal('locationInput', meta.location || (meta.lat != null ? `${meta.lat.toFixed(4)}, ${meta.lon.toFixed(4)}` : ''));
+                // Reverse-geocode the coordinates to a place name (the upload flow
+                // does the same). Falls back to the coords already shown on failure.
+                if (!meta.location && meta.lat != null && meta.lon != null) {
+                    const lg = document.getElementById('locationGranularity');
+                    if (lg) lg.style.display = 'block';
+                    const gran = (lg && lg.value) || 'place';
+                    reverseGeocodeWithGranularity(meta.lat, meta.lon, gran).then((name) => {
+                        if (!name || currentLibraryFileId !== id) return;
+                        const li = document.getElementById('locationInput');
+                        if (li) { li.value = name; li.dataset.autoDetected = 'true'; }
+                    }).catch(() => {});
+                }
 
                 // Info bar + EXIF badge
                 const fnEl = document.getElementById('drFilename'); if (fnEl) fnEl.textContent = meta.filename;
