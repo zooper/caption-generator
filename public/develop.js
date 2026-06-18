@@ -117,7 +117,7 @@
   var FRAGFINAL = [
     'precision highp float; varying vec2 v_uv;',
     'uniform sampler2D u_base; uniform sampler2D u_blur;',
-    'uniform float clarity,texture_,sharpen,grain,grainSize,vignette,dehaze,noise,seed,uAspect;',
+    'uniform float clarity,texture_,sharpen,grain,grainSize,vignette,dehaze,noise,seed,uAspect,uClip;',
     'const vec3 LUM=vec3(0.2126,0.7152,0.0722);',  // Rec.709 luma
     'float rnd(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }',
     'void main(){',
@@ -131,7 +131,12 @@
     '  c = clamp(c,0.0,1.0);',  // clamp detail boost before grain/vignette so noise + darkening act on display-range signal
     '  if(grain>0.0){ float n=rnd(v_uv*grainSize*6.0+seed)-0.5; c += n*(grain*0.0032); }',
     '  if(abs(vignette)>0.0){ vec2 q=(v_uv-0.5)*vec2(uAspect,1.0); float d=length(q)/(0.5*sqrt(uAspect*uAspect+1.0)); c *= 1.0 - (vignette*0.006)*smoothstep(0.35,1.0,d); }',  // aspect-correct: circular in pixels, reaches all corners evenly
-    '  gl_FragColor=vec4(clamp(c,0.0,1.0),1.0);',
+    '  vec3 oc = clamp(c,0.0,1.0);',
+    '  if(uClip>0.5){',                                                  // clipping warnings: blown highlights red, crushed shadows blue
+    '    float mx=max(oc.r,max(oc.g,oc.b)), mn=min(oc.r,min(oc.g,oc.b));',
+    '    if(mx>=0.99609) oc=vec3(1.0,0.0,0.0); else if(mn<=0.00391) oc=vec3(0.0,0.45,1.0);',
+    '  }',
+    '  gl_FragColor=vec4(oc,1.0);',
     '}',
   ].join('\n');
 
@@ -139,6 +144,7 @@
   var adj = defaults();
   var prog1, progBlur, progFinal, srcTex, lutTex, fboA, fboB, fboC, quad;
   var pushTimer = null, saveTimer = null, seed = 0.137, cropMode = false, pendCrop = null, exporting = false, comparing = false;
+  var histoCanvas, histoCtx, sampleCanvas, sampleCtx, clipStatEl, showClip = false, histoRAF = 0;  // histogram + clipping
   var history = [], headSeq = -1, lastLabel = 'Adjust';  // edit history (undo/redo + History panel)
   var clipboard = null, compareSaved = null;             // copy/paste settings + before/after compare
 
@@ -250,8 +256,44 @@
     gl.uniform1f(u(progFinal, 'dehaze'), adj.dehaze || 0); gl.uniform1f(u(progFinal, 'noise'), adj.noise || 0);
     gl.uniform1f(u(progFinal, 'seed'), seed);
     gl.uniform1f(u(progFinal, 'uAspect'), W / H);
+    gl.uniform1f(u(progFinal, 'uClip'), showClip ? 1 : 0);
     drawQuad();
     schedulePush();
+    if (!exporting) scheduleHisto();
+  }
+
+  // ---- Histogram + clipping: sample the rendered canvas, plot log-scaled RGB ----
+  function scheduleHisto() {
+    if (histoRAF || !histoCtx) return;
+    histoRAF = requestAnimationFrame(function () { histoRAF = 0; drawHistogram(); });
+  }
+  function drawHistogram() {
+    if (!histoCtx || !ready || !baseImage) return;
+    var SW = sampleCanvas.width, SH = sampleCanvas.height, data;
+    try { sampleCtx.drawImage(canvas, 0, 0, SW, SH); data = sampleCtx.getImageData(0, 0, SW, SH).data; }
+    catch (e) { return; }
+    var r = new Float32Array(256), g = new Float32Array(256), b = new Float32Array(256), i;
+    var clipHi = 0, clipLo = 0, total = SW * SH;
+    for (i = 0; i < data.length; i += 4) {
+      r[data[i]]++; g[data[i + 1]]++; b[data[i + 2]]++;
+      var mx = Math.max(data[i], data[i + 1], data[i + 2]), mn = Math.min(data[i], data[i + 1], data[i + 2]);
+      if (mx >= 254) clipHi++; if (mn <= 1) clipLo++;
+    }
+    var mxv = 1;
+    for (i = 1; i < 255; i++) { if (r[i] > mxv) mxv = r[i]; if (g[i] > mxv) mxv = g[i]; if (b[i] > mxv) mxv = b[i]; }
+    var W = histoCanvas.width, H = histoCanvas.height, logmx = Math.log(1 + mxv), bw = W / 256;
+    histoCtx.clearRect(0, 0, W, H);
+    histoCtx.globalCompositeOperation = 'lighter';
+    function plot(h, color) {
+      histoCtx.fillStyle = color;
+      for (var x = 0; x < 256; x++) { var bh = Math.round((Math.log(1 + h[x]) / logmx) * H); if (bh > 0) histoCtx.fillRect(x * bw, H - bh, Math.ceil(bw), bh); }
+    }
+    plot(r, 'rgba(255,70,70,0.62)'); plot(g, 'rgba(60,225,90,0.62)'); plot(b, 'rgba(80,120,255,0.62)');
+    histoCtx.globalCompositeOperation = 'source-over';
+    if (clipStatEl) {
+      var hp = (100 * clipHi / total), lp = (100 * clipLo / total);
+      clipStatEl.textContent = (hp >= 0.05 ? '▲ ' + hp.toFixed(1) + '%' : '') + (hp >= 0.05 && lp >= 0.05 ? '   ' : '') + (lp >= 0.05 ? '▼ ' + lp.toFixed(1) + '%' : '');
+    }
   }
 
   function outDims(max) {
@@ -835,6 +877,25 @@
     });
   }
 
-  function start() { if (!initGL()) { window.drDevelop = null; return; } ready = true; buildColorMixer(); wireControls(); wireGeometry(); renderPresets(); loadPresets(); window.drDevelop = api; }
+  function toggleClip() {
+    showClip = !showClip;
+    var btn = document.getElementById('devClipToggle'); if (btn) btn.classList.toggle('active', showClip);
+    render();
+  }
+  function wireHistogram() {
+    histoCanvas = document.getElementById('devHisto'); if (histoCanvas) histoCtx = histoCanvas.getContext('2d');
+    clipStatEl = document.getElementById('devClipStat');
+    sampleCanvas = document.createElement('canvas'); sampleCanvas.width = 192; sampleCanvas.height = 128;
+    sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    var btn = document.getElementById('devClipToggle'); if (btn) btn.addEventListener('click', toggleClip);
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'j' && e.key !== 'J') return;
+      var mc = document.querySelector('.main-content'); if (!mc || mc.getAttribute('data-view') !== 'develop') return;
+      var t = (e.target && e.target.tagName) || ''; if (t === 'INPUT' || t === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+      e.preventDefault(); toggleClip();
+    });
+  }
+
+  function start() { if (!initGL()) { window.drDevelop = null; return; } ready = true; buildColorMixer(); wireControls(); wireGeometry(); wireHistogram(); renderPresets(); loadPresets(); window.drDevelop = api; }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
