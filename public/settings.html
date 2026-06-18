@@ -165,6 +165,14 @@
         }
     </style>
     <link rel="stylesheet" href="darkroom.css">
+    <style>
+        /* darkroom.css restyles `.container` as the develop module's fixed app shell
+           (display:flex; height:100vh; overflow:hidden) — on this normal scrolling
+           page that clips everything below the first viewport (Modules, API Keys,
+           Social) and breaks the layout. Loaded after darkroom.css so it wins:
+           restore a standard centered, scrolling document. */
+        .container { display: block; max-width: 1000px; margin: 0 auto; padding: 0; height: auto; min-height: 100vh; overflow: visible; }
+    </style>
 </head>
 <body>
     <div class="container">
