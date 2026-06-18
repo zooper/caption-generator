@@ -4099,6 +4099,15 @@ NOTE: The system automatically provides camera info, location, weather, and cont
         window.drConfirm = (message, opts) => { opts = opts || {}; return drDialog({ title: opts.title || 'Are you sure?', message, confirmLabel: opts.confirmLabel || 'Confirm', cancelLabel: opts.cancelLabel || 'Cancel', danger: opts.danger, requireText: opts.requireText }); };
         window.drPrompt = (message, opts) => { opts = opts || {}; return drDialog({ title: opts.title || message, message: opts.title ? message : '', input: true, inputValue: opts.defaultValue || '', inputPlaceholder: opts.placeholder || '', confirmLabel: opts.confirmLabel || 'OK' }); };
         window.drAlert = (message, opts) => { opts = opts || {}; return drDialog({ title: opts.title || 'Notice', message, cancelLabel: null, confirmLabel: 'OK' }); };
+
+        // Develop-stage busy overlay (spinner + label). Used for proxy reloads,
+        // resets/restores and exports so there's always a visual cue while waiting.
+        window.drBusy = (on, text) => {
+            const el = document.getElementById('drLoading');
+            if (!el) return;
+            if (text) { const t = document.getElementById('drLoadingText'); if (t) t.textContent = text; }
+            el.classList.toggle('hidden', !on);
+        };
     </script>
 
     <!-- Footer -->

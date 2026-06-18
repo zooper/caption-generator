@@ -159,10 +159,11 @@
     entries.forEach(function (en) {
       if (!en.isIntersecting) return;
       var el = en.target; thumbIO.unobserve(el);
+      el.classList.add('loading');
       fetch('/api/library/' + el.getAttribute('data-thumb') + '/thumb', { headers: authHeaders(), credentials: 'include' })
         .then(function (r) { return r.ok ? r.blob() : null; })
-        .then(function (b) { if (b) el.style.backgroundImage = 'url("' + URL.createObjectURL(b) + '")'; })
-        .catch(function () {});
+        .then(function (b) { if (b) el.style.backgroundImage = 'url("' + URL.createObjectURL(b) + '")'; el.classList.remove('loading'); })
+        .catch(function () { el.classList.remove('loading'); });
     });
   }, { root: null, rootMargin: '200px' }) : null;
 
@@ -186,7 +187,7 @@
     var b = document.createElement('button');
     b.className = 'dr-frame dr-cat-item';
     b.setAttribute('data-id', f.id);
-    b.innerHTML = '<div class="dr-frame-thumb" data-thumb="' + f.id + '"></div><span class="dr-frame-name"></span>';
+    b.innerHTML = '<div class="dr-frame-thumb loading" data-thumb="' + f.id + '"></div><span class="dr-frame-name"></span>';
     b.querySelector('.dr-frame-name').textContent = f.name;
     b.addEventListener('click', function () {
       var strip = $('drFilmstrip');
@@ -198,7 +199,7 @@
     if (thumbIO) thumbIO.observe(th); else {
       fetch('/api/library/' + f.id + '/thumb', { headers: authHeaders(), credentials: 'include' })
         .then(function (r) { return r.ok ? r.blob() : null; })
-        .then(function (bl) { if (bl) th.style.backgroundImage = 'url("' + URL.createObjectURL(bl) + '")'; }).catch(function () {});
+        .then(function (bl) { if (bl) th.style.backgroundImage = 'url("' + URL.createObjectURL(bl) + '")'; th.classList.remove('loading'); }).catch(function () { th.classList.remove('loading'); });
     }
     return b;
   }
@@ -249,11 +250,11 @@
       b.querySelector('.dr-tile-thumb').innerHTML = '<svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
       b.addEventListener('click', function () { renderGrid(opts.relPath); });
     } else {
-      var th = b.querySelector('.dr-tile-thumb'); th.setAttribute('data-thumb', opts.id);
+      var th = b.querySelector('.dr-tile-thumb'); th.setAttribute('data-thumb', opts.id); th.classList.add('loading');
       // highlight the photo currently open in Develop/Caption ("where you came from")
       if (window.getLibraryFileId && window.getLibraryFileId() === opts.id) b.classList.add('dr-tile-current');
       if (opts.edited) { var badge = document.createElement('span'); badge.className = 'dr-tile-edited'; badge.title = 'Has edits'; th.appendChild(badge); }
-      if (thumbIO) thumbIO.observe(th); else fetch('/api/library/' + opts.id + '/thumb', { headers: authHeaders(), credentials: 'include' }).then(function (r) { return r.ok ? r.blob() : null; }).then(function (bl) { if (bl) th.style.backgroundImage = 'url("' + URL.createObjectURL(bl) + '")'; }).catch(function () {});
+      if (thumbIO) thumbIO.observe(th); else fetch('/api/library/' + opts.id + '/thumb', { headers: authHeaders(), credentials: 'include' }).then(function (r) { return r.ok ? r.blob() : null; }).then(function (bl) { if (bl) th.style.backgroundImage = 'url("' + URL.createObjectURL(bl) + '")'; th.classList.remove('loading'); }).catch(function () { th.classList.remove('loading'); });
       b.addEventListener('click', function () { if (window.openLibraryFile) window.openLibraryFile(opts.id); setView('develop'); });
     }
     return b;
