@@ -4558,9 +4558,14 @@ async function serveLibraryImage(c, kind) {
             buf = await c.env.IMAGING.decodeProxy(abs, { ...opts, longEdge: 2048 });
         }
         if (!buf) return c.json({ error: 'Could not render image' }, 500);
-        // edited thumbnails change as the user develops, so don't let them cache stale
+        // Thumbnails reflect the live develop (they change whenever the user
+        // edits), so always revalidate — otherwise the grid serves a stale
+        // cached thumb after an edit. Proxies (the develop base) only change on
+        // Reset, which the client cache-busts, so they can cache.
+        var cache = kind === 'thumb' ? 'private, no-cache' : 'private, max-age=604800';
+        void edited;
         return new Response(buf, {
-            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': edited ? 'private, no-cache' : 'private, max-age=604800' },
+            headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': cache },
         });
     } catch (e) {
         console.error(`library/${kind} failed:`, e);

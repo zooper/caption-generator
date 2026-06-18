@@ -337,6 +337,10 @@
         var cur = null; for (var i = 0; i < history.length; i++) if (history[i].seq === headSeq) cur = history[i];
         api.applyAdjustments(cur && cur.adjustments ? cur.adjustments : {});
         renderHistory();
+        // Keep the grid thumbnail in sync with the actual develop: if this image
+        // has edits, regenerate the edited thumbnail now (otherwise the grid can
+        // show the un-edited embedded preview while Develop shows the edit).
+        if (!adjIsDefault()) pushThumb(id);
       }).catch(function () {});
   }
   function gotoSeq(seq) {
