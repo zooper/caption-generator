@@ -577,7 +577,7 @@
             isAuthenticated = true;
             document.getElementById('loginSection').classList.add('hidden');
             document.getElementById('authStatus').classList.remove('hidden');
-            var mt = document.getElementById('modTabs'); if (mt) mt.classList.remove('hidden');
+            loadAndApplyModules(); // fetches the user's module switches, then reveals the tab bar
             document.getElementById('userEmail').textContent = user.email;
             document.querySelector('.main-content').style.display = 'grid';
             
@@ -589,6 +589,21 @@
             
             // Load custom prompts after authentication
             loadCustomPromptsAndUpdateButtons();
+        }
+
+        // Fetch the per-user module switches (Caption / Photo-editing) and apply
+        // them to the UI. On any failure, fall back to both enabled so the app is
+        // never left without a usable view. drApplyModules also reveals the tabs.
+        async function loadAndApplyModules() {
+            let mods = { caption: true, develop: true };
+            try {
+                const token = localStorage.getItem('auth_token');
+                const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+                const r = await fetch('/api/settings', { headers, credentials: 'include' });
+                if (r.ok) { const s = await r.json(); if (s && s.modules) mods = s.modules; }
+            } catch (e) { /* keep defaults */ }
+            if (window.drApplyModules) window.drApplyModules(mods);
+            else { var mt = document.getElementById('modTabs'); if (mt) mt.classList.remove('hidden'); }
         }
 
         function showLoginForm() {

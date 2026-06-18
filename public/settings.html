@@ -165,6 +165,14 @@
         }
     </style>
     <link rel="stylesheet" href="darkroom.css">
+    <style>
+        /* darkroom.css restyles `.container` as the develop module's fixed app shell
+           (display:flex; height:100vh; overflow:hidden) — on this normal scrolling
+           page that clips everything below the first viewport (Modules, API Keys,
+           Social) and breaks the layout. Loaded after darkroom.css so it wins:
+           restore a standard centered, scrolling document. */
+        .container { display: block; max-width: 1000px; margin: 0 auto; padding: 0; height: auto; min-height: 100vh; overflow: visible; }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -320,6 +328,25 @@
                     </div>
                 </div>
                 <button class="btn btn-primary" onclick="savePreferences()">Save Preferences</button>
+            </div>
+
+            <!-- Modules -->
+            <div class="settings-section">
+                <div class="section-title">Modules</div>
+                <p class="text-muted mb-3">Turn parts of the app on or off. If you develop your photos in Darktable, switch <strong>Photo editing</strong> off and keep just <strong>Caption</strong>. At least one must stay enabled.</p>
+                <div class="form-group">
+                    <label class="form-label" for="moduleCaption">
+                        <input type="checkbox" id="moduleCaption" checked onchange="saveModules()"> Caption
+                    </label>
+                    <p class="text-sm text-muted">Upload an image and generate captions, hashtags and alt text.</p>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="moduleDevelop">
+                        <input type="checkbox" id="moduleDevelop" checked onchange="saveModules()"> Photo editing (Library &amp; Develop)
+                    </label>
+                    <p class="text-sm text-muted">Browse your photo library and develop RAWs. Requires the server's photo library to be configured.</p>
+                </div>
+                <p id="modulesStatus" class="text-sm text-muted"></p>
             </div>
 
             <!-- API Keys -->
@@ -541,9 +568,39 @@
                 });
                 if (response.ok) {
                     const settings = await response.json();
+                    const mods = (settings && settings.modules) || { caption: true, develop: true };
+                    const mc = document.getElementById('moduleCaption'); if (mc) mc.checked = mods.caption !== false;
+                    const md = document.getElementById('moduleDevelop'); if (md) md.checked = mods.develop !== false;
                 }
             } catch (error) {
-                console.error('Error loading location zoom setting:', error);
+                console.error('Error loading settings:', error);
+            }
+        }
+
+        // Persist the module switches immediately when toggled.
+        async function saveModules() {
+            const caption = document.getElementById('moduleCaption').checked;
+            const develop = document.getElementById('moduleDevelop').checked;
+            const status = document.getElementById('modulesStatus');
+            if (!caption && !develop) {
+                if (status) status.textContent = '⚠️ At least one module must stay enabled.';
+                document.getElementById('moduleCaption').checked = true; // undo
+                return;
+            }
+            try {
+                const response = await fetch('/api/settings/modules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('auth_token') },
+                    body: JSON.stringify({ caption, develop })
+                });
+                if (response.ok) {
+                    if (status) status.textContent = '✅ Saved. Reload the main page to see the change.';
+                } else {
+                    const e = await response.json().catch(() => ({}));
+                    if (status) status.textContent = '❌ ' + (e.error || 'Failed to save.');
+                }
+            } catch (err) {
+                if (status) status.textContent = '❌ Failed to save modules.';
             }
         }
 

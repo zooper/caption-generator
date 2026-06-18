@@ -238,13 +238,44 @@
   window.drReloadCatalog = function () { loadCatalog(LIB.dir || ''); };
 
   /* -------- module views (Library grid / Develop / Caption) -------- */
+  // Caption + Photo-editing are toggleable modules (per-user, see Settings).
+  // Library and Develop both belong to the Photo-editing module. Default both on.
+  var MODULES = { caption: true, develop: true };
+  function firstEnabledView() { return MODULES.develop ? 'library' : 'caption'; }
+
   function setView(v) {
+    // Never land on a view whose module is disabled.
+    if ((v === 'library' || v === 'develop') && !MODULES.develop) v = MODULES.caption ? 'caption' : 'library';
+    if (v === 'caption' && !MODULES.caption) v = firstEnabledView();
     var mc = document.querySelector('.main-content'); if (!mc) return;
     mc.setAttribute('data-view', v);
     document.querySelectorAll('.dr-modtab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-view') === v); });
     if (v === 'library') renderGrid(LIB.dir || '');
   }
   window.drSetView = setView;
+
+  // Apply the per-user module switches: hide the disabled module's tabs (and the
+  // library-browsing chrome when Photo-editing is off), keep the active view on
+  // an enabled module, then reveal the tab bar.
+  window.drApplyModules = function (mods) {
+    mods = mods || {};
+    MODULES.caption = mods.caption !== false;
+    MODULES.develop = mods.develop !== false;
+    var vis = function (sel, on) {
+      document.querySelectorAll(sel).forEach(function (el) { el.style.display = on ? '' : 'none'; });
+    };
+    vis('.dr-modtab[data-view="library"]', MODULES.develop);
+    vis('.dr-modtab[data-view="develop"]', MODULES.develop);
+    vis('.dr-modtab[data-view="caption"]', MODULES.caption);
+    // The folder tree and filmstrip browse the photo library — only meaningful
+    // when Photo-editing is on (display='' defers to the existing data-views CSS).
+    vis('.dr-folders', MODULES.develop);
+    vis('#drFilmstrip', MODULES.develop);
+    var mc = document.querySelector('.main-content');
+    var cur = mc && mc.getAttribute('data-view');
+    setView(cur || firstEnabledView()); // re-resolves to an enabled view if needed
+    var mt = document.getElementById('modTabs'); if (mt) mt.classList.remove('hidden');
+  };
 
   function gridTile(opts) {
     var b = document.createElement('button'); b.type = 'button';
