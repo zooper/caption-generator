@@ -16,6 +16,14 @@ import sharp from 'sharp';
 import exifr from 'exifr';
 import { RAW_EXTS } from './library-fs.js';
 
+// Bound libvips' footprint: cap its operation cache and pin it to a single
+// worker thread. Without this, every sharp() call spins a CPU-sized thread pool
+// and caches large intermediate buffers — several concurrent RAW decodes then
+// stack up and trip the OOM killer on a small box. We run our own decode
+// concurrency limiter below, so libvips internal parallelism buys little here.
+sharp.cache({ memory: 96 });
+sharp.concurrency(1);
+
 // Bump when the decode logic changes so stale proxies/thumbnails on disk are
 // ignored (the cache key embeds it). v2: as-shot embedded preview by default,
 // colour demosaic only on demand.
@@ -142,7 +150,7 @@ class Limiter {
 }
 
 export class Imaging {
-    constructor({ proxyDir, exportDir, darktableBin = 'darktable-cli', dcrawEmuBin = 'dcraw_emu', maxConcurrent = 2, maxRawConcurrent = 4 } = {}) {
+    constructor({ proxyDir, exportDir, darktableBin = 'darktable-cli', dcrawEmuBin = 'dcraw_emu', maxConcurrent = 1, maxRawConcurrent = 2 } = {}) {
         this.proxyDir = proxyDir || null;
         this.exportDir = exportDir || null;
         this.darktable = darktableBin;
@@ -344,9 +352,16 @@ export class Imaging {
                 '--width', String(longEdge), '--height', String(longEdge),
                 '--hq', 'false', '--apply-custom-presets', 'false',
                 '--core', '--library', ':memory:',
+                // resourcelevel=small caps darktable's tile/cache memory so a
+                // single preview render stays well under the box's RAM budget.
+                '--conf', 'resourcelevel=small',
                 '--conf', 'plugins/imageio/format/jpeg/quality=90',
             ];
-            const ps = spawn(this.darktable, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+            // Cap the OpenMP thread pool too (2 cores) — fewer threads, lower peak.
+            const ps = spawn(this.darktable, args, {
+                stdio: ['ignore', 'ignore', 'pipe'],
+                env: { ...process.env, OMP_NUM_THREADS: '2' },
+            });
             let err = '';
             ps.stderr.on('data', (d) => { err += d.toString(); });
             ps.on('error', reject);
@@ -361,7 +376,7 @@ export class Imaging {
 // instant and the first-touch demosaic never blocks the UI. Idempotent —
 // embeddedThumb returns the cached file when present, so re-runs only fill gaps
 // (new/changed files). Newest files first, since that's what the user opens.
-export async function warmLibrary(library, db, imaging, { log = () => {}, longEdge = 480, concurrency = 4 } = {}) {
+export async function warmLibrary(library, db, imaging, { log = () => {}, longEdge = 480, concurrency = 2 } = {}) {
     if (!library?.enabled || !imaging) return { warmed: 0, failed: 0, total: 0 };
     const rows = (await db.prepare(
         'SELECT id, rel_path, mtime, size FROM library_files ORDER BY mtime DESC'
