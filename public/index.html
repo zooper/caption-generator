@@ -69,7 +69,15 @@
                     <div class="dr-nav-thumb" id="navThumb" title="Click to choose a photo"></div>
                 </div>
 
-                <div class="dr-folders">
+                <!-- Develop: presets + history in the left panel (the folder tree is hidden here) -->
+                <div data-views="develop" class="dr-develop-left">
+                    <div class="dr-section-label">Presets</div>
+                    <div class="dr-presets" id="devPresets"></div>
+                    <div class="dr-section-label" style="margin-top:16px">History</div>
+                    <div class="dr-history" id="devHistory"></div>
+                </div>
+
+                <div class="dr-folders" data-views="library caption">
                     <div class="dr-section-label">Folders</div>
                     <div class="dr-tree" id="drTree"><div class="dr-tree-empty">Loading…</div></div>
                 </div>
@@ -198,14 +206,7 @@
                         <button type="button" id="devReset" class="dr-reset" title="Reset all adjustments">Reset</button>
                     </button>
                     <div class="dr-module-body" id="developBody">
-                        <!-- Presets row (populated by develop.js) -->
-                        <div class="dr-presets" id="devPresets"></div>
-
-                        <!-- Edit history (populated by develop.js); click a step to jump there -->
-                        <div class="dr-sub" data-group="history">
-                            <button class="dr-subhead" type="button"><svg class="dr-subchev" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>History</button>
-                            <div class="dr-subbody"><div class="dr-history" id="devHistory"></div></div>
-                        </div>
+                        <!-- Presets + History now live in the left panel (data-views="develop") -->
 
                         <!-- B&W toggle -->
                         <div class="dr-toggle-row">
