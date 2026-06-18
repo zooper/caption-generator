@@ -493,6 +493,40 @@
     if (window.showSuccess) showSuccess('Settings pasted', 'Develop');
   }
 
+  /* ---- Auto tone ---- */
+  // Analyse the (unedited) base image's luminance and set exposure + black/white
+  // points for a balanced result — a starting point, like Lightroom's Auto.
+  // Reads the source image directly (independent of the live edit), so it's
+  // stable regardless of current adjustments.
+  function autoTone() {
+    if (!baseImage) return;
+    var iw = baseImage.naturalWidth || baseImage.width, ih = baseImage.naturalHeight || baseImage.height;
+    if (!iw || !ih) return;
+    var sw = 200, sh = Math.max(1, Math.round(sw * ih / iw));
+    var cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+    var ctx = cv.getContext('2d'); ctx.drawImage(baseImage, 0, 0, sw, sh);
+    var data;
+    try { data = ctx.getImageData(0, 0, sw, sh).data; } catch (e) { return; }
+    var n = sw * sh, hist = new Array(256);
+    for (var i = 0; i < 256; i++) hist[i] = 0;
+    for (var p = 0; p < n; p++) {
+      var L = Math.round(0.2126 * data[p * 4] + 0.7152 * data[p * 4 + 1] + 0.0722 * data[p * 4 + 2]);
+      hist[L < 0 ? 0 : L > 255 ? 255 : L]++;
+    }
+    function pct(q) { var t = n * q, acc = 0; for (var k = 0; k < 256; k++) { acc += hist[k]; if (acc >= t) return k; } return 255; }
+    var lo = pct(0.005), hi = pct(0.995), med = pct(0.5);
+    var clamp = function (v) { return Math.max(-100, Math.min(100, Math.round(v))); };
+    // Stretch endpoints (shader: bp=blacks*0.0012, wp=1+whites*0.0016).
+    var blacks = clamp((lo / 255) / 0.0012);
+    var whites = clamp(((hi / 255) - 1) / 0.0016);
+    // Nudge midtone toward ~0.46 (half strength so Auto stays gentle).
+    var m = Math.max(1, med) / 255;
+    var exposure = clamp((Math.log(0.46 / m) / Math.log(2)) / 0.02 * 0.6);
+    // Set only the tone values; leave colour/crop/detail edits intact.
+    adj.exposure = exposure; adj.blacks = blacks; adj.whites = whites;
+    syncControls(); render(); scheduleSave('Auto tone');
+  }
+
   function wireControls() {
     document.querySelectorAll('#developBody input[data-adj]').forEach(function (inp) {
       inp.addEventListener('input', function () {
@@ -517,6 +551,7 @@
       beforeBtn.addEventListener('touchstart', function (e) { e.preventDefault(); showBefore(); }, { passive: false });
       beforeBtn.addEventListener('touchend', showAfter);
     }
+    var autoBtn = document.getElementById('devAuto'); if (autoBtn) autoBtn.addEventListener('click', autoTone);
     var copyBtn = document.getElementById('devCopy'); if (copyBtn) copyBtn.addEventListener('click', copySettings);
     var pasteBtn = document.getElementById('devPaste'); if (pasteBtn) { pasteBtn.addEventListener('click', pasteSettings); pasteBtn.disabled = !clipboard; }
     // foldable develop sections
