@@ -408,22 +408,25 @@
   function clearAndReload(endpoint, method) {
     if (!fileId) { adj = defaults(); syncControls(); sizeCanvas(); uploadLUT(); render(); return; }
     var id = fileId;
+    var busy = function (on) { if (window.drBusy) window.drBusy(on, endpoint === '/reset' ? 'Resetting…' : 'Restoring…'); };
+    busy(true);
     fetch('/api/library/' + id + endpoint, { method: method, headers: authHeaders(), credentials: 'include' })
       .then(function (r) { return r && r.ok ? r.json().catch(function () { return {}; }) : null; })
       .then(function (ok) {
-        if (ok === null || fileId !== id) return;
+        if (ok === null || fileId !== id) { busy(false); return; }
         history = []; headSeq = -1; renderHistory();
         adj = defaults(); syncControls();
         return fetch('/api/library/' + id + '/proxy?v=' + Date.now(), { headers: authHeaders(), credentials: 'include' })
           .then(function (r) { return r.ok ? r.blob() : null; })
           .then(function (b) {
-            if (!b || fileId !== id) return;
+            if (!b || fileId !== id) { busy(false); return; }
             var url = URL.createObjectURL(b);
             var img = new Image();
-            img.onload = function () { setBaseImage(img); try { URL.revokeObjectURL(url); } catch (e) {} };
+            img.onload = function () { setBaseImage(img); try { URL.revokeObjectURL(url); } catch (e) {} busy(false); };
+            img.onerror = function () { busy(false); };
             img.src = url;
           });
-      }).catch(function () {});
+      }).catch(function () { busy(false); });
   }
 
   var api = {
@@ -477,6 +480,7 @@
     var id = window.getLibraryFileId && window.getLibraryFileId();
     var curLong = Math.max(canvas.width, canvas.height);
     var dataUrl;
+    if (window.drBusy) window.drBusy(true, 'Exporting…');
     try {
       if (target <= curLong || !baseImage) {
         dataUrl = api.getEdited();
@@ -489,6 +493,7 @@
         dataUrl = renderAt(baseImage, target);
       }
     } catch (e) { dataUrl = api.getEdited(); }
+    finally { if (window.drBusy) window.drBusy(false); }
     if (!dataUrl) { if (window.showError) showError('Could not export', 'Export'); return; }
 
     var name = (window.getCurrentFilename && window.getCurrentFilename()) || 'caption-studio';
@@ -753,7 +758,8 @@
 
     var tree = document.createElement('div'); tree.className = 'dr-preset-tree';
     groups.forEach(function (g) {
-      var grp = document.createElement('div'); grp.className = 'dr-preset-group' + (presetGroupCollapsed[g.name] ? ' collapsed' : '');
+      // Default collapsed; only expanded if the user explicitly opened this group.
+      var grp = document.createElement('div'); grp.className = 'dr-preset-group' + (presetGroupCollapsed[g.name] === false ? '' : ' collapsed');
       var head = document.createElement('button'); head.type = 'button'; head.className = 'dr-preset-grouphead';
       head.innerHTML = '<svg class="dr-presetchev" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l8 7-8 7z"/></svg>';
       head.appendChild(document.createTextNode(g.name));

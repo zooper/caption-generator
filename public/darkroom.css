@@ -593,6 +593,14 @@ input, textarea, select { font-family: inherit; }
 .dr-dialog.shake { animation: dr-shake .35s; }
 @keyframes dr-shake { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-7px)} 40%,80%{transform:translateX(7px)} }
 
+/* Thumbnail loading shimmer (grid + filmstrip tiles while their thumb generates) */
+.dr-tile-thumb.loading, .dr-frame-thumb.loading {
+    background-image: linear-gradient(100deg, var(--dr-panel-2) 28%, var(--dr-elevated) 50%, var(--dr-panel-2) 72%);
+    background-size: 200% 100%;
+    animation: dr-shimmer 1.25s ease-in-out infinite;
+}
+@keyframes dr-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
 /* Tone-curve channel tabs (RGB master + R/G/B) */
 .dr-curve-tabs { display: flex; gap: 4px; margin-bottom: 6px; }
 .dr-curve-tab { font-size: 11px; font-weight: 700; color: var(--dr-ink-2); background: var(--dr-panel-2); border: 1px solid var(--dr-line-2); border-radius: 5px; padding: 3px 9px; cursor: pointer; }
