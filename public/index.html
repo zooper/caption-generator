@@ -635,8 +635,8 @@
                 ]);
                 if (!meta || !blob) { if (window.showError) showError('Could not open this file', 'Library'); return; }
 
-                const dataUrl = await new Promise((res) => {
-                    const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob);
+                const dataUrl = await new Promise((res, rej) => {
+                    const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(blob);
                 });
 
                 const previewImage = document.getElementById('previewImage');
@@ -645,6 +645,10 @@
                 previewImage.classList.remove('hidden');
                 if (uploadPlaceholder) uploadPlaceholder.classList.add('hidden');
 
+                // The file has opened and is on screen. Everything below is best-effort
+                // wiring (metadata fields, geocode, develop engine); a hiccup here must
+                // NOT report "could not open this file" — it gets its own guard.
+                try {
                 uploadedImage = dataUrl.split(',')[1];
                 currentImageId = null;
                 currentImageFilename = meta.filename;
@@ -680,7 +684,11 @@
                 if (badge) { const has = !!(meta.camera_model || exBits.length); badge.textContent = has ? 'EXIF' : 'no EXIF'; badge.classList.toggle('none', !has); }
 
                 if (window.drDevelop) window.drDevelop.load({ src: dataUrl, fileId: id });
+                } catch (wireErr) {
+                    console.error('openLibraryFile: post-open wiring failed (file is open)', wireErr);
+                }
             } catch (e) {
+                console.error('openLibraryFile: failed to open', e);
                 if (window.showError) showError('Could not open this file', 'Library');
             } finally {
                 if (loading) loading.classList.add('hidden');
