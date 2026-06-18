@@ -554,6 +554,14 @@ input, textarea, select { font-family: inherit; }
 .dr-mix-grouplabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--dr-ink-2); margin: 10px 0 4px; }
 .dr-mix-grouplabel:first-child { margin-top: 0; }
 
+/* Tone-curve channel tabs (RGB master + R/G/B) */
+.dr-curve-tabs { display: flex; gap: 4px; margin-bottom: 6px; }
+.dr-curve-tab { font-size: 11px; font-weight: 700; color: var(--dr-ink-2); background: var(--dr-panel-2); border: 1px solid var(--dr-line-2); border-radius: 5px; padding: 3px 9px; cursor: pointer; }
+.dr-curve-tab.active { color: var(--dr-ink); border-color: var(--dr-accent); }
+.dr-curve-tab.ch-r.active { border-color: #ff5b5b; color: #ff7b7b; }
+.dr-curve-tab.ch-g.active { border-color: #54cc6a; color: #6ad97e; }
+.dr-curve-tab.ch-b.active { border-color: #5b9bff; color: #7bb0ff; }
+
 /* Geometry controls + crop overlay */
 .dr-geo-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .dr-geo-btn { flex: 1; min-width: 58px; padding: 7px 8px; font-size: 12px; font-weight: 600; color: var(--dr-ink-2); background: var(--dr-panel-2); border: 1px solid var(--dr-line-2); border-radius: 8px; cursor: pointer; transition: all .15s; }
